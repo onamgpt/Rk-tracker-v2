@@ -1,0 +1,1358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="RK Tracker"/>
+<meta name="theme-color" content="#2a1800"/>
+<title>RK Life Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#fdf8ef;font-family:'Palatino Linotype','Book Antiqua',Palatino,serif;color:#2a1a00;-webkit-tap-highlight-color:transparent;}
+input,select,textarea,button{font-family:inherit;}
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-thumb{background:#c8a060;border-radius:3px;}
+.rh:hover{background:linear-gradient(90deg,#fff8ee,#fffaee)!important;}
+@media(max-width:650px){.hm{display:none!important;}}
+.inp{width:100%;padding:8px 12px;border-radius:8px;border:1.5px solid #e0d8cc;background:#fffef9;font-size:14px;outline:none;color:#2a1f0e;font-family:inherit;}
+.inp:focus{border-color:#c8a060;box-shadow:0 0 0 3px rgba(200,160,60,.12);}
+.lbl{display:block;font-weight:700;font-size:11px;color:#7a6a52;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;}
+.bg{padding:9px 22px;border-radius:8px;border:none;background:linear-gradient(135deg,#c8860a,#a06010);color:#fff;cursor:pointer;font-size:14px;font-weight:700;font-family:inherit;}
+.bgh{padding:9px 18px;border-radius:8px;border:1.5px solid #d0c4a8;background:#fffdf7;cursor:pointer;font-size:13px;color:#7a6a52;font-family:inherit;}
+.ai-btn{padding:8px 16px;border-radius:8px;border:none;background:linear-gradient(135deg,#5a2a8a,#3a1a6a);color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
+.voice-btn{padding:10px 16px;border-radius:8px;border:none;background:linear-gradient(135deg,#0088cc,#006aaa);color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
+.scan-btn{padding:10px 16px;border-radius:8px;border:none;background:linear-gradient(135deg,#2a7a2a,#1a5a1a);color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.5;}}
+.listening{animation:pulse 1s infinite;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef,useMemo,useCallback}=React;
+
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+const SCRIPT_URL="https://script.google.com/macros/s/AKfycbykR0d_SVgZsKVG98IDG7yLQz_o0OvlSR7nu8Xk0koKg1PK9BBcdMQPA-XYTABPJ5tp4w/exec";
+const BOT_TOKEN="8852628858:AAHAZ3ZjosHPrEC0OU8fDnRXBNcKnwO2gus";
+const OWNER_CHAT_ID="8632288596";
+const URL_USER=new URLSearchParams(window.location.search).get("user")||"main";
+const FAMILY_USERS=["wife","daughter"];
+const SALES_USERS=["satish","sebi","sugeesh","sunil","biju","sadasivan","sooraj","murugan"];
+const IS_FAMILY=FAMILY_USERS.includes(URL_USER);
+const IS_SALES=SALES_USERS.includes(URL_USER);
+const IS_SHARED=["main","prakash","maadhu","virupaksha","gopal",...SALES_USERS].includes(URL_USER);
+const LS_CACHE="rk_cache_v2_"+URL_USER;
+const LS_DD="rk_dropdowns_v2_"+URL_USER;
+const USER_CONFIG={
+  main:{name:"Krr",color:"#2a1800",bg:"#f5d890",admin:true},
+  prakash:{name:"Prakash",color:"#0a3a6a",bg:"#c8e8ff",admin:false},
+  maadhu:{name:"Maadhu",color:"#1a4a1a",bg:"#c8f0c8",admin:false},
+  virupaksha:{name:"Virupaksha",color:"#4a1a4a",bg:"#e8c8f0",admin:false},
+  gopal:{name:"Gopal Reddy",color:"#4a2a0a",bg:"#f0d8c8",admin:false},
+  satish:{name:"Satish Kumar",color:"#1a4a1a",bg:"#d8f0c8",admin:false},
+  sebi:{name:"Sebi Joseph",color:"#1a1a6a",bg:"#c8d8f8",admin:false},
+  sugeesh:{name:"Sugeesh Babu",color:"#4a1a1a",bg:"#f8d8d8",admin:false},
+  sunil:{name:"Sunil Kumar",color:"#4a3a0a",bg:"#f8f0c8",admin:false},
+  biju:{name:"Biju Verghese",color:"#1a3a4a",bg:"#c8e8f8",admin:false},
+  sadasivan:{name:"Sadasivan",color:"#3a1a4a",bg:"#e8d8f8",admin:false},
+  sooraj:{name:"Sooraj",color:"#0a4a3a",bg:"#c8f8e8",admin:false},
+  murugan:{name:"Murugan",color:"#4a2a0a",bg:"#f8e0c8",admin:false},
+  wife:{name:"Wife",color:"#6a1a4a",bg:"#f8c8e8",admin:false},
+  daughter:{name:"Daughter",color:"#1a4a6a",bg:"#c8e0ff",admin:false},
+};
+const CURRENT_USER=USER_CONFIG[URL_USER]||{name:URL_USER,color:"#2a1800",bg:"#f5d890",admin:false};
+const IS_ENTRY_MODE=new URLSearchParams(window.location.search).has("entry");
+const URL_PARAMS=new URLSearchParams(window.location.search);
+const VIEW_PERSON=URL_PARAMS.get("person");
+const VIEW_ACCOUNT=URL_PARAMS.get("account");
+const VIEW_TAG=URL_PARAMS.get("tag");
+const VIEW_CATEGORY=URL_PARAMS.get("category");
+const IS_VIEW_MODE=!!(VIEW_PERSON||VIEW_ACCOUNT||VIEW_TAG||VIEW_CATEGORY)&&!new URLSearchParams(window.location.search).get("user");
+
+// ── DEFAULTS ──────────────────────────────────────────────────────────────────
+const DEFAULT_DD={
+  taskTypes:["Reminder / Task","Orders Received","Despatched","Discussions","Produced Items","Purchase Orders","Purchase Inwards","Goods Delivered","Pending Tasks","CSD Tasks","New Brand Ideas","Competition Intel","Digital Marketing","GST Issues","Tax","Security","Subscriptions","GOVT","CPC Deposit","CSD Deposit","Spectrum Deposit","Every Month"],
+  persons:["Prakash","Satish (Auditor)","Maadhu","Virupaksha","Gopal Reddy","Brunda","Tassmai","CPC","CSD","Spectrum"],
+  accounts:["Kotak Onam","Bank 3771","Bank 846","Bank 846 1st Floor","IDBI","ICICI","Zerodha Cash Funds","3771 FD","ICICI (Tassmai)","IDBI (Tassmai)","Tassmai Account","8466","3325","KRR Loan","BDA","Greenbay","N104","Bommasandra","HDFC XX0194"],
+  financials:["Purchase Value","Deposits - 194","Deposits - 9950","194 Paid","9950 Payment Paid","Cash Expenses","Labour","Raw Bathi Purchased (Tons)","Purchase Taxes","Kotak Online Expenses","Credit Card Expenses","Brunda Expenses","Tassmai Expenses","Cheques","Zerodha","India Bulls","Indmoney","HUF"],
+  vendors:["Benson Co.","Sree Balaji Agarbathi Works","Vidhura Polypack","Grafik Printing & Packaging","Hathway","GS1 India","Paras Perfumers","S H Kelkar","Givaudan","IFF"],
+  properties:["Greenbay","846","846 1st Floor","N104","Bommasandra","BDA","Coonoor trip"],
+  paymentStatuses:["Payment Pending","Asked Payment","Partial Payment","Paid","Overdue"],
+  chemicals:["Sandal","Rose","Jasmine","Mogra","Vetiver / Khus","Lavender","Patchouli","Cedarwood","Frankincense","Myrrh","Camphor","Benzyl Benzoate","DOP","DEP","Galaxolide","Iso E Super","Hedione","Coumarin","Musk Ketone","Eugenol","Linalool","Geraniol","Vanillin","Jigat / Binder","Charcoal Powder","Wood Powder","Bamboo Sticks","Masala Mix","Jasmine ASP"],
+  categories:["Business - Orders","Business - Dispatch","Business - Production","Business - Purchase","Finance - Bank","Finance - Loans","Finance - Investments","Finance - Expenses","People","Property","Compliance - Tax","Compliance - ESI/EPF/PT","Personal","Reminders","Digital / Marketing","CSD Tasks","Misc","Sales - Order","Sales - Payment","Sales - Visit","Sales - Expense","Sales - Complaint","Intelligence - Competitor","Intelligence - New Brand","Problem - Customer","Problem - Delivery","Personal - Wedding","Personal - Expense","Personal - Thoughts","Personal - Shopping"]
+};
+
+const STATUS_TAGS=["Pending","In Progress","Done","Urgent","Super Pending","Waiting","Follow-up","Payment Due","Paid","Overdue","Review","GOVT","Recurring","AI Flagged"];
+const TAG_STYLES={
+  "Pending":      {bg:"#FFF3CD",text:"#856404",border:"#FFDF7E"},
+  "In Progress":  {bg:"#D1ECF1",text:"#0C5460",border:"#BEE5EB"},
+  "Done":         {bg:"#D4EDDA",text:"#155724",border:"#C3E6CB"},
+  "Urgent":       {bg:"#F8D7DA",text:"#721C24",border:"#F5C6CB"},
+  "Super Pending":{bg:"#8B0000",text:"#fff",border:"#600000"},
+  "Waiting":      {bg:"#E2E3E5",text:"#383D41",border:"#D6D8DB"},
+  "Follow-up":    {bg:"#FDE2F3",text:"#7A0050",border:"#F5A8DB"},
+  "Payment Due":  {bg:"#FF8C00",text:"#fff",border:"#cc6600"},
+  "Paid":         {bg:"#D4EDDA",text:"#155724",border:"#C3E6CB"},
+  "Overdue":      {bg:"#dc3545",text:"#fff",border:"#b02a37"},
+  "Review":       {bg:"#E8D5F5",text:"#5A1585",border:"#D4A8EE"},
+  "GOVT":         {bg:"#D0E8FF",text:"#0D4A8A",border:"#9AC5F7"},
+  "Recurring":    {bg:"#D4F5E2",text:"#0B5E30",border:"#7DDBA8"},
+  "AI Flagged":   {bg:"#2a0050",text:"#d0a0ff",border:"#6a30aa"},
+};
+const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+function genId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+function today(){return new Date().toISOString().slice(0,10);}
+function fmtDate(d){if(!d)return"—";return new Date(d+"T00:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});}
+function fmtDT(d){if(!d)return"—";return new Date(d).toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});}
+function isOverdue(r){return r&&new Date(r)<new Date();}
+
+function sanitizeEntry(e){
+  if(!e||typeof e!=="object"||!e.id)return null;
+  var out={};
+  ["id","title","date","month","category","taskType","person","vendor","account",
+   "financialType","paymentStatus","property","chemical","amount","notes",
+   "reminder","reminderNote","link","createdAt","loggedBy","loggedByName"].forEach(function(k){
+    out[k]=(e[k]===null||e[k]===undefined)?"":String(e[k]);
+  });
+  if(Array.isArray(e.tags))out.tags=e.tags;
+  else if(typeof e.tags==="string"&&e.tags)out.tags=e.tags.split(",").map(function(t){return t.trim();}).filter(Boolean);
+  else out.tags=[];
+  out.attachments=Array.isArray(e.attachments)?e.attachments:[];
+  out.hidden=!!e.hidden;
+  out.recurring=!!e.recurring;
+  if(!out.title)return null;
+  return out;
+}
+
+var TOMB_KEY="rk_deleted_ids";
+function loadTombstones(){try{return JSON.parse(localStorage.getItem(TOMB_KEY))||[];}catch(e){return [];}}
+function addTombstones(ids){try{var t=loadTombstones();ids.forEach(function(id){if(t.indexOf(id)===-1)t.push(id);});if(t.length>1500)t=t.slice(-1000);localStorage.setItem(TOMB_KEY,JSON.stringify(t));}catch(e){}}
+
+function loadCache(){
+  try{
+    const all={};
+    ["rk_cache_v2_main","rk_master_backup",LS_CACHE,LS_CACHE+"_backup","rk_cache_v2"].forEach(k=>{
+      try{
+        let d=JSON.parse(localStorage.getItem(k)||"null");
+        if(!d)return;
+        if(d.entries)d=d.entries;
+        if(Array.isArray(d))d.forEach(e=>{if(e&&e.id&&e.title)all[e.id]=e;});
+      }catch(e){}
+    });
+    const r=Object.values(all);
+    r.sort((a,b)=>(b.createdAt||b.date||"").localeCompare(a.createdAt||a.date||""));
+    return r;
+  }catch{return[];}
+}
+function saveCache(e){
+  try{
+    localStorage.setItem(LS_CACHE,JSON.stringify(e));
+    // Keep rolling backup — last 3 saves
+    const backup={entries:e,savedAt:new Date().toISOString(),count:e.length};
+    localStorage.setItem(LS_CACHE+"_backup",JSON.stringify(backup));
+    // Also save dated backup
+    const dateKey=LS_CACHE+"_"+new Date().toISOString().slice(0,10);
+    localStorage.setItem(dateKey,JSON.stringify(backup));
+  }catch(err){
+    console.warn("Cache full — clearing old backups");
+    // Clear old dated backups to free space
+    Object.keys(localStorage).filter(k=>k.startsWith(LS_CACHE+"_20")).forEach(k=>localStorage.removeItem(k));
+    try{localStorage.setItem(LS_CACHE,JSON.stringify(e));}catch(e2){}
+  }
+}
+function loadDD(){try{return JSON.parse(localStorage.getItem(LS_DD))||DEFAULT_DD;}catch{return DEFAULT_DD;}}
+function saveDD(d){localStorage.setItem(LS_DD,JSON.stringify(d));}
+
+// ── GOOGLE SHEETS API ─────────────────────────────────────────────────────────
+async function sheetsAPI(action,data={}){
+  try{
+    const r=await fetch("/.netlify/functions/sheets",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action,...data})
+    });
+    if(!r.ok) throw new Error("Sheets error: "+r.status);
+    const text=await r.text();
+    try{return JSON.parse(text);}
+    catch(e){return {error:"Invalid response"};}
+  }catch(e){
+    console.error("Sheets:",e);
+    return {error:e.message};
+  }
+}
+
+// ── CLAUDE API ────────────────────────────────────────────────────────────────
+async function claudeAPI(prompt,system,imageBase64,imageType){
+  // Route through Netlify function to avoid CORS on iPhone Safari
+  try{
+    const r=await fetch("/.netlify/functions/claude",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({prompt,system,imageBase64,imageType})
+    });
+    if(!r.ok) throw new Error("Server error: "+r.status);
+    const d=await r.json();
+    if(d.error) throw new Error(d.error);
+    return d.text||"";
+  }catch(e){
+    throw new Error(e.message);
+  }
+}
+
+// ── TELEGRAM ──────────────────────────────────────────────────────────────────
+async function tgSend(text){
+  try{
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({chat_id:OWNER_CHAT_ID,text,parse_mode:"HTML"})
+    });
+  }catch(e){}
+}
+
+// ── FILE HELPERS ──────────────────────────────────────────────────────────────
+function uploadToDrive(att){
+  // Upload a single attachment to Drive via Apps Script, return Drive URL
+  return sheetsAPI("uploadFile",{file:{name:att.name,type:att.type,data:att.data}}).then(function(r){
+    if(r&&r.url)return {name:att.name,type:"drive",data:r.url,driveId:r.id};
+    return att; // fallback: keep original if upload fails
+  }).catch(function(){return att;});
+}
+
+function fileToB64(f){
+  return new Promise((res,rej)=>{
+    if(f.type.startsWith("image/")){
+      const r=new FileReader();
+      r.onload=e=>{
+        const img=new Image();
+        img.onload=()=>{
+          const MAX=1200;let w=img.width,h=img.height;
+          if(w>MAX||h>MAX){if(w>h){h=Math.round(h*MAX/w);w=MAX;}else{w=Math.round(w*MAX/h);h=MAX;}}
+          const c=document.createElement("canvas");c.width=w;c.height=h;
+          c.getContext("2d").drawImage(img,0,0,w,h);
+          const data=c.toDataURL("image/jpeg",.85);
+          res({name:f.name,type:"image/jpeg",data,base64:data.split(",")[1]});
+        };
+        img.onerror=rej;img.src=e.target.result;
+      };r.onerror=rej;r.readAsDataURL(f);
+    }else{
+      const r=new FileReader();
+      r.onload=()=>{
+        const result=r.result;
+        res({name:f.name,type:f.type,data:result,base64:result.split(",")[1]});
+      };
+      r.onerror=rej;r.readAsDataURL(f);
+    }
+  });
+}
+
+// ── OCR BILL SCANNER ──────────────────────────────────────────────────────────
+async function scanBill(imageBase64,imageType){
+  const system=`You are an OCR and data extraction assistant for Onam Agarbathi Pvt. Ltd., a Bangalore incense manufacturer.
+Extract invoice/bill data and return ONLY valid JSON with these exact fields:
+{
+  "title": "short description",
+  "date": "YYYY-MM-DD",
+  "vendor": "vendor name",
+  "amount": "total amount with ₹",
+  "invoiceNo": "invoice number",
+  "gstin": "vendor GSTIN",
+  "category": "Business - Purchase",
+  "financialType": "Purchase Value",
+  "paymentStatus": "Payment Pending",
+  "notes": "key items summary, quantities, rates",
+  "tags": ["Pending"],
+  "chemical": "chemical/fragrance name if applicable"
+}
+Return ONLY the JSON object, no other text.`;
+
+  const prompt="Extract all data from this bill/invoice and return as JSON.";
+  try{
+    const result=await claudeAPI(prompt,system,imageBase64,imageType);
+    const clean=result.replace(/```json|```/g,"").trim();
+    return JSON.parse(clean);
+  }catch(e){
+    return {title:"Scanned bill",notes:result,date:today(),tags:["Pending"]};
+  }
+}
+
+// ── VOICE INPUT PROCESSOR ─────────────────────────────────────────────────────
+async function processVoice(transcript,dropdowns){
+  const system=`You are a data entry assistant for Onam Agarbathi Pvt. Ltd. 
+The user speaks naturally and you extract structured data.
+Available categories: ${dropdowns.categories.join(", ")}
+Available persons: ${dropdowns.persons.join(", ")}
+Available accounts: ${dropdowns.accounts.join(", ")}
+Available task types: ${dropdowns.taskTypes.join(", ")}
+Available payment statuses: ${dropdowns.paymentStatuses.join(", ")}
+Available tags: Pending, In Progress, Done, Urgent, Super Pending, Payment Due, Paid, Follow-up, GOVT, Recurring
+
+Return ONLY valid JSON:
+{
+  "title": "entry title",
+  "date": "today or extracted date in YYYY-MM-DD",
+  "category": "matched category",
+  "taskType": "matched task type or empty",
+  "person": "matched person or empty",
+  "account": "matched account or empty",
+  "amount": "amount with ₹ or empty",
+  "paymentStatus": "matched status or empty",
+  "notes": "additional context",
+  "reminder": "ISO datetime if mentioned or empty",
+  "reminderNote": "reminder note if mentioned",
+  "tags": ["relevant tags"]
+}
+Return ONLY the JSON, no other text.`;
+
+  try{
+    const result=await claudeAPI(`Extract data from this voice input: "${transcript}"`,system);
+    const clean=result.replace(/```json|```/g,"").trim();
+    const data=JSON.parse(clean);
+    if(!data.date||data.date==="today")data.date=today();
+    return data;
+  }catch(e){
+    return {title:transcript,date:today(),tags:["Pending"]};
+  }
+}
+
+// ── AI INSIGHTS ───────────────────────────────────────────────────────────────
+async function getAIInsights(entries,question){
+  const system=`You are a business intelligence assistant for Onam Agarbathi Pvt. Ltd., a 100+ year old Bangalore incense manufacturer (Vaishak brand). 
+You know: CSD/CPC orders, raw materials (Jasmine ASP, Sandal, Rose, bamboo sticks, jigat), compliance (GST, ESI, EPF, PT, TDS 194), 
+accounts (Kotak, IDBI, ICICI, Zerodha, HDFC), people (Prakash, Satish auditor, Maadhu, Virupaksha, Gopal Reddy).
+Analyse ALL data deeply including document contents in notes. Be specific with amounts, dates, names.
+Flag risks, overdue items, action items. Use ₹ formatting with lakhs/crores notation.`;
+
+  // Include full notes (which may contain extracted document text)
+  const summary=entries.slice(0,150).map(e=>{
+    const notesFull=(e.notes||"").slice(0,200); // More notes for deeper analysis
+    const hasAtt=(e.attachments||[]).length>0?"[HAS ATTACHMENTS]":"";
+    return `[${e.date}] ${e.title}|Cat:${e.category||"-"}|Type:${e.taskType||"-"}|Person:${e.person||"-"}|Vendor:${e.vendor||"-"}|Account:${e.account||"-"}|Amount:${e.amount||"-"}|Status:${e.paymentStatus||"-"}|Tags:${(e.tags||[]).join(",")}|Notes:${notesFull}${hasAtt}`;
+  }).join("\n");
+
+  return await claudeAPI(
+    `Business tracker data (${entries.length} total entries):\n${summary}\n\nQuestion: ${question||"Give comprehensive business insights: urgent items, overdue payments, cash flow, compliance due, production status."}`,
+    system
+  );
+}
+
+// ── COMPONENTS ────────────────────────────────────────────────────────────────
+function TagBadge({tag,onRemove}){
+  const c=TAG_STYLES[tag]||{bg:"#eee",text:"#444",border:"#ccc"};
+  return<span style={{display:"inline-flex",alignItems:"center",gap:3,background:c.bg,color:c.text,border:`1px solid ${c.border}`,borderRadius:20,padding:"2px 9px",fontSize:11,fontWeight:700,whiteSpace:"nowrap",lineHeight:1.7}}>
+    {tag}{onRemove&&<span onClick={()=>onRemove(tag)} style={{cursor:"pointer",marginLeft:1,fontSize:14,opacity:.6,lineHeight:1}}>×</span>}
+  </span>;
+}
+
+function Thumb({att,small}){
+  const s=small?30:50;
+  const b={width:s,height:s,borderRadius:6,border:"1.5px solid #e2d9c8",cursor:"pointer",flexShrink:0,objectFit:"cover",display:"block"};
+  const openAtt=()=>{
+    if(!att.data)return;
+    // Create blob URL and open
+    try{
+      const byteStr=atob(att.data.split(",")[1]||att.data);
+      const ab=new ArrayBuffer(byteStr.length);
+      const ia=new Uint8Array(ab);
+      for(let i=0;i<byteStr.length;i++)ia[i]=byteStr.charCodeAt(i);
+      const blob=new Blob([ab],{type:att.type||"application/octet-stream"});
+      const url=URL.createObjectURL(blob);
+      window.open(url,"_blank");
+    }catch(e){
+      // Fallback: open data URL directly
+      const w=window.open("","_blank");
+      if(w){w.document.write(`<img src="${att.data}" style="max-width:100%" />`);w.document.close();}
+    }
+  };
+  if(att.type?.startsWith("image/"))return<div onClick={openAtt} style={{...b,overflow:"hidden",cursor:"zoom-in"}}><img src={att.data} alt={att.name||"image"} style={{width:"100%",height:"100%",objectFit:"cover"}}/></div>;
+  const p=att.type==="application/pdf";
+  return<div onClick={openAtt} style={{...b,background:p?"#fff0f0":"#f0f4ff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:small?9:11,color:p?"#b00":"#339",fontWeight:700,flexDirection:"column",gap:1}}>
+    <span style={{fontSize:small?14:18}}>{p?"📄":"📎"}</span>
+    <span>{p?"PDF":"FILE"}</span>
+  </div>;
+}
+
+function Modal({open,onClose,children,wide}){
+  if(!open)return null;
+  return<div onClick={e=>{if(e.target===e.currentTarget)onClose();}} style={{position:"fixed",inset:0,background:"rgba(20,15,5,.65)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:8,backdropFilter:"blur(4px)"}}>
+    <div style={{background:"#fffdf7",borderRadius:16,padding:"24px 22px 20px",width:"100%",maxWidth:wide?760:620,maxHeight:"96vh",overflowY:"auto",boxShadow:"0 24px 80px rgba(0,0,0,.3)",position:"relative"}}>
+      <button onClick={onClose} style={{position:"absolute",top:12,right:14,background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}}>×</button>
+      {children}
+    </div>
+  </div>;
+}
+
+function Combo({label,value,onChange,options,placeholder,onAddNew}){
+  const [open,setOpen]=useState(false);
+  const [q,setQ]=useState(value||"");
+  const ref=useRef();
+  const filtered=useMemo(()=>q?options.filter(o=>o.toLowerCase().includes(q.toLowerCase())):options,[q,options]);
+  useEffect(()=>{setQ(value||"");},[value]);
+  useEffect(()=>{const h=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};document.addEventListener("mousedown",h);return()=>document.removeEventListener("mousedown",h);},[]);
+  const canAdd=q&&!options.find(o=>o.toLowerCase()===q.toLowerCase());
+  return<div ref={ref} style={{position:"relative"}}>
+    {label&&<label className="lbl">{label}</label>}
+    <input className="inp" value={q} placeholder={placeholder||"Type or select…"}
+      onChange={e=>{setQ(e.target.value);onChange(e.target.value);setOpen(true);}} onFocus={()=>setOpen(true)}/>
+    {open&&(filtered.length>0||canAdd)&&<div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:300,background:"#fffdf5",border:"1.5px solid #e0d8cc",borderRadius:10,boxShadow:"0 8px 32px rgba(0,0,0,.18)",maxHeight:180,overflowY:"auto",marginTop:2}}>
+      {filtered.map(o=><div key={o} onClick={()=>{onChange(o);setQ(o);setOpen(false);}} style={{padding:"8px 13px",cursor:"pointer",fontSize:13,color:"#2a1a00",borderBottom:"1px solid #f0e8d8"}} onMouseEnter={e=>e.currentTarget.style.background="#fff8ee"} onMouseLeave={e=>e.currentTarget.style.background=""}>{o}</div>)}
+      {canAdd&&onAddNew&&<div onClick={()=>{onAddNew(q);onChange(q);setOpen(false);}} style={{padding:"8px 13px",cursor:"pointer",fontSize:13,color:"#2a7a2a",borderTop:"1.5px solid #c8e8c8",fontWeight:700,background:"#f0faf0"}}>＋ Add "{q}"</div>}
+    </div>}
+  </div>;
+}
+
+function TagPicker({value,onChange}){
+  return<div>
+    <label className="lbl">Status Tags</label>
+    <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:6,minHeight:24}}>{value.map(t=><TagBadge key={t} tag={t} onRemove={t=>onChange(value.filter(x=>x!==t))}/>)}</div>
+    <select className="inp" style={{padding:"6px 10px"}} value="" onChange={e=>{const t=e.target.value;if(t&&!value.includes(t))onChange([...value,t]);e.target.value="";}}>
+      <option value="">＋ Add tag…</option>
+      {STATUS_TAGS.filter(t=>!value.includes(t)).map(t=><option key={t}>{t}</option>)}
+    </select>
+  </div>;
+}
+
+// ── VOICE INPUT COMPONENT ─────────────────────────────────────────────────────
+function VoiceInput({onResult,dropdowns}){
+  const [listening,setListening]=useState(false);
+  const [transcript,setTranscript]=useState("");
+  const [processing,setProcessing]=useState(false);
+  const recognRef=useRef(null);
+
+  const start=()=>{
+    if(!('webkitSpeechRecognition' in window)&&!('SpeechRecognition' in window)){
+      alert("Voice input not supported in this browser. Use Chrome or Safari.");return;
+    }
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    const r=new SR();
+    r.lang="en-IN";r.continuous=false;r.interimResults=true;
+    r.onstart=()=>setListening(true);
+    r.onresult=e=>{
+      const t=Array.from(e.results).map(r=>r[0].transcript).join("");
+      setTranscript(t);
+    };
+    r.onend=async()=>{
+      setListening(false);
+      if(transcript){
+        setProcessing(true);
+        const data=await processVoice(transcript,dropdowns);
+        onResult(data);
+        setProcessing(false);
+        setTranscript("");
+      }
+    };
+    r.onerror=()=>setListening(false);
+    recognRef.current=r;
+    r.start();
+  };
+
+  const stop=()=>{if(recognRef.current)recognRef.current.stop();};
+
+  return<div style={{background:"#e8f4fb",border:"1.5px solid #b0d8f0",borderRadius:10,padding:13,marginBottom:12}}>
+    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+      <button onClick={listening?stop:start} disabled={processing}
+        className={listening?"voice-btn listening":"voice-btn"}
+        style={{fontSize:18,padding:"10px 16px"}}>
+        {processing?"⏳":listening?"⏹ Stop":"🎤 Speak"}
+      </button>
+      <div style={{flex:1}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#006aaa"}}>
+          {processing?"AI processing…":listening?"Listening…":"Voice Input"}
+        </div>
+        <div style={{fontSize:11,color:"#5a8aaa"}}>
+          {listening?"Speak naturally — title, amount, person, reminder…":"Tap and speak your entry"}
+        </div>
+      </div>
+    </div>
+    {transcript&&<div style={{background:"rgba(0,0,0,.06)",borderRadius:7,padding:"7px 11px",fontSize:12,color:"#003a5a",fontStyle:"italic"}}>"{transcript}"</div>}
+    <div style={{fontSize:10,color:"#7a9ab0",marginTop:6}}>
+      Example: "Prakash payment pending fifty thousand remind me tomorrow 10am"
+    </div>
+  </div>;
+}
+
+// ── SCAN BILL COMPONENT ───────────────────────────────────────────────────────
+function ScanBill({onResult,onMultiResult}){
+  const [scanning,setScanning]=useState(false);
+  const [scanMsg,setScanMsg]=useState("");
+  const [progress,setProgress]=useState({current:0,total:0});
+
+  const processFile=async(file)=>{
+    if(!file)return;
+    setScanning(true);setScanMsg("Reading bill...");
+    try{
+      const att=await fileToB64(file);
+      setScanMsg("Analysing with AI...");
+      const txt=await claudeAPI(
+        "Extract all data from this bill/invoice. Return ONLY valid JSON: {title, date (YYYY-MM-DD), vendor, amount (with ₹), invoiceNo, gstin, category, paymentStatus, notes, tags (array)}",
+        "You are an OCR assistant for Onam Agarbathi. Return only valid JSON, no markdown backticks.",
+        att.base64, att.type
+      );
+      let parsed={title:"Scanned bill",date:today(),tags:["Pending"],category:"Business - Purchase",paymentStatus:"Payment Pending"};
+      try{parsed={...parsed,...JSON.parse(txt.replace(/```json|```/g,"").trim())};}
+      catch(ex){parsed.notes=txt.slice(0,300);}
+      onResult({...parsed,attachments:[att],id:genId(),createdAt:new Date().toISOString()});
+      setScanMsg("✅ Done!");
+    }catch(e){alert("Scan error: "+e.message);}
+    setScanning(false);
+    setTimeout(()=>setScanMsg(""),2000);
+  };
+
+  const processMultiple=async(files)=>{
+    if(!files||files.length===0)return;
+    const arr=Array.from(files);
+    setScanning(true);
+    setProgress({current:0,total:arr.length});
+    const results=[];
+    for(let i=0;i<arr.length;i++){
+      setScanMsg(`Scanning ${i+1} of ${arr.length}...`);
+      setProgress({current:i+1,total:arr.length});
+      try{
+        const att=await fileToB64(arr[i]);
+        const txt=await claudeAPI(
+          "Extract all data from this bill/invoice. Return ONLY valid JSON: {title, date (YYYY-MM-DD), vendor, amount (with ₹), invoiceNo, gstin, category, paymentStatus, notes, tags (array)}",
+          "You are an OCR assistant for Onam Agarbathi. Return only valid JSON, no markdown.",
+          att.base64, att.type
+        );
+        let parsed={title:`Bill ${i+1}`,date:today(),tags:["Pending"],category:"Business - Purchase",paymentStatus:"Payment Pending"};
+        try{parsed={...parsed,...JSON.parse(txt.replace(/```json|```/g,"").trim())};}
+        catch(ex){parsed.notes=txt.slice(0,300);}
+        results.push({...parsed,attachments:[att],id:genId(),createdAt:new Date().toISOString()});
+      }catch(e){
+        results.push({title:`Bill ${i+1} (scan failed)`,date:today(),tags:["Pending"],notes:e.message,id:genId(),createdAt:new Date().toISOString()});
+      }
+    }
+    setScanMsg(`✅ ${results.length} bills scanned!`);
+    setScanning(false);
+    setProgress({current:0,total:0});
+    if(onMultiResult) onMultiResult(results);
+    else results.forEach(r=>onResult(r));
+    setTimeout(()=>setScanMsg(""),3000);
+  };
+
+  const openCamera=()=>{
+    const i=document.createElement("input");
+    i.type="file";i.accept="image/*";i.capture="environment";
+    i.onchange=e=>{if(e.target.files[0])processFile(e.target.files[0]);};
+    i.click();
+  };
+  const openGallery=()=>{
+    const i=document.createElement("input");
+    i.type="file";i.accept="image/*,application/pdf,.pdf";
+    i.onchange=e=>{if(e.target.files[0])processFile(e.target.files[0]);};
+    i.click();
+  };
+  const openMulti=()=>{
+    const i=document.createElement("input");
+    i.type="file";i.accept="image/*,application/pdf,.pdf";
+    i.multiple=true;
+    i.onchange=e=>{if(e.target.files.length>0)processMultiple(e.target.files);};
+    i.click();
+  };
+
+  return<div style={{background:"#edfaed",border:"1.5px solid #a8d8a8",borderRadius:10,padding:13,marginBottom:12}}>
+    <div style={{fontWeight:700,fontSize:12,color:"#1a5a1a",marginBottom:8}}>📸 Scan Bill / Invoice → Auto-fill</div>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
+      <button onClick={openCamera} disabled={scanning} className="scan-btn" style={{fontSize:12,padding:"8px 12px"}}>
+        {scanning?"⏳":"📷"} Camera
+      </button>
+      <button onClick={openGallery} disabled={scanning} className="scan-btn" style={{background:"linear-gradient(135deg,#5a6a2a,#3a4a1a)",fontSize:12,padding:"8px 12px"}}>
+        {scanning?"⏳":"🖼"} Gallery
+      </button>
+      <button onClick={openMulti} disabled={scanning} className="scan-btn" style={{background:"linear-gradient(135deg,#1a5a7a,#0a3a5a)",fontSize:12,padding:"8px 12px"}}>
+        {scanning?"⏳":"📚"} Multi Bills
+      </button>
+    </div>
+    {scanMsg&&<div style={{fontSize:12,color:"#1a5a1a",fontWeight:600,marginBottom:4}}>{scanMsg}</div>}
+    {progress.total>0&&<div style={{background:"#c8e8c8",borderRadius:20,height:6,marginBottom:6}}>
+      <div style={{background:"#1a7a1a",borderRadius:20,height:6,width:`${(progress.current/progress.total)*100}%`,transition:"width .3s"}}/>
+    </div>}
+    <div style={{fontSize:10,color:"#5a8a5a"}}>📚 Multi Bills: select up to 10 photos at once → all auto-filled</div>
+  </div>;
+}
+
+// ── AI PANEL ──────────────────────────────────────────────────────────────────
+function AIPanel({entries,onClose}){
+  const [q,setQ]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [result,setResult]=useState("");
+  const QUICK=["What needs urgent attention?","Overdue payments summary","Who owes me money?","Pending compliance (GST/ESI/EPF)","CSD dispatch status","Cash flow this month","Vendor payment summary"];
+
+  const ask=async(question)=>{
+    setLoading(true);setResult("");
+    try{const r=await getAIInsights(entries,question||q);setResult(r);}
+    catch(e){setResult("Error: "+e.message);}
+    setLoading(false);
+  };
+
+  return<div>
+    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+      <span style={{fontSize:26}}>🧠</span>
+      <div><h2 style={{margin:0,fontSize:18,color:"#3a1a6a"}}>AI Business Insights</h2>
+        <div style={{fontSize:11,color:"#7a5aaa"}}>Claude · knows your incense business</div></div>
+    </div>
+    <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:12}}>
+      {QUICK.map(q=><button key={q} onClick={()=>ask(q)} style={{padding:"5px 11px",borderRadius:20,border:"1.5px solid #c8a8e8",background:"#f5eeff",color:"#5a1a8a",cursor:"pointer",fontSize:11,fontWeight:600}}>{q}</button>)}
+    </div>
+    <div style={{display:"flex",gap:8,marginBottom:12}}>
+      <textarea className="inp" value={q} rows={2} placeholder="Ask anything about your data…" onChange={e=>setQ(e.target.value)} style={{resize:"none"}}/>
+      <button onClick={()=>ask()} disabled={loading} className="ai-btn" style={{alignSelf:"stretch",whiteSpace:"nowrap",opacity:loading?.6:1}}>{loading?"…":"Ask"}</button>
+    </div>
+    {loading&&<div style={{textAlign:"center",padding:"20px",color:"#7a5aaa",fontSize:13}}>🧠 Analysing {entries.length} entries…</div>}
+    {result&&<div style={{background:"linear-gradient(135deg,#f8f0ff,#f0e8ff)",border:"1.5px solid #c8a8e8",borderRadius:10,padding:"14px",fontSize:13,color:"#2a0050",whiteSpace:"pre-wrap",lineHeight:1.7}}>{result}</div>}
+    <div style={{display:"flex",justifyContent:"flex-end",marginTop:12}}><button className="bgh" onClick={onClose}>Close</button></div>
+  </div>;
+}
+
+// ── DROPDOWN MANAGER ──────────────────────────────────────────────────────────
+function DropdownManager({dropdowns,onSave,onClose}){
+  const [dd,setDd]=useState(JSON.parse(JSON.stringify(dropdowns)));
+  const [active,setActive]=useState("taskTypes");
+  const [newVal,setNewVal]=useState("");
+  const KEYS={taskTypes:"Task Types",persons:"People",accounts:"Accounts",financials:"Financial",vendors:"Vendors",properties:"Properties",paymentStatuses:"Payment Status",chemicals:"Chemicals",categories:"Categories"};
+  const addItem=()=>{const v=newVal.trim();if(!v)return;if(!dd[active].includes(v))setDd(p=>({...p,[active]:[...p[active],v]}));setNewVal("");};
+  const removeItem=i=>setDd(p=>({...p,[active]:p[active].filter((_,j)=>j!==i)}));
+  return<div>
+    <h2 style={{margin:"0 0 12px",fontSize:18}}>⚙️ Manage Dropdowns</h2>
+    <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:12}}>
+      {Object.entries(KEYS).map(([k,l])=><button key={k} onClick={()=>setActive(k)} style={{padding:"4px 11px",borderRadius:20,border:`1.5px solid ${active===k?"#c8a060":"#e0d0b8"}`,background:active===k?"#fff3d8":"#fffdf7",color:active===k?"#7a4800":"#7a6a52",cursor:"pointer",fontSize:12,fontWeight:active===k?700:400}}>{l}</button>)}
+    </div>
+    <div style={{background:"#fffdf5",border:"1px solid #e8dcc8",borderRadius:10,padding:10,marginBottom:10,maxHeight:200,overflowY:"auto"}}>
+      {dd[active].map((item,i)=><div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"5px 8px",borderBottom:"1px solid #f0e8d8"}}>
+        <span style={{fontSize:13}}>{item}</span>
+        <button onClick={()=>removeItem(i)} style={{background:"none",border:"none",color:"#c00",cursor:"pointer",fontSize:16}}>×</button>
+      </div>)}
+    </div>
+    <div style={{display:"flex",gap:8,marginBottom:12}}>
+      <input className="inp" value={newVal} placeholder={`Add to ${KEYS[active]}…`} onChange={e=>setNewVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addItem()}/>
+      <button onClick={addItem} style={{padding:"8px 14px",borderRadius:8,border:"none",background:"#2a7a2a",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700,whiteSpace:"nowrap"}}>＋</button>
+    </div>
+    <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+      <button className="bgh" onClick={onClose}>Cancel</button>
+      <button className="bg" onClick={()=>{onSave(dd);onClose();}}>Save All</button>
+    </div>
+  </div>;
+}
+
+// ── ENTRY FORM ────────────────────────────────────────────────────────────────
+const EMPTY_E={id:null,date:"",title:"",category:"Business - Orders",taskType:"",person:"",account:"",vendor:"",property:"",financialType:"",paymentStatus:"",month:"",chemical:"",tags:[],notes:"",reminder:"",reminderNote:"",amount:"",attachments:[],link:"",linkLabel:"",isRecurring:false,createdAt:""};
+
+function EntryForm({initial,onSave,onClose,dropdowns,onAddToDropdown,saving}){
+  const [f,setF]=useState({...EMPTY_E,date:today(),id:genId(),createdAt:new Date().toISOString(),...initial});
+  const [busy,setBusy]=useState(false);
+  const fileRef=useRef();
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const allPersons=[...new Set([...dropdowns.persons])];
+  const allAccounts=[...new Set([...dropdowns.accounts])];
+  const allVendors=[...new Set([...dropdowns.vendors])];
+  const handleFiles=async files=>{setBusy(true);const r=await Promise.all(Array.from(files).map(fileToB64));set("attachments",[...f.attachments,...r]);setBusy(false);};
+  const addNew=(list,val)=>{if(onAddToDropdown)onAddToDropdown(list,val);};
+  const applyVoiceData=data=>setF(p=>({...p,...data,id:p.id,createdAt:p.createdAt,attachments:p.attachments}));
+  const applyScanData=data=>setF(p=>({...p,...data,id:p.id,createdAt:p.createdAt,attachments:[...p.attachments,...(data.attachments||[])]}));
+  const G2={display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12};
+
+  return<div>
+    <h2 style={{margin:"0 0 14px",fontSize:18,color:"#3a2a0e",fontWeight:700}}>{initial?.id?"✏️ Edit":"✨ New Entry"}</h2>
+
+    {/* VOICE INPUT */}
+    <VoiceInput onResult={applyVoiceData} dropdowns={dropdowns}/>
+
+    {/* SCAN BILL */}
+    <ScanBill onResult={applyScanData} onMultiResult={(results)=>{
+      if(results.length===1){applyScanData(results[0]);return;}
+      // For multiple bills - save all except first directly, open first in form
+      results.slice(1).forEach(r=>onSave({...r,id:r.id||genId()}));
+      applyScanData(results[0]);
+      if(results.length>1)alert(`✅ ${results.length} bills scanned! First bill loaded in form. Other ${results.length-1} saved automatically.`);
+    }}/>
+
+    <div style={G2}>
+      <div><label className="lbl">Date *</label><input className="inp" type="date" value={f.date} onChange={e=>set("date",e.target.value)}/></div>
+      <div><label className="lbl">Month</label><select className="inp" value={f.month} onChange={e=>set("month",e.target.value)}><option value="">— Select —</option>{MONTHS.map(m=><option key={m}>{m}</option>)}</select></div>
+    </div>
+    <div style={{marginBottom:12}}><label className="lbl">Title *</label><input className="inp" type="text" value={f.title} placeholder="What is this about?" onChange={e=>set("title",e.target.value)}/></div>
+    <div style={G2}>
+      <div>
+        <label className="lbl">Category</label>
+        <div style={{display:"flex",gap:6}}>
+          <select className="inp" value={f.category} onChange={e=>set("category",e.target.value)} style={{flex:1}}>{dropdowns.categories.map(c=><option key={c}>{c}</option>)}</select>
+          <button type="button" onClick={()=>{const v=prompt("New category name:");if(v&&v.trim()){addNew("categories",v.trim());set("category",v.trim());}}} style={{padding:"6px 10px",borderRadius:8,border:"1.5px solid #c8a060",background:"#fff8ee",color:"#8a5a00",cursor:"pointer",fontSize:14,fontWeight:700,flexShrink:0}}>＋</button>
+        </div>
+      </div>
+      <div><Combo label="Task Type" value={f.taskType} onChange={v=>set("taskType",v)} options={dropdowns.taskTypes} onAddNew={v=>addNew("taskTypes",v)}/></div>
+    </div>
+    <div style={G2}>
+      <div><Combo label="Person" value={f.person} onChange={v=>set("person",v)} options={allPersons} onAddNew={v=>addNew("persons",v)}/></div>
+      <div><Combo label="Vendor" value={f.vendor} onChange={v=>set("vendor",v)} options={allVendors} onAddNew={v=>addNew("vendors",v)}/></div>
+    </div>
+    <div style={G2}>
+      <div><Combo label="Account / Bank" value={f.account} onChange={v=>set("account",v)} options={allAccounts} onAddNew={v=>addNew("accounts",v)}/></div>
+      <div><Combo label="Financial Type" value={f.financialType} onChange={v=>set("financialType",v)} options={dropdowns.financials} onAddNew={v=>addNew("financials",v)}/></div>
+    </div>
+    <div style={G2}>
+      <div><Combo label="Property" value={f.property} onChange={v=>set("property",v)} options={dropdowns.properties} onAddNew={v=>addNew("properties",v)}/></div>
+      <div><Combo label="Chemical / Fragrance" value={f.chemical} onChange={v=>set("chemical",v)} options={dropdowns.chemicals} onAddNew={v=>addNew("chemicals",v)} placeholder="Sandal, Jasmine…"/></div>
+    </div>
+    <div style={G2}>
+      <div><label className="lbl">Payment Status</label><select className="inp" value={f.paymentStatus} onChange={e=>set("paymentStatus",e.target.value)}><option value="">— Select —</option>{dropdowns.paymentStatuses.map(o=><option key={o}>{o}</option>)}</select></div>
+      <div><label className="lbl">Amount / Ref</label><input className="inp" type="text" value={f.amount} placeholder="₹50,000 / INV-42" onChange={e=>set("amount",e.target.value)}/></div>
+    </div>
+    <div style={{marginBottom:12}}><TagPicker value={f.tags} onChange={v=>set("tags",v)}/></div>
+    <div style={{marginBottom:12}}><label className="lbl">Notes / Remarks</label><textarea className="inp" value={f.notes} rows={3} placeholder="Details, context, action items…" onChange={e=>set("notes",e.target.value)} style={{resize:"vertical",lineHeight:1.6}}/></div>
+    <div style={G2}>
+      <div><label className="lbl">🔗 Link</label><input className="inp" type="url" value={f.link} placeholder="https://…" onChange={e=>set("link",e.target.value)}/></div>
+      <div><label className="lbl">Link Label</label><input className="inp" type="text" value={f.linkLabel} placeholder="Invoice, Doc…" onChange={e=>set("linkLabel",e.target.value)}/></div>
+    </div>
+    <div style={{background:"#e8f4fb",border:"1.5px solid #b0d8f0",borderRadius:10,padding:13,marginBottom:12}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+        <label className="lbl" style={{color:"#006aaa",margin:0}}>📲 Reminder → Telegram (fires 24/7)</label>
+        <label style={{display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#005a8a",cursor:"pointer"}}><input type="checkbox" checked={f.isRecurring} onChange={e=>set("isRecurring",e.target.checked)}/>Monthly</label>
+      </div>
+      <div style={G2}>
+        <div><label className="lbl" style={{fontSize:10}}>Date & Time</label><input className="inp" type="datetime-local" value={f.reminder} onChange={e=>set("reminder",e.target.value)}/></div>
+        <div><label className="lbl" style={{fontSize:10}}>Note</label><input className="inp" type="text" value={f.reminderNote} placeholder="What to do…" onChange={e=>set("reminderNote",e.target.value)}/></div>
+      </div>
+    </div>
+    <div style={{marginBottom:18}}>
+      <label className="lbl">📎 Attachments — Camera / Gallery / Files</label>
+      <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+        <button onClick={()=>{const i=document.createElement("input");i.type="file";i.accept="image/*";i.capture="environment";i.onchange=e=>handleFiles(e.target.files);i.click();}}
+          style={{padding:"8px 14px",borderRadius:8,border:"none",background:"#2a7a2a",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}}>📷 Camera</button>
+        <button onClick={()=>fileRef.current.click()}
+          style={{padding:"8px 14px",borderRadius:8,border:"none",background:"#3a5a8a",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}}>🖼 Gallery</button>
+        <button onClick={()=>{const i=document.createElement("input");i.type="file";i.accept="application/pdf,.pdf,*/*";i.onchange=e=>handleFiles(e.target.files);i.click();}}
+          style={{padding:"8px 14px",borderRadius:8,border:"none",background:"#8a3a00",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}}>📄 PDF/Files</button>
+      </div>
+      <input ref={fileRef} type="file" multiple accept="image/*" style={{display:"none"}} onChange={e=>handleFiles(e.target.files)}/>
+      {busy&&<div style={{fontSize:12,color:"#5a8a5a",marginBottom:6}}>⏳ Processing…</div>}
+      {f.attachments.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:8}}>{f.attachments.map((a,i)=><div key={i} style={{position:"relative"}}><Thumb att={a}/><button onClick={()=>set("attachments",f.attachments.filter((_,j)=>j!==i))} style={{position:"absolute",top:-6,right:-6,background:"#d00",color:"#fff",border:"none",borderRadius:"50%",width:16,height:16,fontSize:10,cursor:"pointer",lineHeight:1,padding:0}}>×</button></div>)}</div>}
+    </div>
+    <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+      <button className="bgh" onClick={onClose}>Cancel</button>
+      <button className="bg" disabled={saving} onClick={()=>{if(!f.title.trim()){alert("Please add a title.");return;}if(!f.date){alert("Please set a date.");return;}onSave(f);}} style={{opacity:saving?.7:1}}>
+        {saving?"Saving…":"Save Entry"}
+      </button>
+    </div>
+  </div>;
+}
+
+// ── SHAREABLE VIEW ────────────────────────────────────────────────────────────
+function ShareableView(){
+  const entries=loadCache();
+  const label=VIEW_PERSON||VIEW_ACCOUNT||VIEW_TAG||VIEW_CATEGORY;
+  const filtered=entries.filter(e=>{
+    if(VIEW_PERSON&&(e.person||"").toLowerCase()!==VIEW_PERSON.toLowerCase())return false;
+    if(VIEW_ACCOUNT&&(e.account||"").toLowerCase()!==VIEW_ACCOUNT.toLowerCase())return false;
+    if(VIEW_TAG&&!e.tags?.map(t=>t.toLowerCase()).includes(VIEW_TAG.toLowerCase()))return false;
+    if(VIEW_CATEGORY&&(e.category||"").toLowerCase()!==VIEW_CATEGORY.toLowerCase())return false;
+    return true;
+  }).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const pending=filtered.filter(e=>!e.tags?.includes("Done"));
+  const done=filtered.filter(e=>e.tags?.includes("Done"));
+
+  return<div style={{minHeight:"100vh",background:"linear-gradient(160deg,#fdf8ef,#f8f2e4)",fontFamily:"'Palatino Linotype',serif"}}>
+    <div style={{background:"linear-gradient(135deg,#2a1800,#5a3800)",padding:"16px 18px"}}>
+      <div style={{fontSize:11,color:"#c8a860",marginBottom:4}}>🌿 Onam Agarbathi · RK Life Tracker</div>
+      <h1 style={{margin:0,fontSize:20,color:"#f5d890"}}>{VIEW_PERSON?"👤 "+VIEW_PERSON:VIEW_ACCOUNT?"🏦 "+VIEW_ACCOUNT:VIEW_TAG?"🏷 "+VIEW_TAG:"📂 "+VIEW_CATEGORY}</h1>
+      <div style={{fontSize:12,color:"#c8a860",marginTop:4}}>{pending.length} pending · {done.length} done</div>
+    </div>
+    <div style={{padding:"14px 12px 40px"}}>
+      {filtered.length===0?<div style={{textAlign:"center",padding:"50px",color:"#b0966a"}}><div style={{fontSize:36,marginBottom:10}}>📋</div><div>No tasks for {label}</div></div>:(
+        <div>
+          {pending.length>0&&<div style={{marginBottom:20}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#8B0000",marginBottom:10}}><span style={{background:"#8B0000",color:"#fff",borderRadius:20,padding:"2px 10px"}}>⏳ Pending — {pending.length}</span></div>
+            {pending.map((e,i)=><div key={e.id} style={{background:e.tags?.includes("Super Pending")?"#fff0f0":"#fffdf7",border:`1.5px solid ${e.tags?.includes("Super Pending")?"#f5c6cb":"#e8dcc8"}`,borderRadius:12,padding:"12px 14px",marginBottom:8}}>
+              <div style={{fontWeight:700,fontSize:14,color:"#2a1600",marginBottom:4}}>{e.title}</div>
+              {e.tags?.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:6}}>{e.tags.map(t=><TagBadge key={t} tag={t}/>)}</div>}
+              <div style={{display:"flex",flexWrap:"wrap",gap:6,fontSize:12}}>
+                {e.amount&&<span style={{color:"#1a5a00",fontWeight:700}}>{e.amount}</span>}
+                {e.taskType&&<span style={{color:"#5a3800"}}>{e.taskType}</span>}
+                {e.paymentStatus&&<span style={{fontWeight:700,color:e.paymentStatus==="Overdue"?"#c00":"#856404"}}>{e.paymentStatus}</span>}
+              </div>
+              {e.notes&&<div style={{fontSize:12,color:"#5a4030",marginTop:6,background:"#fffdf5",borderRadius:6,padding:"6px 9px"}}>{e.notes}</div>}
+              <div style={{fontSize:11,color:"#9a8060",marginTop:4}}>{fmtDate(e.date)}</div>
+            </div>)}
+          </div>}
+          {done.length>0&&<div>
+            <div style={{fontSize:12,fontWeight:700,color:"#155724",marginBottom:10}}><span style={{background:"#d4edda",color:"#155724",borderRadius:20,padding:"2px 10px",border:"1px solid #c3e6cb"}}>✅ Done — {done.length}</span></div>
+            {done.map(e=><div key={e.id} style={{background:"#f8fbf8",border:"1px solid #d4edda",borderRadius:10,padding:"9px 13px",marginBottom:6,opacity:.8}}>
+              <div style={{fontWeight:700,fontSize:13,color:"#5a8060",textDecoration:"line-through"}}>{e.title}</div>
+              {e.amount&&<div style={{fontSize:12,color:"#3a6000",fontWeight:700,marginTop:2}}>{e.amount}</div>}
+              <div style={{fontSize:11,color:"#9a8060",marginTop:2}}>{fmtDate(e.date)}</div>
+            </div>)}
+          </div>}
+        </div>
+      )}
+    </div>
+    <div style={{position:"fixed",bottom:0,left:0,right:0,background:"linear-gradient(135deg,#2a1800,#4a2e00)",padding:"8px 16px",textAlign:"center",fontSize:11,color:"#9a8060"}}>🌿 Onam Agarbathi — Read only</div>
+  </div>;
+}
+
+// ── DUPLICATE FINDER ──────────────────────────────────────────────────────────
+function DupeFinder({entries,onDelete,onClose}){
+  const dupes=useMemo(()=>{const s={};entries.forEach(e=>{const k=(e.title||"").toLowerCase().trim();if(k){if(!s[k])s[k]=[];s[k].push(e);}});return Object.values(s).filter(g=>g.length>1);},[entries]);
+  if(!dupes.length)return<div style={{textAlign:"center",padding:"30px"}}><div style={{fontSize:36,marginBottom:10}}>✅</div><div style={{fontSize:16,fontWeight:700,color:"#2a5a2a"}}>No duplicates!</div><button className="bgh" onClick={onClose} style={{marginTop:16}}>Close</button></div>;
+  return<div>
+    <h2 style={{margin:"0 0 12px",fontSize:18}}>🔍 Duplicates ({dupes.length} groups)</h2>
+    {dupes.map((g,i)=><div key={i} style={{background:"#fff8ee",border:"1.5px solid #f0ddb0",borderRadius:10,padding:12,marginBottom:10}}>
+      <div style={{fontWeight:700,fontSize:13,color:"#5a3800",marginBottom:8}}>"{g[0].title}" — {g.length} entries</div>
+      {g.map((e,j)=><div key={e.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"6px 10px",background:j%2?"#fff8ee":"#fffdf5",borderRadius:7,marginBottom:3,gap:8}}>
+        <div style={{fontSize:12}}><strong>{fmtDate(e.date)}</strong>{e.person&&<span style={{marginLeft:8,color:"#7a5800"}}>{e.person}</span>}{e.amount&&<span style={{marginLeft:8,color:"#3a6000",fontWeight:700}}>{e.amount}</span>}</div>
+        <button onClick={()=>onDelete(e.id)} style={{padding:"3px 10px",borderRadius:6,border:"1px solid #f5a8ab",background:"#fff5f5",color:"#c00",cursor:"pointer",fontSize:11}}>Delete</button>
+      </div>)}
+    </div>)}
+    <div style={{display:"flex",justifyContent:"flex-end"}}><button className="bgh" onClick={onClose}>Done</button></div>
+  </div>;
+}
+
+
+// ── SHARE INDIVIDUAL ENTRY ────────────────────────────────────────────────────
+function shareEntry(entry){
+  const lines=[];
+  lines.push("📋 *"+entry.title+"*");
+  lines.push("📅 "+fmtDate(entry.date)+(entry.month?" · "+entry.month:""));
+  if(entry.taskType) lines.push("📌 "+entry.taskType);
+  if(entry.person)   lines.push("👤 "+entry.person);
+  if(entry.vendor)   lines.push("🏭 "+entry.vendor);
+  if(entry.account)  lines.push("🏦 "+entry.account);
+  if(entry.amount)   lines.push("💰 "+entry.amount);
+  if(entry.paymentStatus) lines.push("💳 "+entry.paymentStatus);
+  if(entry.property) lines.push("🏠 "+entry.property);
+  if(entry.chemical) lines.push("🧪 "+entry.chemical);
+  if(entry.tags?.length) lines.push("🏷 "+entry.tags.join(", "));
+  if(entry.notes)    lines.push("\n📝 "+entry.notes);
+  if(entry.reminder) lines.push("⏰ "+fmtDT(entry.reminder)+(entry.reminderNote?" — "+entry.reminderNote:""));
+  if(entry.link)     lines.push("🔗 "+(entry.linkLabel||entry.link)+": "+entry.link);
+  lines.push("\n🌿 Onam Agarbathi · RK Life Tracker");
+  const text=lines.join("\n");
+
+  // Try native share API first (works on iPhone)
+  if(navigator.share){
+    navigator.share({
+      title:entry.title,
+      text:text,
+      url:entry.link||window.location.href
+    }).catch(()=>{});
+  } else {
+    // Fallback: copy to clipboard
+    navigator.clipboard.writeText(text).then(()=>{
+      alert("Entry copied to clipboard! Paste in WhatsApp or Gmail.");
+    }).catch(()=>{
+      // Last resort: show in prompt
+      prompt("Copy this and share:",text);
+    });
+  }
+}
+
+function shareEntryHTML(entry){
+  const w=window.open("","_blank");
+  const atts=(entry.attachments||[]);
+  const imgs=atts.filter(a=>a.type?.startsWith("image/"));
+  const docs=atts.filter(a=>!a.type?.startsWith("image/"));
+
+  const imgHtml=imgs.map(a=>`<img src="${a.data}" style="max-width:100%;border-radius:8px;margin:4px 0;display:block;border:1.5px solid #e2d9c8" onclick="window.open(this.src)" />`).join("");
+  const docHtml=docs.map(a=>`<a href="${a.data}" target="_blank" download="${a.name||"file"}" style="display:inline-block;padding:8px 14px;background:#f0f4ff;border-radius:8px;font-size:13px;color:#339;margin:4px;text-decoration:none;border:1px solid #c0c8f0">📄 ${a.name||"Download File"}</a>`).join("");
+
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>${entry.title}</title>
+  <style>
+    body{font-family:Georgia,serif;background:#fdf8ef;padding:16px;max-width:500px;margin:0 auto;}
+    .card{background:#fff;border-radius:16px;padding:20px;box-shadow:0 4px 24px rgba(0,0,0,.12);}
+    .header{background:linear-gradient(135deg,#2a1800,#5a3800);color:#f5d890;padding:14px 16px;border-radius:10px;margin-bottom:14px;}
+    .field{display:flex;gap:8px;margin-bottom:8px;font-size:13px;}
+    .notes{background:#fffdf5;border:1px solid #e8dcc8;border-radius:8px;padding:10px;font-size:13px;margin-top:10px;line-height:1.6;}
+    .share-btn{display:block;width:100%;padding:12px;background:linear-gradient(135deg,#c8860a,#a06010);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;margin-top:14px;}
+    .footer{text-align:center;font-size:11px;color:#9a8060;margin-top:12px;}
+    img{cursor:zoom-in;}
+  </style></head><body>
+  <div class="card">
+    <div class="header">
+      <div style="font-size:18px;font-weight:700">${entry.title}</div>
+      <div style="font-size:11px;color:#c8a860;margin-top:4px">📅 ${entry.date||""}${entry.category?" · "+entry.category:""}</div>
+    </div>
+    ${entry.taskType?`<div class="field"><span>📌</span><span>${entry.taskType}</span></div>`:""}
+    ${entry.person?`<div class="field"><span>👤</span><span>${entry.person}</span></div>`:""}
+    ${entry.vendor?`<div class="field"><span>🏭</span><span>${entry.vendor}</span></div>`:""}
+    ${entry.amount?`<div class="field"><span>💰</span><b style="color:#1a5a00">${entry.amount}</b></div>`:""}
+    ${entry.paymentStatus?`<div class="field"><span>💳</span><span>${entry.paymentStatus}</span></div>`:""}
+    ${entry.notes?`<div class="notes">📝 ${entry.notes}</div>`:""}
+    ${imgHtml?`<div style="margin-top:12px">${imgHtml}</div>`:""}
+    ${docHtml?`<div style="margin-top:8px">${docHtml}</div>`:""}
+    <div class="footer">🌿 Onam Agarbathi Pvt. Ltd. · RK Life Tracker · Read only</div>
+    <button class="share-btn" onclick="if(navigator.share){navigator.share({title:'${entry.title}',text:document.body.innerText});}else{window.print();}">📤 Share / Save as PDF</button>
+  </div></body></html>`);
+  w.document.close();
+}
+
+
+function exportCSV(entries){
+  const h=["ID","Date","Month","Title","Category","Task Type","Person","Vendor","Account","Financial","Payment Status","Property","Chemical","Amount","Tags","Notes","Reminder","Recurring","Link","Created At"];
+  const rows=entries.map(e=>[e.id,e.date,e.month,e.title,e.category,e.taskType,e.person,e.vendor,e.account,e.financialType,e.paymentStatus,e.property,e.chemical,e.amount,(e.tags||[]).join("; "),e.notes,e.reminder,e.isRecurring?"Yes":"",e.link,e.createdAt].map(v=>`"${String(v||"").replace(/"/g,'""')}"`));
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([[h,...rows].map(r=>r.join(",")).join("\n")],{type:"text/csv"}));
+  a.download=`rk-tracker-${today()}.csv`;a.click();
+}
+
+function exportPDF(entries,label){
+  const isDone=e=>e.tags?.includes("Done");
+  const pending=entries.filter(e=>!isDone(e));
+  const done=entries.filter(e=>isDone(e));
+  const rows=(list,title)=>{
+    if(!list.length)return"";
+    return`<h3 style="margin:16px 0 8px;color:${title==="Pending"?"#8B0000":"#155724"};font-size:14px">${title==="Pending"?"⏳":"✅"} ${title} (${list.length})</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:16px">
+      <thead><tr style="background:#4a2e00;color:#f5d890"><th style="padding:6px 8px;text-align:left">Title</th><th style="padding:6px 8px;text-align:left">Date</th><th style="padding:6px 8px;text-align:left">Person</th><th style="padding:6px 8px;text-align:left">Amount</th><th style="padding:6px 8px;text-align:left">Status</th><th style="padding:6px 8px;text-align:left">Notes</th></tr></thead>
+      <tbody>${list.map((e,i)=>`<tr style="background:${i%2===0?"#fffdf7":"#fff8ee"}"><td style="padding:6px 8px;font-weight:700">${e.title}</td><td style="padding:6px 8px;white-space:nowrap">${fmtDate(e.date)}</td><td style="padding:6px 8px">${e.person||""}</td><td style="padding:6px 8px;color:#1a5a00;font-weight:700">${e.amount||""}</td><td style="padding:6px 8px">${e.paymentStatus||""}</td><td style="padding:6px 8px;font-size:11px">${(e.notes||"").slice(0,60)}</td></tr>`).join("")}</tbody>
+    </table>`;
+  };
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"/><style>body{font-family:Georgia,serif;color:#2a1a00;padding:24px;max-width:900px;margin:0 auto;}@media print{body{padding:0;}}</style></head><body>
+  <div style="background:linear-gradient(135deg,#2a1800,#5a3800);color:#f5d890;padding:16px 20px;border-radius:8px;margin-bottom:20px">
+    <div style="font-size:11px;color:#c8a860;margin-bottom:4px">🌿 Onam Agarbathi · RK Life Tracker</div>
+    <div style="font-size:20px;font-weight:700">${label} — Task Report</div>
+    <div style="font-size:11px;color:#c8a860;margin-top:4px">Generated: ${new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})} · ${entries.length} entries</div>
+  </div>
+  ${rows(pending,"Pending")}${rows(done,"Done")}
+  </body></html>`;
+  const w=window.open("","_blank");w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);
+}
+
+// ── MAIN APP ──────────────────────────────────────────────────────────────────
+function App(){
+  if(IS_VIEW_MODE) return<ShareableView/>;
+
+  const [entries,setEntries]=useState(loadCache);
+  const [dropdowns,setDropdowns]=useState(loadDD);
+  const [loading,setLoading]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [syncStatus,setSyncStatus]=useState("");
+  const [showForm,setShowForm]=useState(false);
+  const [editE,setEditE]=useState(null);
+  const [viewE,setViewE]=useState(null);
+  const [showDupes,setShowDupes]=useState(false);
+  const [showAI,setShowAI]=useState(false);
+  const [showDD,setShowDD]=useState(false);
+  const [showShare,setShowShare]=useState(false);
+  const [search,setSearch]=useState("");
+  const [filterCat,setFilterCat]=useState("All");
+  const [filterTag,setFilterTag]=useState("");
+  const [filterPerson,setFilterPerson]=useState("");
+  const [filterAccount,setFilterAccount]=useState("");
+  const [filterVendor,setFilterVendor]=useState("");
+  const [filterStatus,setFilterStatus]=useState("");
+  const [hideDone,setHideDone]=useState(false);
+  const [showHidden,setShowHidden]=useState(false);
+  const [sort,setSort]=useState("date_desc");
+  const [selIds,setSelIds]=useState([]);
+
+  useEffect(()=>{saveDD(dropdowns);},[dropdowns]);
+
+  // BULLETPROOF: localStorage is master, Sheets is backup only
+  useEffect(()=>{
+    const cached=loadCache();
+    setEntries(cached);
+    setLoading(false);
+    setSyncStatus(cached.length>0?"📱 "+cached.length+" entries loaded":"📱 Ready — tap + New to start");
+    // Push local to sheets silently
+    if(cached.length>0){
+      sheetsAPI("getAll").then(r=>{
+        if(r.error||!r.entries){setSyncStatus("📴 Offline · "+cached.length+" entries safe");return;}
+        // LOCAL IS MASTER. Never replace local entries. Two add-only directions:
+        const localIds=new Set(cached.map(e=>e.id));
+        const sheetIds=new Set(r.entries.map(e=>e.id));
+        // a) push local entries missing in Sheets
+        const toPush=cached.filter(e=>!sheetIds.has(e.id));
+        toPush.forEach(e=>sheetsAPI("save",{entry:e}).catch(()=>{}));
+        // b) ADD (never replace) Sheets entries missing locally, sanitized
+        const toAdd=r.entries.filter(e=>e&&e.id&&!localIds.has(e.id)&&loadTombstones().indexOf(e.id)===-1).map(sanitizeEntry).filter(Boolean);
+        if(toAdd.length>0){
+          const merged=cached.concat(toAdd);
+          merged.sort((a,b)=>String(b.createdAt||b.date||"").localeCompare(String(a.createdAt||a.date||"")));
+          setEntries(merged);saveCache(merged);
+          setSyncStatus("✅ "+merged.length+" entries · "+toAdd.length+" from Sheets"+(toPush.length>0?" · "+toPush.length+" backed up":""));
+        } else {
+          setSyncStatus("✅ "+cached.length+" entries"+(toPush.length>0?" · "+toPush.length+" backed up":" · all in Sheets"));
+        }
+      }).catch(()=>setSyncStatus("📴 Offline · "+cached.length+" entries safe"));
+    }
+    sheetsAPI("getDropdowns").then(r=>{if(r.dropdowns)setDropdowns(p=>({...p,...r.dropdowns}));}).catch(()=>{});
+  },[]);
+
+  const saveEntry=async(entry)=>{
+    setSaving(true);
+    // Upload any base64 attachments to Google Drive first
+    var finalEntry=Object.assign({},entry);
+    if(entry.attachments&&entry.attachments.length>0&&url){
+      try{
+        var uploaded=await Promise.all(entry.attachments.map(function(a){
+          if(a&&a.data&&a.data.length>100&&a.type!=="drive"){
+            return uploadToDrive(a);
+          }
+          return Promise.resolve(a);
+        }));
+        finalEntry=Object.assign({},entry,{attachments:uploaded});
+        // Set link to first Drive URL if link field is empty
+        var firstDrive=uploaded.find(function(a){return a&&a.type==="drive";});
+        if(firstDrive&&!finalEntry.link){
+          finalEntry.link=firstDrive.data;
+          finalEntry.linkLabel="📎 Photo";
+        }
+      }catch(e){}
+    }
+    setEntries(p=>{const ex=p.find(x=>x.id===finalEntry.id);const updated=ex?p.map(x=>x.id===finalEntry.id?finalEntry:x):[finalEntry,...p];saveCache(updated);return updated;});
+    sheetsAPI("save",{entry:finalEntry}).then(r=>{
+      setSyncStatus(r.error?"📱 Saved locally · syncing...":"✅ Saved · backed up to Sheets");
+    }).catch(()=>setSyncStatus("📱 Saved locally"));
+    if(entry.person&&!dropdowns.persons.includes(entry.person))addToDropdown("persons",entry.person);
+    if(entry.vendor&&!dropdowns.vendors.includes(entry.vendor))addToDropdown("vendors",entry.vendor);
+    if(entry.account&&!dropdowns.accounts.includes(entry.account))addToDropdown("accounts",entry.account);
+    setSaving(false);setShowForm(false);setEditE(null);
+  };
+
+  const delEntry=async(id)=>{
+    if(!window.confirm("Delete this entry?"))return;
+    if(!window.confirm("⚠️ Cannot be undone. Delete permanently?"))return;
+    addTombstones([id]);
+    setEntries(p=>{const u=p.filter(e=>e.id!==id);saveCache(u);return u;});
+    setViewE(null);
+    await sheetsAPI("delete",{id});
+  };
+
+  const toggleSel=(id)=>{setSelIds(p=>p.indexOf(id)>-1?p.filter(x=>x!==id):p.concat([id]));};
+  const bulkDelete=async()=>{
+    if(selIds.length===0)return;
+    if(!window.confirm("Delete "+selIds.length+" selected entries?"))return;
+    if(!window.confirm("⚠️ Cannot be undone. Delete "+selIds.length+" entries permanently?"))return;
+    const ids=selIds.slice();
+    addTombstones(ids);
+    setEntries(p=>{const u=p.filter(e=>ids.indexOf(e.id)===-1);saveCache(u);return u;});
+    setSelIds([]);
+    ids.forEach(id=>{sheetsAPI("delete",{id}).catch(()=>{});});
+  };
+
+  const markDone=async(id)=>{
+    const updated=entries.map(e=>e.id===id?{...e,tags:[...new Set([...e.tags||[],"Done"])]}:e);
+    setEntries(updated);saveCache(updated);setViewE(null);
+    const entry=updated.find(e=>e.id===id);
+    if(entry)await sheetsAPI("save",{entry});
+  };
+  const hideEntry=async(id)=>{
+    const updated=entries.map(e=>e.id===id?{...e,hidden:true}:e);
+    setEntries(updated);saveCache(updated);setViewE(null);
+    const entry=updated.find(e=>e.id===id);
+    if(entry)sheetsAPI("save",{entry});
+  };
+  const unhideEntry=async(id)=>{
+    const updated=entries.map(e=>e.id===id?{...e,hidden:false}:e);
+    setEntries(updated);saveCache(updated);
+    const entry=updated.find(e=>e.id===id);
+    if(entry)sheetsAPI("save",{entry});
+  };
+
+  const addToDropdown=(list,val)=>{
+    setDropdowns(p=>{if(p[list]?.includes(val))return p;const u={...p,[list]:[...p[list],val]};sheetsAPI("saveDropdowns",{dropdowns:u}).catch(()=>{});return u;});
+  };
+
+  const saveDropdowns=async(dd)=>{
+    setDropdowns(dd);saveDD(dd);
+    await sheetsAPI("saveDropdowns",{dropdowns:dd});
+  };
+
+  const refresh=async()=>{
+    // Two-way ADD-ONLY sync. Local is master: nothing local is ever replaced or removed.
+    setLoading(true);setSyncStatus("📤 Syncing...");
+    const cached=loadCache();
+    try{
+      const r=await sheetsAPI("getAll");
+      if(r.error||!r.entries){setSyncStatus("📴 Offline — "+cached.length+" entries safe locally");setLoading(false);return;}
+      const localIds=new Set(cached.map(e=>e.id));
+      const sheetIds=new Set(r.entries.map(e=>e.id));
+      // push local-only entries to Sheets
+      const toPush=cached.filter(e=>!sheetIds.has(e.id));
+      if(toPush.length>0)await Promise.all(toPush.map(e=>sheetsAPI("save",{entry:e}).catch(()=>{})));
+      // add Sheets-only entries locally (sanitized), never replacing existing
+      const toAdd=r.entries.filter(e=>e&&e.id&&!localIds.has(e.id)&&loadTombstones().indexOf(e.id)===-1).map(sanitizeEntry).filter(Boolean);
+      if(toAdd.length>0){
+        const merged=cached.concat(toAdd);
+        merged.sort((a,b)=>String(b.createdAt||b.date||"").localeCompare(String(a.createdAt||a.date||"")));
+        setEntries(merged);saveCache(merged);
+        setSyncStatus("✅ "+merged.length+" entries · ↓"+toAdd.length+" added · ↑"+toPush.length+" backed up · "+new Date().toLocaleTimeString("en-IN"));
+      } else {
+        setSyncStatus("✅ "+cached.length+" entries · ↑"+toPush.length+" backed up · "+new Date().toLocaleTimeString("en-IN"));
+      }
+    }catch(e){
+      setSyncStatus("📴 Offline — "+cached.length+" entries safe locally");
+    }
+    setLoading(false);
+  };
+
+  const allPersons=[...new Set([...dropdowns.persons,...entries.map(e=>e.person).filter(Boolean)])];
+  const allAccounts=[...new Set([...dropdowns.accounts,...entries.map(e=>e.account).filter(Boolean)])];
+  const allVendors=[...new Set([...dropdowns.vendors,...entries.map(e=>e.vendor).filter(Boolean)])];
+
+  const filtered=useMemo(()=>entries.filter(e=>{
+    if(e.hidden&&!showHidden)return false;
+    if(hideDone&&e.tags?.includes("Done"))return false;
+    if(filterCat!=="All"&&e.category!==filterCat)return false;
+    if(filterTag&&!e.tags?.includes(filterTag))return false;
+    if(filterPerson&&e.person!==filterPerson)return false;
+    if(filterAccount&&e.account!==filterAccount)return false;
+    if(filterVendor&&e.vendor!==filterVendor)return false;
+    if(filterStatus&&e.paymentStatus!==filterStatus)return false;
+    if(search){const q=search.toLowerCase();return["title","notes","person","vendor","amount","taskType","chemical","account","financialType","property"].some(k=>(e[k]||"").toLowerCase().includes(q));}
+    return true;
+  }).sort((a,b)=>{
+    if(sort==="date_desc")return(b.date||"").localeCompare(a.date||"");
+    if(sort==="date_asc") return(a.date||"").localeCompare(b.date||"");
+    return(a.title||"").localeCompare(b.title||"");
+  }),[entries,hideDone,filterCat,filterTag,filterPerson,filterAccount,filterVendor,filterStatus,search,sort]);
+
+  const overdueN=entries.filter(e=>isOverdue(e.reminder)&&!e.tags?.includes("Done")).length;
+  const superN=entries.filter(e=>e.tags?.includes("Super Pending")).length;
+  const dupeN=useMemo(()=>{const s={};entries.forEach(e=>{const k=(e.title||"").toLowerCase().trim();if(k)s[k]=(s[k]||0)+1;});return Object.values(s).filter(n=>n>1).length;},[entries]);
+
+  const getRowBg=e=>{
+    const t=e.tags||[];
+    if(t.includes("Done"))return"#f4fbf4";
+    if(t.includes("Super Pending"))return"#ffe8e8";
+    if(t.includes("Overdue")||isOverdue(e.reminder))return"#fff6f6";
+    if(t.includes("Urgent"))return"#fff8f0";
+    if(t.includes("GOVT"))return"#f0f4ff";
+    if(t.includes("Paid"))return"#f4fbf4";
+    if(t.includes("Payment Due"))return"#fffbf0";
+    return"#fffdf7";
+  };
+
+  const fSel={padding:"6px 10px",borderRadius:8,border:"1px solid #7a5a20",background:"rgba(255,255,255,.12)",color:"#f5e8c0",fontSize:12,cursor:"pointer",outline:"none"};
+  const ALL_CATS=["All",...dropdowns.categories];
+
+  // Share panel
+  const SharePanel=()=>{
+    const [copied,setCopied]=useState("");
+    const base=window.location.origin+window.location.pathname;
+    const persons=[...new Set(entries.map(e=>e.person).filter(Boolean))];
+    const accounts=[...new Set(entries.map(e=>e.account).filter(Boolean))];
+    const tags=[...new Set(entries.flatMap(e=>e.tags||[]).filter(t=>t!=="Done"))];
+    const copy=(url,key)=>{navigator.clipboard.writeText(url).then(()=>{setCopied(key);setTimeout(()=>setCopied(""),2000);});};
+    const Row=({label,url,k})=><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 10px",background:"#fffdf5",borderRadius:8,marginBottom:5,gap:8}}>
+      <div><div style={{fontSize:13,fontWeight:600,color:"#3a2800"}}>{label}</div><div style={{fontSize:10,color:"#9a8060",wordBreak:"break-all"}}>{url}</div></div>
+      <button onClick={()=>copy(url,k)} style={{padding:"5px 12px",borderRadius:7,border:"none",background:copied===k?"#2a7a2a":"linear-gradient(135deg,#c8860a,#a06010)",color:"#fff",cursor:"pointer",fontSize:11,fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>{copied===k?"✓ Copied":"Copy"}</button>
+    </div>;
+    return<div>
+      <h2 style={{margin:"0 0 4px",fontSize:18}}>🔗 Share View Links</h2>
+      <p style={{fontSize:12,color:"#9a8060",marginBottom:12}}>Read-only filtered view — recipient can't edit</p>
+      {persons.length>0&&<div style={{marginBottom:12}}><div className="lbl" style={{marginBottom:6}}>👤 By Person</div>{persons.map(p=><Row key={p} label={p} url={`${base}?person=${encodeURIComponent(p)}`} k={p}/>)}</div>}
+      {tags.length>0&&<div style={{marginBottom:12}}><div className="lbl" style={{marginBottom:6}}>🏷 By Tag</div>{tags.slice(0,6).map(t=><Row key={t} label={t} url={`${base}?tag=${encodeURIComponent(t)}`} k={t}/>)}</div>}
+      {accounts.length>0&&<div style={{marginBottom:12}}><div className="lbl" style={{marginBottom:6}}>🏦 By Account</div>{accounts.slice(0,5).map(a=><Row key={a} label={a} url={`${base}?account=${encodeURIComponent(a)}`} k={a}/>)}</div>}
+      <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}><button className="bgh" onClick={()=>setShowShare(false)}>Close</button></div>
+    </div>;
+  };
+
+  return<div style={{minHeight:"100vh",background:"linear-gradient(160deg,#fdf8ef,#f8f2e4 50%,#fdf5e6)",paddingBottom:52}}>
+
+    {/* SYNC BAR */}
+    <div style={{background:syncStatus.includes("✅")?"#1a5a1a":syncStatus.includes("⚠️")?"#7a5800":"#1a3a5a",padding:"4px 14px",fontSize:11,color:"#c8f0c8",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+      <span style={{flex:1}}>{syncStatus||"📊 Google Sheets connected"}</span>
+      <button onClick={()=>{
+        // Emergency recovery — restore from backup
+        try{
+          const backup=JSON.parse(localStorage.getItem(LS_CACHE+"_backup")||"null");
+          if(backup&&backup.entries&&backup.entries.length>0){
+            setEntries(backup.entries);
+            saveCache(backup.entries);
+            setSyncStatus("✅ Recovered "+backup.entries.length+" entries from backup ("+backup.savedAt?.slice(0,10)+")");
+          } else {
+            // Try today's backup
+            const todayKey=LS_CACHE+"_"+new Date().toISOString().slice(0,10);
+            const todayBackup=JSON.parse(localStorage.getItem(todayKey)||"null");
+            if(todayBackup&&todayBackup.entries){
+              setEntries(todayBackup.entries);
+              saveCache(todayBackup.entries);
+              setSyncStatus("✅ Recovered "+todayBackup.entries.length+" entries");
+            } else {
+              setSyncStatus("⚠️ No backup found");
+            }
+          }
+        }catch(e){setSyncStatus("⚠️ Recovery failed: "+e.message);}
+      }} style={{background:"rgba(255,150,50,.3)",border:"1px solid rgba(255,150,50,.5)",color:"#ffcc88",borderRadius:6,padding:"2px 10px",cursor:"pointer",fontSize:10,whiteSpace:"nowrap"}}>🔄 Recover</button>
+      <button onClick={refresh} disabled={loading} style={{background:"transparent",border:"1px solid rgba(255,255,255,.3)",color:"inherit",borderRadius:6,padding:"2px 10px",cursor:"pointer",fontSize:10}}>{loading?"…":"↻ Sync"}</button>
+    </div>
+
+    {/* HEADER */}
+    <div style={{background:"linear-gradient(135deg,#2a1800,#5a3800 50%,#3a2000)",padding:"12px 12px 10px",boxShadow:"0 4px 24px rgba(0,0,0,.3)",position:"sticky",top:0,zIndex:50}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:10}}>
+        <div>
+          <h1 style={{margin:0,fontSize:19,fontWeight:700,color:"#f5d890"}}>
+            📋 RK Life Tracker
+            {URL_USER!=="main"&&<span style={{fontSize:12,marginLeft:8,background:CURRENT_USER.bg,color:CURRENT_USER.color,borderRadius:20,padding:"2px 10px",fontWeight:700}}>{CURRENT_USER.name}</span>}
+          </h1>
+          <div style={{fontSize:10,color:"#c8a860",marginTop:2,display:"flex",flexWrap:"wrap",gap:5,alignItems:"center"}}>
+            <span>{entries.length} total · {filtered.length} shown</span>
+            {overdueN>0&&<span style={{background:"#c00",color:"#fff",borderRadius:20,padding:"1px 7px",fontSize:9,fontWeight:700}}>⏰ {overdueN}</span>}
+            {superN>0&&<span style={{background:"#8B0000",color:"#fff",borderRadius:20,padding:"1px 7px",fontSize:9,fontWeight:700}}>🔴 {superN}</span>}
+            {dupeN>0&&<span onClick={()=>setShowDupes(true)} style={{background:"#7a5800",color:"#fff",borderRadius:20,padding:"1px 7px",fontSize:9,fontWeight:700,cursor:"pointer"}}>🔍 {dupeN} dupes</span>}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          <button onClick={()=>setShowAI(true)} className="ai-btn" style={{fontSize:11,padding:"6px 11px"}}>🧠 AI</button>
+          <button onClick={()=>setShowShare(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>🔗 Share</button>
+          <button onClick={()=>setShowDD(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>⚙️</button>
+          <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
+          <button onClick={()=>setShowHidden(h=>!h)} style={{...fSel,background:showHidden?"rgba(255,200,100,.15)":"rgba(255,255,255,.08)",color:showHidden?"#ffcc88":"#f0cc80",fontSize:11}}>👁</button>
+          <button onClick={()=>{const l=filterPerson||filterTag||filterAccount||filterVendor||filterStatus||(filterCat!=="All"?filterCat:"")||"All Tasks";exportPDF(filtered,l);}} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>↓PDF({filtered.length})</button>
+          <button onClick={()=>exportCSV(entries)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>↓CSV</button>
+          {URL_USER==="main"&&[
+            {l:"💰 Prakash",c:"Finance - Bank",t:"Payment Collected",p:"Prakash"},
+            {l:"💍 Wedding",c:"Personal - Wedding",t:"Wedding Planning"},
+          ].map(q=><button key={q.l} onClick={()=>{setEditE({category:q.c,taskType:q.t,person:q.p||""});setShowForm(true);}} style={{padding:"6px 12px",borderRadius:8,border:"none",background:q.l.includes("Prakash")?"#1a5a8a":"#c8006a",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}}>{q.l}</button>)}
+          {IS_FAMILY&&[
+            {l:"💍",c:"Personal - Wedding",t:"Wedding Planning"},
+            {l:"💰",c:"Personal - Expense",t:"Expense"},
+            {l:"💭",c:"Personal - Thoughts",t:"Thoughts"},
+            {l:"⏰",c:"Reminders",t:"Reminder / Task"},
+          ].map(q=><button key={q.l} onClick={()=>{setEditE({category:q.c,taskType:q.t});setShowForm(true);}} style={{padding:"7px 10px",borderRadius:8,border:"none",background:"rgba(255,255,255,.15)",color:"#f5d890",cursor:"pointer",fontSize:16}}>{q.l}</button>)}
+          {IS_SALES&&[
+            {l:"📦",c:"Sales - Order",t:"Orders Received"},
+            {l:"💰",c:"Sales - Payment",t:"Payment Collected"},
+            {l:"🚶",c:"Sales - Visit",t:"Customer Visit"},
+            {l:"🧾",c:"Sales - Expense",t:"Expense - Travel"},
+            {l:"😟",c:"Sales - Complaint",t:"Complaint Received"},
+            {l:"🏷",c:"Intelligence - Competitor",t:"Competitor Spotted"},
+          ].map(q=><button key={q.l} onClick={()=>{setEditE({category:q.c,taskType:q.t});setShowForm(true);}} style={{padding:"7px 10px",borderRadius:8,border:"none",background:"rgba(255,255,255,.15)",color:"#f5d890",cursor:"pointer",fontSize:16}}>{q.l}</button>)}
+          <button onClick={()=>{setEditE(null);setShowForm(true);}} style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#e8a020,#c07010)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700,boxShadow:"0 4px 14px rgba(200,120,0,.35)"}}>+ New</button>
+        </div>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search all fields…" style={{...fSel,background:"rgba(255,255,255,.1)",width:150}}/>
+        <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={fSel}>{ALL_CATS.map(c=><option key={c} value={c} style={{background:"#3a2000"}}>{c}</option>)}</select>
+        <select value={filterTag} onChange={e=>setFilterTag(e.target.value)} style={fSel}><option value="" style={{background:"#3a2000"}}>All Tags</option>{STATUS_TAGS.map(t=><option key={t} value={t} style={{background:"#3a2000"}}>{t}</option>)}</select>
+        <select value={filterPerson} onChange={e=>setFilterPerson(e.target.value)} style={fSel}><option value="" style={{background:"#3a2000"}}>All People</option>{allPersons.map(p=><option key={p} value={p} style={{background:"#3a2000"}}>{p}</option>)}</select>
+        <select value={filterVendor} onChange={e=>setFilterVendor(e.target.value)} style={fSel}><option value="" style={{background:"#3a2000"}}>All Vendors</option>{allVendors.map(v=><option key={v} value={v} style={{background:"#3a2000"}}>{v}</option>)}</select>
+        <select value={filterAccount} onChange={e=>setFilterAccount(e.target.value)} style={fSel}><option value="" style={{background:"#3a2000"}}>All Accounts</option>{allAccounts.map(a=><option key={a} value={a} style={{background:"#3a2000"}}>{a}</option>)}</select>
+        <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={fSel}><option value="" style={{background:"#3a2000"}}>All Status</option>{dropdowns.paymentStatuses.map(s=><option key={s} value={s} style={{background:"#3a2000"}}>{s}</option>)}</select>
+        <select value={sort} onChange={e=>setSort(e.target.value)} style={fSel}><option value="date_desc" style={{background:"#3a2000"}}>Newest</option><option value="date_asc" style={{background:"#3a2000"}}>Oldest</option><option value="title" style={{background:"#3a2000"}}>A–Z</option></select>
+        {(filterCat!=="All"||filterTag||filterPerson||filterAccount||filterVendor||filterStatus||search)&&<button onClick={()=>{setFilterCat("All");setFilterTag("");setFilterPerson("");setFilterAccount("");setFilterVendor("");setFilterStatus("");setSearch("");}} style={{...fSel,background:"rgba(255,100,100,.2)",color:"#ffb0b0",border:"1px solid #ff8888",fontSize:11}}>✕ Clear</button>}
+      </div>
+    </div>
+
+    {/* TABLE */}
+    <div style={{padding:"10px 8px 40px",overflowX:"auto"}}>
+      {loading&&entries.length===0?<div style={{textAlign:"center",padding:"50px",color:"#b0966a"}}><div style={{fontSize:30,marginBottom:10}}>⏳</div><div>Loading from Google Sheets…</div></div>:
+      filtered.length===0?<div style={{textAlign:"center",padding:"50px",color:"#b0966a"}}>
+        <div style={{fontSize:40,marginBottom:10}}>📋</div>
+        <div style={{fontSize:15,fontWeight:700}}>{entries.length===0?"No entries yet":"No matches"}</div>
+        <div style={{fontSize:12,marginTop:5,color:"#c0a880"}}>{entries.length===0?"Tap + New or 🎤 Speak to start":"Try clearing filters"}</div>
+      </div>:(
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:640}}>
+          <thead>
+            <tr style={{background:"linear-gradient(135deg,#4a2e00,#6a4010)",color:"#f5d890"}}>
+              {["#","Date","Title & Notes","Type · Person","Account · ₹","Tags","Remind","Files",""].map(h=><th key={h} style={{padding:"7px 8px",textAlign:"left",fontSize:10,fontWeight:700,letterSpacing:.6,textTransform:"uppercase",borderRight:"1px solid rgba(255,255,255,.07)",whiteSpace:"nowrap"}}>{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((e,idx)=>{
+              const ov=isOverdue(e.reminder)&&!e.tags?.includes("Done");
+              const isDone=e.tags?.includes("Done");
+              const isSP=e.tags?.includes("Super Pending");
+              return<tr key={e.id} className="rh" style={{background:getRowBg(e),borderBottom:"1px solid #f0e8d8",opacity:isDone?.72:1,outline:isSP?"2px solid #8B0000":"none"}}>
+                <td style={{padding:"7px 8px",fontSize:11,color:"#b09060"}}>{isSP?"🔴":idx+1}</td>
+                <td style={{padding:"7px 8px",fontSize:11,whiteSpace:"nowrap",color:"#5a3800"}}>{fmtDate(e.date)}{e.month&&<div style={{fontSize:9,color:"#9a7040"}}>{e.month}</div>}</td>
+                <td style={{padding:"7px 8px",minWidth:140,maxWidth:200}}>
+                  <div style={{fontWeight:700,fontSize:13,color:"#2a1600",cursor:"pointer",textDecoration:isDone?"line-through":"none"}} onClick={()=>setViewE(e)}>{e.title}</div>
+                  {e.chemical&&<div style={{fontSize:10,color:"#5a3a7a",marginTop:1}}>🧪 {e.chemical}</div>}
+                  {e.notes&&<div style={{fontSize:10,color:"#7a6040",lineHeight:1.4,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",marginTop:1}}>{e.notes}</div>}
+                  {e.link&&<a href={e.link} target="_blank" rel="noreferrer" style={{fontSize:10,color:"#0057b0",display:"block",marginTop:1}} onClick={ev=>ev.stopPropagation()}>🔗 {e.linkLabel||"Link"}</a>}
+                </td>
+                <td style={{padding:"7px 8px",fontSize:11,minWidth:90}}>
+                  {e.taskType&&<div style={{color:"#5a3800",fontWeight:600,fontSize:10,marginBottom:1}}>{e.taskType}</div>}
+                  {e.person&&<div style={{color:"#3a5a8a",fontSize:10}}>👤 {e.person}</div>}
+                  {e.vendor&&<div style={{color:"#5a3a8a",fontSize:10}}>🏭 {e.vendor}</div>}
+                  {e.property&&<div style={{color:"#5a3a5a",fontSize:9}}>🏠 {e.property}</div>}
+                </td>
+                <td style={{padding:"7px 8px",fontSize:11,minWidth:85}}>
+                  {e.account&&<div style={{color:"#3a6000",fontWeight:600,fontSize:10,marginBottom:1}}>🏦 {e.account}</div>}
+                  {e.amount&&<div style={{color:"#1a5a00",fontWeight:700,fontSize:12}}>{e.amount}</div>}
+                  {e.financialType&&<div style={{fontSize:9,color:"#5a7a00"}}>{e.financialType}</div>}
+                  {e.paymentStatus&&<span style={{fontSize:9,display:"inline-block",marginTop:1,background:e.paymentStatus==="Paid"?"#d4edda":e.paymentStatus==="Overdue"?"#f8d7da":e.paymentStatus==="Payment Pending"?"#fff3cd":"#e8e8e8",color:e.paymentStatus==="Paid"?"#155724":e.paymentStatus==="Overdue"?"#721c24":e.paymentStatus==="Payment Pending"?"#856404":"#444",padding:"1px 6px",borderRadius:10,fontWeight:700,whiteSpace:"nowrap"}}>{e.paymentStatus}</span>}
+                </td>
+                <td style={{padding:"7px 8px",minWidth:90}}><div style={{display:"flex",flexWrap:"wrap",gap:2}}>{e.tags?.map(t=><TagBadge key={t} tag={t}/>)}</div></td>
+                <td style={{padding:"7px 8px",fontSize:10,whiteSpace:"nowrap"}}>
+                  {e.reminder?<span style={{color:ov?"#c00":"#006aaa",fontWeight:ov?700:500}}>{ov?"🔴":"📲"} {fmtDate(e.reminder.slice(0,10))}{e.isRecurring&&<span style={{display:"block",color:"#5a8a30",fontSize:9}}>🔁</span>}</span>:<span style={{color:"#d0c0a0"}}>—</span>}
+                </td>
+                <td style={{padding:"7px 8px"}}>{(e.attachments||[]).length>0?<div style={{display:"flex",gap:2}}>{e.attachments.slice(0,2).map((a,i)=><Thumb key={i} att={a} small/>)}{e.attachments.length>2&&<span style={{fontSize:9,color:"#9a8060",alignSelf:"center"}}>+{e.attachments.length-2}</span>}</div>:<span style={{color:"#d0c0a0",fontSize:10}}>—</span>}</td>
+                <td style={{padding:"7px 6px",whiteSpace:"nowrap"}}>
+                  <button onClick={()=>toggleSel(e.id)} style={{padding:"3px 7px",borderRadius:6,border:selIds.indexOf(e.id)>-1?"2px solid #c01818":"1px solid #ccc",background:selIds.indexOf(e.id)>-1?"#ffe5e5":"#fff",cursor:"pointer",fontSize:11,marginRight:3}}>{selIds.indexOf(e.id)>-1?"☑️":"⬜"}</button><button onClick={()=>setViewE(e)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #d0b880",background:"#fff8ee",color:"#8a5800",cursor:"pointer",fontSize:10,marginRight:3}}>View</button>
+                  <button onClick={()=>shareEntry(e)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #0088cc",background:"#e8f4fb",color:"#006aaa",cursor:"pointer",fontSize:10,marginRight:3}}>📤</button>
+                  {!isDone&&<button onClick={()=>markDone(e.id)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #88cc88",background:"#edfaed",color:"#1a5a1a",cursor:"pointer",fontSize:10,marginRight:3}}>✅</button>}
+                  {!e.hidden&&<button onClick={()=>hideEntry(e.id)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #ccc",background:"#f5f5f5",color:"#666",cursor:"pointer",fontSize:10}}>Hide</button>}
+                  {e.hidden&&<button onClick={()=>unhideEntry(e.id)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #c8a060",background:"#fff8ee",color:"#8a5800",cursor:"pointer",fontSize:10}}>Show</button>}
+                </td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+
+    {/* BOTTOM BAR */}
+    <div style={{position:"fixed",bottom:0,left:0,right:0,background:"linear-gradient(135deg,#2a1800,#4a2e00)",borderTop:"1px solid #7a5020",padding:"5px 12px",display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",zIndex:100}}>
+      {STATUS_TAGS.slice(0,5).map(t=>{const n=entries.filter(e=>e.tags?.includes(t)).length;return n>0?<span key={t} onClick={()=>setFilterTag(filterTag===t?"":t)} style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer"}}><TagBadge tag={t}/><span style={{fontSize:10,color:"#d0a060"}}>{n}</span></span>:null;})}
+      <span style={{fontSize:9,color:"#9a7040",marginLeft:"auto"}}>📊 Google Sheets</span>
+    </div>
+
+    {/* VIEW MODAL */}
+    <Modal open={!!viewE} onClose={()=>setViewE(null)}>
+      {viewE&&<div>
+        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+          <div><div style={{fontSize:11,color:"#9a8060",fontWeight:600,marginBottom:3}}>{fmtDate(viewE.date)}{viewE.month?" · "+viewE.month:""}</div>
+            <h2 style={{margin:0,fontSize:18,color:"#2a1a00"}}>{viewE.title}</h2></div>
+          <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+            {!viewE.tags?.includes("Done")&&<button onClick={()=>markDone(viewE.id)} style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid #88cc88",background:"#edfaed",color:"#1a5a1a",cursor:"pointer",fontSize:12,fontWeight:700}}>✅ Done</button>}
+            <button onClick={()=>shareEntry(viewE)} style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid #0088cc",background:"#e8f4fb",color:"#006aaa",cursor:"pointer",fontSize:12,fontWeight:700}}>📤 Share</button>
+            <button onClick={()=>shareEntryHTML(viewE)} style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid #5a3a8a",background:"#f5eeff",color:"#5a1a8a",cursor:"pointer",fontSize:12}}>🖼 Card</button>
+            <button onClick={()=>{setEditE(viewE);setViewE(null);setShowForm(true);}} style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid #c8a060",background:"#fff8ee",color:"#8a5a00",cursor:"pointer",fontSize:12}}>✏️</button>
+            <button onClick={()=>hideEntry(viewE.id)} style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid #ccc",background:"#f5f5f5",color:"#555",cursor:"pointer",fontSize:12}}>👁 Hide</button>
+            <button onClick={()=>delEntry(viewE.id)} style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid #f5a8ab",background:"#fff5f5",color:"#c00",cursor:"pointer",fontSize:12}}>🗑</button>
+          </div>
+        </div>
+        {viewE.tags?.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:12}}>{viewE.tags.map(t=><TagBadge key={t} tag={t}/>)}</div>}
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
+          {[["taskType","Task"],["person","Person"],["vendor","Vendor"],["account","Account"],["financialType","Financial"],["paymentStatus","Status"],["property","Property"],["chemical","Chemical"],["amount","Amount"],["month","Month"]].filter(([k])=>viewE[k]).map(([k,l])=><span key={k} style={{background:"#f9f3e8",border:"1px solid #e8dcc0",borderRadius:8,padding:"3px 11px",fontSize:12,color:"#5a3800"}}><span style={{color:"#9a7040",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:.4,marginRight:4}}>{l}</span>{viewE[k]}</span>)}
+        </div>
+        {viewE.notes&&<div style={{marginBottom:12}}><div className="lbl" style={{marginBottom:5}}>Notes</div><div style={{background:"#fffdf5",border:"1px solid #e8dcc8",borderRadius:8,padding:"9px 13px",fontSize:13,whiteSpace:"pre-wrap",lineHeight:1.6}}>{viewE.notes}</div></div>}
+        {viewE.link&&<div style={{marginBottom:12}}><div className="lbl" style={{marginBottom:4}}>Link</div><a href={viewE.link} target="_blank" rel="noreferrer" style={{color:"#0057b0",fontSize:13,wordBreak:"break-all"}}>{viewE.linkLabel||viewE.link}</a></div>}
+        {viewE.reminder&&<div style={{background:isOverdue(viewE.reminder)?"#fff0f0":"#e8f4fb",border:`1.5px solid ${isOverdue(viewE.reminder)?"#f5a8ab":"#b0d8f0"}`,borderRadius:9,padding:"9px 13px",marginBottom:12}}>
+          <span style={{fontSize:13,fontWeight:700,color:isOverdue(viewE.reminder)?"#c00":"#006aaa"}}>📲 {isOverdue(viewE.reminder)?"OVERDUE · ":""}{fmtDT(viewE.reminder)}{viewE.isRecurring&&<span style={{marginLeft:8,fontSize:11,color:"#5a8a30"}}>🔁 Monthly</span>}</span>
+          {viewE.reminderNote&&<div style={{fontSize:12,color:"#005a8a",marginTop:3}}>{viewE.reminderNote}</div>}
+        </div>}
+        {viewE.attachments?.length>0&&<div><div className="lbl" style={{marginBottom:6}}>Attachments</div><div style={{display:"flex",flexWrap:"wrap",gap:8}}>{viewE.attachments.map((a,i)=><Thumb key={i} att={a}/>)}</div></div>}
+        <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}><button className="bgh" onClick={()=>setViewE(null)}>Close</button></div>
+      </div>}
+    </Modal>
+
+    {/* MODALS */}
+    <Modal open={showForm} onClose={()=>{setShowForm(false);setEditE(null);}} wide>
+      <EntryForm initial={editE} onSave={saveEntry} onClose={()=>{setShowForm(false);setEditE(null);}} dropdowns={dropdowns} onAddToDropdown={addToDropdown} saving={saving}/>
+    </Modal>
+    {selIds.length>0&&<div style={{position:"fixed",bottom:0,left:0,right:0,background:"#7a1010",padding:"10px 14px",zIndex:999,display:"flex",justifyContent:"space-between",alignItems:"center",boxShadow:"0 -2px 12px rgba(0,0,0,.3)"}}>
+      <span style={{color:"#fff",fontWeight:700,fontSize:14}}>{selIds.length} selected</span>
+      <div>
+        <button onClick={()=>setSelIds(filtered.map(e=>e.id))} style={{padding:"8px 10px",borderRadius:8,border:"1px solid #fff",background:"transparent",color:"#fff",marginRight:8,fontSize:13,cursor:"pointer"}}>☑️ All Shown</button><button onClick={()=>setSelIds([])} style={{padding:"8px 14px",borderRadius:8,border:"1px solid #fff",background:"transparent",color:"#fff",marginRight:8,fontSize:13,cursor:"pointer"}}>Clear</button>
+        <button onClick={bulkDelete} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#fff",color:"#7a1010",fontWeight:800,fontSize:13,cursor:"pointer"}}>🗑 Delete All</button>
+      </div>
+    </div>}
+    <Modal open={showDupes} onClose={()=>setShowDupes(false)}><DupeFinder entries={entries} onDelete={delEntry} onClose={()=>setShowDupes(false)}/></Modal>
+    <Modal open={showAI} onClose={()=>setShowAI(false)} wide><AIPanel entries={entries} onClose={()=>setShowAI(false)}/></Modal>
+    <Modal open={showDD} onClose={()=>setShowDD(false)} wide><DropdownManager dropdowns={dropdowns} onSave={saveDropdowns} onClose={()=>setShowDD(false)}/></Modal>
+    <Modal open={showShare} onClose={()=>setShowShare(false)} wide><SharePanel/></Modal>
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
