@@ -204,6 +204,27 @@ async function claudeAPI(prompt,system,imageBase64,imageType){
   }
 }
 
+// ── AUTO-TAG ───────────────────────────────────────────────────────────────────
+async function suggestTags(entry){
+  try{
+    const prompt=`Entry details:
+Title: ${entry.title||""}
+Category: ${entry.category||""}
+Task Type: ${entry.taskType||""}
+Amount: ${entry.amount||""}
+Payment Status: ${entry.paymentStatus||""}
+Notes: ${(entry.notes||"").slice(0,300)}
+
+Pick the most relevant tags from this exact list (return ONLY tags from this list, comma-separated, no explanation, choose 0-3 tags, fewer is better, only pick what clearly applies):
+${STATUS_TAGS.join(", ")}`;
+    const txt=await claudeAPI(prompt,"You are a tagging assistant for a business tracker. Return ONLY a comma-separated list of tags from the given list, nothing else. If nothing clearly applies, return an empty string.");
+    const tags=txt.split(",").map(t=>t.trim()).filter(t=>STATUS_TAGS.includes(t));
+    return tags;
+  }catch(e){
+    return []; // fail silently - never block saving over a tagging error
+  }
+}
+
 // ── TELEGRAM ──────────────────────────────────────────────────────────────────
 async function tgSend(text){
   try{
@@ -407,7 +428,7 @@ function Combo({label,value,onChange,options,placeholder,onAddNew}){
 
 function TagPicker({value,onChange}){
   return<div>
-    <label className="lbl">Status Tags</label>
+    <label className="lbl">Status Tags <span style={{fontWeight:400,color:"#999",fontSize:10}}>(optional — auto-tagged on save if left empty)</span></label>
     <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:6,minHeight:24}}>{value.map(t=><TagBadge key={t} tag={t} onRemove={t=>onChange(value.filter(x=>x!==t))}/>)}</div>
     <select className="inp" style={{padding:"6px 10px"}} value="" onChange={e=>{const t=e.target.value;if(t&&!value.includes(t))onChange([...value,t]);e.target.value="";}}>
       <option value="">＋ Add tag…</option>
@@ -953,8 +974,151 @@ function LogisticsTracker({entries,onClose,onUpdateEntry}){
   </div>;
 }
 
+// ── LEDGER UPLOAD (bulk import from Tally/Excel PDF export) ──────────────────
+function LedgerUpload({entries,onClose,onSaveEntry}){
+  const [ledgerType,setLedgerType]=useState("sales"); // sales | purchase
+  const [scanning,setScanning]=useState(false);
+  const [statusMsg,setStatusMsg]=useState("");
+  const [preview,setPreview]=useState(null); // {found, created, skipped, items}
+
+  const parseAmt=(a)=>{
+    if(!a)return 0;
+    const n=parseFloat(String(a).replace(/[₹,\s]/g,""));
+    return isNaN(n)?0:n;
+  };
+
+  const isDuplicate=(row)=>{
+    // Match by invoice number first (most reliable), then by date+amount+name
+    return entries.some(e=>{
+      if(row.invoiceNo&&e.notes&&String(e.notes).includes(row.invoiceNo))return true;
+      const eAmt=parseAmt(e.amount), rAmt=parseAmt(row.amount);
+      const sameAmt=Math.abs(eAmt-rAmt)<1;
+      const sameDate=e.date===row.date;
+      const eName=(e.person||e.vendor||"").toLowerCase();
+      const rName=(row.name||"").toLowerCase();
+      const sameName=rName&&eName&&(eName.includes(rName)||rName.includes(eName));
+      return sameAmt&&sameDate&&sameName;
+    });
+  };
+
+  const processLedger=async(file)=>{
+    setScanning(true);setStatusMsg("Reading ledger…");setPreview(null);
+    try{
+      const att=await fileToB64(file);
+      const isSales=ledgerType==="sales";
+      const prompt=`Extract every row from this ${isSales?"sales":"purchase"} ledger PDF (exported from Tally/Excel). `+
+        `Return ONLY a valid JSON array, one object per transaction row: `+
+        `[{"date":"YYYY-MM-DD","name":"${isSales?"customer":"vendor"} name","amount":number,"invoiceNo":"invoice/voucher number if present","notes":"any other relevant detail"}]. `+
+        `Skip header rows, subtotal rows, and blank rows. Include every real transaction row found.`;
+      const txt=await claudeAPI(prompt,
+        "You are a ledger data extraction assistant for Onam Agarbathi Pvt. Ltd. Return ONLY valid JSON, no markdown, no explanation.",
+        att.base64,att.type);
+      let rows=[];
+      try{
+        let clean=txt.replace(/```json/g,"").replace(/```/g,"").trim();
+        const s=clean.indexOf("["),e2=clean.lastIndexOf("]");
+        if(s>=0&&e2>s)clean=clean.substring(s,e2+1);
+        rows=JSON.parse(clean);
+      }catch(ex){
+        setStatusMsg("Could not parse ledger: "+txt.slice(0,150));setScanning(false);return;
+      }
+      if(!Array.isArray(rows))rows=[rows];
+
+      setStatusMsg(`Found ${rows.length} rows. Auto-tagging and checking for duplicates…`);
+      const items=[];
+      for(const row of rows){
+        const dup=isDuplicate(row);
+        items.push({row,dup,willCreate:!dup});
+      }
+      setPreview({found:rows.length,items,createdCount:0,skippedCount:items.filter(i=>i.dup).length});
+      setScanning(false);
+    }catch(e){
+      setStatusMsg("Error: "+e.message);setScanning(false);
+    }
+  };
+
+  const confirmImport=async()=>{
+    if(!preview)return;
+    setScanning(true);
+    let created=0;
+    for(const item of preview.items){
+      if(!item.willCreate)continue;
+      const row=item.row;
+      const entry={
+        id:genId(),
+        title:(ledgerType==="sales"?"Sale: ":"Purchase: ")+(row.name||"Unknown")+(row.invoiceNo?" ("+row.invoiceNo+")":""),
+        date:row.date||today(),
+        category:ledgerType==="sales"?"Sales - Payment":"Business - Purchase",
+        person:ledgerType==="sales"?(row.name||""):"",
+        vendor:ledgerType==="purchase"?(row.name||""):"",
+        amount:row.amount?String(row.amount):"",
+        paymentStatus:"Payment Pending",
+        notes:(row.invoiceNo?"Invoice/Voucher: "+row.invoiceNo+". ":"")+(row.notes||"")+" [Imported from ledger]",
+        createdAt:new Date().toISOString(),
+        tags:[]
+      };
+      const autoTags=await suggestTags(entry);
+      if(autoTags.length>0)entry.tags=autoTags;
+      await onSaveEntry(entry);
+      created++;
+    }
+    setStatusMsg(`✅ Imported ${created} new ${ledgerType} entries. ${preview.skippedCount} duplicate(s) skipped.`);
+    setPreview(null);
+    setScanning(false);
+  };
+
+  const openUpload=()=>{
+    const i=document.createElement("input");
+    i.type="file";i.accept="application/pdf,.pdf,image/*";
+    i.onchange=e=>{if(e.target.files[0])processLedger(e.target.files[0]);};
+    i.click();
+  };
+
+  return<div>
+    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+      <span style={{fontSize:26}}>📑</span>
+      <div><h2 style={{margin:0,fontSize:18,color:"#5a3a1a"}}>Ledger Upload</h2>
+        <div style={{fontSize:11,color:"#aa8a5a"}}>Bulk import from weekly/monthly Tally or Excel PDF export</div></div>
+    </div>
+
+    <div style={{display:"flex",gap:8,marginBottom:14}}>
+      <button onClick={()=>setLedgerType("sales")} style={{flex:1,padding:"10px",borderRadius:8,border:ledgerType==="sales"?"2px solid #1a5a3a":"1.5px solid #ddd",background:ledgerType==="sales"?"#f0fff4":"#fafafa",color:ledgerType==="sales"?"#1a5a3a":"#999",cursor:"pointer",fontWeight:700,fontSize:13}}>📈 Sales Ledger</button>
+      <button onClick={()=>setLedgerType("purchase")} style={{flex:1,padding:"10px",borderRadius:8,border:ledgerType==="purchase"?"2px solid #1a3a6a":"1.5px solid #ddd",background:ledgerType==="purchase"?"#f0f6ff":"#fafafa",color:ledgerType==="purchase"?"#1a3a6a":"#999",cursor:"pointer",fontWeight:700,fontSize:13}}>📉 Purchase Ledger</button>
+    </div>
+
+    {!preview&&<button onClick={openUpload} disabled={scanning} className="scan-btn" style={{width:"100%",padding:"14px",fontSize:13}}>{scanning?"⏳ Reading…":"📄 Upload "+(ledgerType==="sales"?"Sales":"Purchase")+" Ledger PDF"}</button>}
+
+    {statusMsg&&<div style={{fontSize:12,color:"#5a3a1a",fontWeight:600,marginTop:12,padding:"8px 12px",background:"#fffaf0",borderRadius:7}}>{statusMsg}</div>}
+
+    {preview&&<div style={{marginTop:14}}>
+      <div style={{display:"flex",gap:10,marginBottom:12}}>
+        <div style={{flex:1,textAlign:"center",padding:10,background:"#f0fff4",borderRadius:8}}>
+          <div style={{fontSize:20,fontWeight:800,color:"#1a5a3a"}}>{preview.items.filter(i=>i.willCreate).length}</div>
+          <div style={{fontSize:10,color:"#5a8a6a"}}>New entries</div>
+        </div>
+        <div style={{flex:1,textAlign:"center",padding:10,background:"#fff8f0",borderRadius:8}}>
+          <div style={{fontSize:20,fontWeight:800,color:"#8a5a1a"}}>{preview.skippedCount}</div>
+          <div style={{fontSize:10,color:"#aa8a5a"}}>Duplicates skipped</div>
+        </div>
+      </div>
+      <div style={{maxHeight:280,overflowY:"auto",display:"flex",flexDirection:"column",gap:5,marginBottom:14}}>
+        {preview.items.map((item,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 11px",background:item.dup?"#fdf5f5":"#f8f8f8",borderRadius:6,fontSize:11,opacity:item.dup?0.6:1}}>
+          <span>{item.row.name||"—"} {item.dup&&"(duplicate)"}</span>
+          <span style={{fontWeight:700}}>₹{item.row.amount}</span>
+        </div>)}
+      </div>
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={confirmImport} disabled={scanning} className="bg" style={{flex:1}}>{scanning?"Importing…":`Import ${preview.items.filter(i=>i.willCreate).length} Entries`}</button>
+        <button onClick={()=>setPreview(null)} className="bgh">Cancel</button>
+      </div>
+    </div>}
+
+    <div style={{display:"flex",justifyContent:"flex-end",marginTop:16}}><button className="bgh" onClick={onClose}>Close</button></div>
+  </div>;
+}
+
 // ── AI PANEL ──────────────────────────────────────────────────────────────────
-function AIPanel({entries,onClose,onShowAgeing,onShowMatcher,onShowLogistics}){
+function AIPanel({entries,onClose,onShowAgeing,onShowMatcher,onShowLogistics,onShowLedger}){
   const [q,setQ]=useState("");
   const [loading,setLoading]=useState(false);
   const [result,setResult]=useState("");
@@ -980,6 +1144,7 @@ function AIPanel({entries,onClose,onShowAgeing,onShowMatcher,onShowLogistics}){
       {onShowAgeing&&<button onClick={()=>{onClose();onShowAgeing();}} style={{padding:"6px 13px",borderRadius:20,border:"1.5px solid #e89a9a",background:"#fff0f0",color:"#7a1a1a",cursor:"pointer",fontSize:11,fontWeight:700}}>📊 Open Ageing Report</button>}
       {onShowMatcher&&<button onClick={()=>{onClose();onShowMatcher();}} style={{padding:"6px 13px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontSize:11,fontWeight:700}}>💳 Match a Payment</button>}
       {onShowLogistics&&<button onClick={()=>{onClose();onShowLogistics();}} style={{padding:"6px 13px",borderRadius:20,border:"1.5px solid #a8c8e8",background:"#f0f6ff",color:"#1a3a6a",cursor:"pointer",fontSize:11,fontWeight:700}}>🚚 Track Logistics</button>}
+      {onShowLedger&&<button onClick={()=>{onClose();onShowLedger();}} style={{padding:"6px 13px",borderRadius:20,border:"1.5px solid #d8c8a8",background:"#fff8f0",color:"#5a3a1a",cursor:"pointer",fontSize:11,fontWeight:700}}>📑 Upload Ledger</button>}
     </div>
     <div style={{display:"flex",gap:8,marginBottom:12}}>
       <textarea className="inp" value={q} rows={2} placeholder="Ask anything about your data…" onChange={e=>setQ(e.target.value)} style={{resize:"none"}}/>
@@ -1045,12 +1210,21 @@ function EntryForm({initial,onSave,onClose,dropdowns,onAddToDropdown,saving}){
     <VoiceInput onResult={applyVoiceData} dropdowns={dropdowns}/>
 
     {/* SCAN BILL */}
-    <ScanBill onResult={applyScanData} onMultiResult={(results)=>{
+    <ScanBill onResult={applyScanData} onMultiResult={async(results)=>{
       if(results.length===1){applyScanData(results[0]);return;}
-      // For multiple bills - save all except first directly, open first in form
-      results.slice(1).forEach(r=>onSave({...r,id:r.id||genId()}));
+      // For multiple bills - auto-tag and save all except first directly, open first in form
+      setBusy(true);
+      for(const r of results.slice(1)){
+        const entry={...r,id:r.id||genId()};
+        if(!entry.tags||entry.tags.length===0){
+          const autoTags=await suggestTags(entry);
+          if(autoTags.length>0)entry.tags=autoTags;
+        }
+        onSave(entry);
+      }
+      setBusy(false);
       applyScanData(results[0]);
-      if(results.length>1)alert(`✅ ${results.length} bills scanned! First bill loaded in form. Other ${results.length-1} saved automatically.`);
+      if(results.length>1)alert(`✅ ${results.length} bills scanned and auto-tagged! First bill loaded in form. Other ${results.length-1} saved automatically.`);
     }}/>
 
     <div style={G2}>
@@ -1116,8 +1290,16 @@ function EntryForm({initial,onSave,onClose,dropdowns,onAddToDropdown,saving}){
     </div>
     <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
       <button className="bgh" onClick={onClose}>Cancel</button>
-      <button className="bg" disabled={saving} onClick={()=>{if(!f.title.trim()){alert("Please add a title.");return;}if(!f.date){alert("Please set a date.");return;}onSave(f);}} style={{opacity:saving?.7:1}}>
-        {saving?"Saving…":"Save Entry"}
+      <button className="bg" disabled={saving||busy} onClick={async()=>{
+          if(!f.title.trim()){alert("Please add a title.");return;}
+          if(!f.date){alert("Please set a date.");return;}
+          if(f.tags&&f.tags.length>0){onSave(f);return;}
+          setBusy(true);
+          const autoTags=await suggestTags(f);
+          setBusy(false);
+          onSave(autoTags.length>0?{...f,tags:autoTags}:f);
+        }} style={{opacity:(saving||busy)?.7:1}}>
+        {busy?"🏷️ Auto-tagging…":saving?"Saving…":"Save Entry"}
       </button>
     </div>
   </div>;
@@ -1321,6 +1503,7 @@ function App(){
   const [showAgeing,setShowAgeing]=useState(false);
   const [showMatcher,setShowMatcher]=useState(false);
   const [showLogistics,setShowLogistics]=useState(false);
+  const [showLedger,setShowLedger]=useState(false);
   const [showDD,setShowDD]=useState(false);
   const [showShare,setShowShare]=useState(false);
   const [search,setSearch]=useState("");
@@ -1593,6 +1776,7 @@ function App(){
           <button onClick={()=>setShowAgeing(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #e89a9a",background:"#fff0f0",color:"#7a1a1a",cursor:"pointer",fontWeight:600}}>📊 Ageing</button>
           <button onClick={()=>setShowMatcher(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontWeight:600}}>💳 Match</button>
           <button onClick={()=>setShowLogistics(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c8e8",background:"#f0f6ff",color:"#1a3a6a",cursor:"pointer",fontWeight:600}}>🚚 Logistics</button>
+          <button onClick={()=>setShowLedger(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #d8c8a8",background:"#fff8f0",color:"#5a3a1a",cursor:"pointer",fontWeight:600}}>📑 Ledger</button>
           <button onClick={()=>setShowShare(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>🔗 Share</button>
           <button onClick={()=>setShowDD(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>⚙️</button>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
@@ -1740,10 +1924,11 @@ function App(){
       </div>
     </div>}
     <Modal open={showDupes} onClose={()=>setShowDupes(false)}><DupeFinder entries={entries} onDelete={delEntry} onClose={()=>setShowDupes(false)}/></Modal>
-    <Modal open={showAI} onClose={()=>setShowAI(false)} wide><AIPanel entries={entries} onClose={()=>setShowAI(false)} onShowAgeing={()=>setShowAgeing(true)} onShowMatcher={()=>setShowMatcher(true)} onShowLogistics={()=>setShowLogistics(true)}/></Modal>
+    <Modal open={showAI} onClose={()=>setShowAI(false)} wide><AIPanel entries={entries} onClose={()=>setShowAI(false)} onShowAgeing={()=>setShowAgeing(true)} onShowMatcher={()=>setShowMatcher(true)} onShowLogistics={()=>setShowLogistics(true)} onShowLedger={()=>setShowLedger(true)}/></Modal>
     <Modal open={showAgeing} onClose={()=>setShowAgeing(false)} wide><AgeingReport entries={entries} onClose={()=>setShowAgeing(false)} onMarkPaid={markPaid}/></Modal>
     <Modal open={showMatcher} onClose={()=>setShowMatcher(false)} wide><PaymentMatcher entries={entries} onClose={()=>setShowMatcher(false)} onMarkPaid={markPaid}/></Modal>
     <Modal open={showLogistics} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={saveEntry}/></Modal>
+    <Modal open={showLedger} onClose={()=>setShowLedger(false)} wide><LedgerUpload entries={entries} onClose={()=>setShowLedger(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showDD} onClose={()=>setShowDD(false)} wide><DropdownManager dropdowns={dropdowns} onSave={saveDropdowns} onClose={()=>setShowDD(false)}/></Modal>
     <Modal open={showShare} onClose={()=>setShowShare(false)} wide><SharePanel/></Modal>
   </div>;
