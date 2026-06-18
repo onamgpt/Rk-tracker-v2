@@ -575,8 +575,264 @@ function ScanBill({onResult,onMultiResult}){
   </div>;
 }
 
+// ── AGEING REPORT ────────────────────────────────────────────────────────────
+function AgeingReport({entries,onClose,onMarkPaid}){
+  const today=new Date();
+  const daysSince=(dateStr)=>{
+    if(!dateStr)return null;
+    const d=new Date(dateStr);
+    if(isNaN(d.getTime()))return null;
+    return Math.round((today.setHours(0,0,0,0)-new Date(d).setHours(0,0,0,0))/86400000);
+  };
+
+  const unpaid=entries.filter(e=>e.category==="Sales - Payment"&&e.paymentStatus!=="Paid"&&e.date);
+  const buckets=[
+    {label:"0–30 days",min:0,max:30,color:"#2a8a2a"},
+    {label:"31–45 days",min:31,max:45,color:"#7a8a2a"},
+    {label:"46–60 days",min:46,max:60,color:"#c89a2a"},
+    {label:"61–90 days",min:61,max:90,color:"#c86a2a"},
+    {label:"90+ days",min:91,max:999999,color:"#c82a2a"},
+  ];
+
+  const parseAmt=(a)=>{
+    if(!a)return 0;
+    const n=parseFloat(String(a).replace(/[₹,\s]/g,""));
+    return isNaN(n)?0:n;
+  };
+
+  const grouped=buckets.map(b=>{
+    const items=unpaid.filter(e=>{
+      const age=daysSince(e.date);
+      return age!==null&&age>=b.min&&age<=b.max;
+    }).map(e=>({...e,_age:daysSince(e.date)})).sort((a,b)=>b._age-a._age);
+    const total=items.reduce((s,e)=>s+parseAmt(e.amount),0);
+    return {...b,items,total};
+  });
+
+  const grandTotal=grouped.reduce((s,b)=>s+b.total,0);
+
+  // Group by customer for the summary at top
+  const byCustomer={};
+  unpaid.forEach(e=>{
+    const name=e.person||e.vendor||"Unknown";
+    if(!byCustomer[name])byCustomer[name]={total:0,count:0,oldest:0};
+    byCustomer[name].total+=parseAmt(e.amount);
+    byCustomer[name].count+=1;
+    const age=daysSince(e.date)||0;
+    if(age>byCustomer[name].oldest)byCustomer[name].oldest=age;
+  });
+  const customerRows=Object.entries(byCustomer).sort((a,b)=>b[1].total-a[1].total);
+
+  return<div>
+    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+      <span style={{fontSize:26}}>📊</span>
+      <div><h2 style={{margin:0,fontSize:18,color:"#7a1a1a"}}>Ageing Report</h2>
+        <div style={{fontSize:11,color:"#aa5a5a"}}>Unpaid customer invoices · Sales - Payment</div></div>
+    </div>
+
+    <div style={{background:"linear-gradient(135deg,#fff0f0,#ffe8e8)",border:"1.5px solid #e8a8a8",borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{fontSize:12,color:"#7a1a1a",fontWeight:600}}>TOTAL OUTSTANDING</div>
+      <div style={{fontSize:22,color:"#7a1a1a",fontWeight:800}}>₹{grandTotal.toLocaleString("en-IN")}</div>
+    </div>
+
+    {/* Bucket breakdown */}
+    <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:18}}>
+      {grouped.map(b=>b.items.length>0&&<div key={b.label} style={{border:`1.5px solid ${b.color}33`,borderRadius:9,overflow:"hidden"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 13px",background:`${b.color}15`}}>
+          <span style={{fontSize:12,fontWeight:700,color:b.color}}>{b.label} ({b.items.length})</span>
+          <span style={{fontSize:13,fontWeight:700,color:b.color}}>₹{b.total.toLocaleString("en-IN")}</span>
+        </div>
+        <div style={{padding:"6px 0"}}>
+          {b.items.map(e=><div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 13px",borderTop:"1px solid #f0f0f0"}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:600,color:"#333",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.title||"Invoice"}</div>
+              <div style={{fontSize:10,color:"#999"}}>{e.person||e.vendor||"—"} · {e._age}d ago · {e.date}</div>
+            </div>
+            <div style={{textAlign:"right",marginLeft:8}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#444"}}>{e.amount?(String(e.amount).includes("₹")?e.amount:"₹"+e.amount):"—"}</div>
+              {onMarkPaid&&<button onClick={()=>onMarkPaid(e)} style={{fontSize:9,padding:"2px 8px",marginTop:2,borderRadius:10,border:"1px solid #2a8a2a",background:"#eaffea",color:"#1a6a1a",cursor:"pointer"}}>Mark Paid</button>}
+            </div>
+          </div>)}
+        </div>
+      </div>)}
+      {unpaid.length===0&&<div style={{textAlign:"center",padding:"30px",color:"#999",fontSize:13}}>🎉 No unpaid invoices — all caught up!</div>}
+    </div>
+
+    {/* By customer summary */}
+    {customerRows.length>0&&<div>
+      <div style={{fontSize:11,fontWeight:700,color:"#7a1a1a",marginBottom:8,letterSpacing:0.5}}>BY CUSTOMER</div>
+      <div style={{display:"flex",flexDirection:"column",gap:5}}>
+        {customerRows.map(([name,d])=><div key={name} style={{display:"flex",justifyContent:"space-between",padding:"7px 12px",background:d.oldest>60?"#fff0f0":"#f8f8f8",borderRadius:7,fontSize:12}}>
+          <span style={{fontWeight:600,color:"#333"}}>{name} {d.oldest>60&&<span style={{color:"#c82a2a"}}>⚠️</span>}</span>
+          <span style={{color:"#666"}}>{d.count} invoice{d.count>1?"s":""} · oldest {d.oldest}d</span>
+          <span style={{fontWeight:700,color:"#7a1a1a"}}>₹{d.total.toLocaleString("en-IN")}</span>
+        </div>)}
+      </div>
+    </div>}
+
+    <div style={{display:"flex",justifyContent:"flex-end",marginTop:16}}><button className="bgh" onClick={onClose}>Close</button></div>
+  </div>;
+}
+
+// ── PAYMENT MATCHER ───────────────────────────────────────────────────────────
+function PaymentMatcher({entries,onClose,onMarkPaid}){
+  const [smsText,setSmsText]=useState("");
+  const [scanning,setScanning]=useState(false);
+  const [matches,setMatches]=useState([]); // [{payment, candidates:[...], autoMatched}]
+  const [statusMsg,setStatusMsg]=useState("");
+
+  const parseAmt=(a)=>{
+    if(!a)return 0;
+    const n=parseFloat(String(a).replace(/[₹,\s]/g,""));
+    return isNaN(n)?0:n;
+  };
+
+  const unpaid=entries.filter(e=>e.category==="Sales - Payment"&&e.paymentStatus!=="Paid");
+
+  const findCandidates=(payment)=>{
+    // payment: {amount:number, name:string}
+    const amtTol=Math.max(1,payment.amount*0.01); // 1% tolerance for rounding
+    return unpaid.filter(e=>{
+      const eAmt=parseAmt(e.amount);
+      const amtClose=Math.abs(eAmt-payment.amount)<=amtTol;
+      if(!amtClose)return false;
+      if(!payment.name)return true;
+      const eName=(e.person||e.vendor||"").toLowerCase();
+      const pName=payment.name.toLowerCase();
+      return eName.includes(pName)||pName.includes(eName)||eName.split(" ").some(w=>w.length>2&&pName.includes(w));
+    }).map(e=>{
+      const eAmt=parseAmt(e.amount);
+      const exact=Math.abs(eAmt-payment.amount)<0.01;
+      const eName=(e.person||e.vendor||"").toLowerCase();
+      const pName=(payment.name||"").toLowerCase();
+      const nameExact=pName&&eName&&(eName===pName||eName.includes(pName)||pName.includes(eName));
+      return {entry:e,exact:exact&&nameExact};
+    });
+  };
+
+  const processSMS=async()=>{
+    if(!smsText.trim()){setStatusMsg("Paste a bank SMS or payment text first");return;}
+    setScanning(true);setStatusMsg("Reading payment details…");
+    try{
+      const txt=await claudeAPI(
+        "Extract payment confirmation details from this bank SMS/text. Return ONLY valid JSON array (even for one payment): "+
+        "[{\"amount\": number, \"name\": \"payer name if mentioned, else empty string\", \"date\": \"YYYY-MM-DD if mentioned else empty\", \"reference\": \"UTR/ref number if any\"}]. "+
+        "If multiple payments are mentioned, return multiple objects. Text: \"\"\""+smsText+"\"\"\"",
+        "You are a financial text parser for Onam Agarbathi. Return ONLY valid JSON, no markdown, no explanation."
+      );
+      let parsed=[];
+      try{parsed=JSON.parse(txt.replace(/```json|```/g,"").trim());}catch(ex){
+        setStatusMsg("Could not parse: "+txt.slice(0,150));setScanning(false);return;
+      }
+      if(!Array.isArray(parsed))parsed=[parsed];
+      const built=parsed.map(p=>{
+        const candidates=findCandidates(p);
+        const autoMatched=candidates.length===1&&candidates[0].exact;
+        return {payment:p,candidates,autoMatched};
+      });
+      setMatches(built);
+      const autoCount=built.filter(b=>b.autoMatched).length;
+      setStatusMsg(autoCount>0?`✅ ${autoCount} payment(s) auto-matched exactly. Review below.`:"Review matches below — none were exact enough to auto-confirm.");
+    }catch(e){
+      setStatusMsg("Error: "+e.message);
+    }
+    setScanning(false);
+  };
+
+  const processPDF=async(file)=>{
+    setScanning(true);setStatusMsg("Reading payment PDF…");
+    try{
+      const att=await fileToB64(file);
+      const txt=await claudeAPI(
+        "Extract every payment confirmation from this PDF/image. Return ONLY valid JSON array: "+
+        "[{\"amount\": number, \"name\": \"payer name if mentioned, else empty string\", \"date\": \"YYYY-MM-DD if mentioned else empty\", \"reference\": \"ref/UTR if any\"}]",
+        "You are a financial document parser for Onam Agarbathi. Return ONLY valid JSON, no markdown, no explanation.",
+        att.base64,att.type
+      );
+      let parsed=[];
+      try{parsed=JSON.parse(txt.replace(/```json|```/g,"").trim());}catch(ex){
+        setStatusMsg("Could not parse PDF: "+txt.slice(0,150));setScanning(false);return;
+      }
+      if(!Array.isArray(parsed))parsed=[parsed];
+      const built=parsed.map(p=>{
+        const candidates=findCandidates(p);
+        const autoMatched=candidates.length===1&&candidates[0].exact;
+        return {payment:p,candidates,autoMatched};
+      });
+      setMatches(built);
+      const autoCount=built.filter(b=>b.autoMatched).length;
+      setStatusMsg(autoCount>0?`✅ ${autoCount} payment(s) auto-matched exactly. Review below.`:"Review matches below.");
+    }catch(e){
+      setStatusMsg("Error: "+e.message);
+    }
+    setScanning(false);
+  };
+
+  const openPDFUpload=()=>{
+    const i=document.createElement("input");
+    i.type="file";i.accept="image/*,application/pdf,.pdf";
+    i.onchange=e=>{if(e.target.files[0])processPDF(e.target.files[0]);};
+    i.click();
+  };
+
+  const confirmMatch=(matchIdx,entry)=>{
+    onMarkPaid(entry);
+    setMatches(prev=>prev.map((m,i)=>i===matchIdx?{...m,confirmed:true,confirmedEntry:entry.id}:m));
+  };
+
+  // Auto-mark on load if exact match found
+  React.useEffect(()=>{
+    matches.forEach((m,i)=>{
+      if(m.autoMatched&&!m.confirmed){
+        onMarkPaid(m.candidates[0].entry);
+        setMatches(prev=>prev.map((mm,ii)=>ii===i?{...mm,confirmed:true,confirmedEntry:m.candidates[0].entry.id}:mm));
+      }
+    });
+  },[matches.length]);
+
+  return<div>
+    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+      <span style={{fontSize:26}}>💳</span>
+      <div><h2 style={{margin:0,fontSize:18,color:"#1a5a3a"}}>Payment Matcher</h2>
+        <div style={{fontSize:11,color:"#5aaa7a"}}>Match bank SMS or payment PDFs to unpaid invoices</div></div>
+    </div>
+
+    <div style={{background:"#f0fff4",border:"1.5px solid #a8d8b8",borderRadius:10,padding:13,marginBottom:14}}>
+      <div style={{fontWeight:700,fontSize:12,color:"#1a5a3a",marginBottom:8}}>📱 Paste Bank SMS / Payment Text</div>
+      <textarea className="inp" value={smsText} rows={3} placeholder="e.g. Rs.5500 credited to your a/c from PRAKASH ENTERPRISES on 12-Jun..." onChange={e=>setSmsText(e.target.value)} style={{resize:"none",marginBottom:8}}/>
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={processSMS} disabled={scanning} className="scan-btn" style={{fontSize:12,padding:"8px 14px"}}>{scanning?"⏳":"🔍"} Match SMS</button>
+        <button onClick={openPDFUpload} disabled={scanning} className="scan-btn" style={{background:"linear-gradient(135deg,#1a5a7a,#0a3a5a)",fontSize:12,padding:"8px 14px"}}>{scanning?"⏳":"📄"} Upload PDF/Image</button>
+      </div>
+    </div>
+
+    {statusMsg&&<div style={{fontSize:12,color:"#1a5a3a",fontWeight:600,marginBottom:12,padding:"8px 12px",background:"#f0fff4",borderRadius:7}}>{statusMsg}</div>}
+
+    {matches.length>0&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {matches.map((m,i)=><div key={i} style={{border:"1.5px solid "+(m.confirmed?"#a8d8b8":"#e8d8a8"),borderRadius:9,padding:12,background:m.confirmed?"#f0fff4":"#fffdf0"}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+          <span style={{fontSize:13,fontWeight:700,color:"#333"}}>₹{m.payment.amount?.toLocaleString("en-IN")} {m.payment.name&&"· "+m.payment.name}</span>
+          {m.confirmed&&<span style={{fontSize:11,color:"#1a8a3a",fontWeight:700}}>✅ Marked Paid</span>}
+        </div>
+        {!m.confirmed&&m.candidates.length===0&&<div style={{fontSize:12,color:"#999"}}>No matching unpaid invoice found. Check manually.</div>}
+        {!m.confirmed&&m.candidates.length>0&&<div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {m.candidates.map((c,ci)=><div key={ci} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"#fff",borderRadius:6,border:"1px solid #eee"}}>
+            <div style={{fontSize:12}}>
+              <div style={{fontWeight:600,color:"#333"}}>{c.entry.title} {c.exact&&<span style={{color:"#1a8a3a"}}>(exact match)</span>}</div>
+              <div style={{color:"#999",fontSize:10}}>{c.entry.person||c.entry.vendor} · {c.entry.amount} · {c.entry.date}</div>
+            </div>
+            <button onClick={()=>confirmMatch(i,c.entry)} style={{fontSize:11,padding:"5px 12px",borderRadius:14,border:"1px solid #2a8a2a",background:"#eaffea",color:"#1a6a1a",cursor:"pointer",fontWeight:600}}>Confirm Paid</button>
+          </div>)}
+        </div>}
+      </div>)}
+    </div>}
+
+    <div style={{display:"flex",justifyContent:"flex-end",marginTop:16}}><button className="bgh" onClick={onClose}>Close</button></div>
+  </div>;
+}
+
 // ── AI PANEL ──────────────────────────────────────────────────────────────────
-function AIPanel({entries,onClose}){
+function AIPanel({entries,onClose,onShowAgeing,onShowMatcher}){
   const [q,setQ]=useState("");
   const [loading,setLoading]=useState(false);
   const [result,setResult]=useState("");
@@ -597,6 +853,10 @@ function AIPanel({entries,onClose}){
     </div>
     <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:12}}>
       {QUICK.map(q=><button key={q} onClick={()=>ask(q)} style={{padding:"5px 11px",borderRadius:20,border:"1.5px solid #c8a8e8",background:"#f5eeff",color:"#5a1a8a",cursor:"pointer",fontSize:11,fontWeight:600}}>{q}</button>)}
+    </div>
+    <div style={{display:"flex",gap:6,marginBottom:14}}>
+      {onShowAgeing&&<button onClick={()=>{onClose();onShowAgeing();}} style={{padding:"6px 13px",borderRadius:20,border:"1.5px solid #e89a9a",background:"#fff0f0",color:"#7a1a1a",cursor:"pointer",fontSize:11,fontWeight:700}}>📊 Open Ageing Report</button>}
+      {onShowMatcher&&<button onClick={()=>{onClose();onShowMatcher();}} style={{padding:"6px 13px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontSize:11,fontWeight:700}}>💳 Match a Payment</button>}
     </div>
     <div style={{display:"flex",gap:8,marginBottom:12}}>
       <textarea className="inp" value={q} rows={2} placeholder="Ask anything about your data…" onChange={e=>setQ(e.target.value)} style={{resize:"none"}}/>
@@ -935,6 +1195,8 @@ function App(){
   const [viewE,setViewE]=useState(null);
   const [showDupes,setShowDupes]=useState(false);
   const [showAI,setShowAI]=useState(false);
+  const [showAgeing,setShowAgeing]=useState(false);
+  const [showMatcher,setShowMatcher]=useState(false);
   const [showDD,setShowDD]=useState(false);
   const [showShare,setShowShare]=useState(false);
   const [search,setSearch]=useState("");
@@ -1020,6 +1282,11 @@ function App(){
     setEntries(p=>{const u=p.filter(e=>e.id!==id);saveCache(u);return u;});
     setViewE(null);
     await sheetsAPI("delete",{id});
+  };
+
+  const markPaid=async(entry)=>{
+    const updated={...entry,paymentStatus:"Paid"};
+    await saveEntry(updated);
   };
 
   const toggleSel=(id)=>{setSelIds(p=>p.indexOf(id)>-1?p.filter(x=>x!==id):p.concat([id]));};
@@ -1199,6 +1466,8 @@ function App(){
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           <button onClick={()=>setShowAI(true)} className="ai-btn" style={{fontSize:11,padding:"6px 11px"}}>🧠 AI</button>
+          <button onClick={()=>setShowAgeing(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #e89a9a",background:"#fff0f0",color:"#7a1a1a",cursor:"pointer",fontWeight:600}}>📊 Ageing</button>
+          <button onClick={()=>setShowMatcher(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontWeight:600}}>💳 Match</button>
           <button onClick={()=>setShowShare(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>🔗 Share</button>
           <button onClick={()=>setShowDD(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>⚙️</button>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
@@ -1346,7 +1615,9 @@ function App(){
       </div>
     </div>}
     <Modal open={showDupes} onClose={()=>setShowDupes(false)}><DupeFinder entries={entries} onDelete={delEntry} onClose={()=>setShowDupes(false)}/></Modal>
-    <Modal open={showAI} onClose={()=>setShowAI(false)} wide><AIPanel entries={entries} onClose={()=>setShowAI(false)}/></Modal>
+    <Modal open={showAI} onClose={()=>setShowAI(false)} wide><AIPanel entries={entries} onClose={()=>setShowAI(false)} onShowAgeing={()=>setShowAgeing(true)} onShowMatcher={()=>setShowMatcher(true)}/></Modal>
+    <Modal open={showAgeing} onClose={()=>setShowAgeing(false)} wide><AgeingReport entries={entries} onClose={()=>setShowAgeing(false)} onMarkPaid={markPaid}/></Modal>
+    <Modal open={showMatcher} onClose={()=>setShowMatcher(false)} wide><PaymentMatcher entries={entries} onClose={()=>setShowMatcher(false)} onMarkPaid={markPaid}/></Modal>
     <Modal open={showDD} onClose={()=>setShowDD(false)} wide><DropdownManager dropdowns={dropdowns} onSave={saveDropdowns} onClose={()=>setShowDD(false)}/></Modal>
     <Modal open={showShare} onClose={()=>setShowShare(false)} wide><SharePanel/></Modal>
   </div>;
