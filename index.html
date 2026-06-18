@@ -831,8 +831,130 @@ function PaymentMatcher({entries,onClose,onMarkPaid}){
   </div>;
 }
 
+// ── LOGISTICS TRACKER ─────────────────────────────────────────────────────────
+const LOGISTICS_STAGES=["Despatched","In Transit","Delivered","Payment Received"];
+const LOGISTICS_DOCS={
+  "Despatched":{label:"LR Copy",icon:"📄"},
+  "In Transit":{label:"Paid LR Copy",icon:"💵"},
+  "Delivered":{label:"Delivery Proof / POD",icon:"✅"},
+  "Payment Received":{label:"Payment Proof",icon:"💳"}
+};
+
+function getLogisticsStageIdx(entry){
+  // Highest stage reached, based on tags like "Stage: Despatched"
+  let idx=-1;
+  LOGISTICS_STAGES.forEach((s,i)=>{
+    if(entry.tags&&entry.tags.includes("Stage: "+s))idx=Math.max(idx,i);
+  });
+  return idx; // -1 means not yet despatched
+}
+
+function LogisticsTracker({entries,onClose,onUpdateEntry}){
+  const [selectedId,setSelectedId]=useState(null);
+  const [uploading,setUploading]=useState(false);
+
+  const shipments=entries.filter(e=>e.category==="Sales - Payment");
+  const selected=shipments.find(e=>e.id===selectedId);
+
+  const setStage=async(entry,stageIdx)=>{
+    // Add tags for this stage and all prior stages (so progress is cumulative/visual)
+    let newTags=(entry.tags||[]).filter(t=>!t.startsWith("Stage: "));
+    for(let i=0;i<=stageIdx;i++)newTags.push("Stage: "+LOGISTICS_STAGES[i]);
+    const updated={...entry,tags:newTags};
+    if(stageIdx>=3&&entry.paymentStatus!=="Paid")updated.paymentStatus="Paid"; // Payment Received also closes payment status
+    await onUpdateEntry(updated);
+  };
+
+  const uploadDoc=(entry,stageName)=>{
+    const i=document.createElement("input");
+    i.type="file";i.accept="image/*,application/pdf,.pdf";
+    i.onchange=async(e)=>{
+      if(!e.target.files[0])return;
+      setUploading(true);
+      try{
+        const att=await fileToB64(e.target.files[0]);
+        att.docType=LOGISTICS_DOCS[stageName].label;
+        const updated={...entry,attachments:[...(entry.attachments||[]),att]};
+        await onUpdateEntry(updated);
+      }catch(err){alert("Upload failed: "+err.message);}
+      setUploading(false);
+    };
+    i.click();
+  };
+
+  const docsForStage=(entry,stageName)=>{
+    return (entry.attachments||[]).filter(a=>a.docType===LOGISTICS_DOCS[stageName].label);
+  };
+
+  if(selected){
+    const curStage=getLogisticsStageIdx(selected);
+    return<div>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+        <button onClick={()=>setSelectedId(null)} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:"#666"}}>←</button>
+        <div>
+          <h2 style={{margin:0,fontSize:16,color:"#1a3a6a"}}>{selected.title||"Shipment"}</h2>
+          <div style={{fontSize:11,color:"#888"}}>{selected.person||selected.vendor||"—"} · {selected.amount?(String(selected.amount).includes("₹")?selected.amount:"₹"+selected.amount):"—"}</div>
+        </div>
+      </div>
+
+      <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:18}}>
+        {LOGISTICS_STAGES.map((stage,i)=>{
+          const reached=i<=curStage;
+          const isCurrent=i===curStage;
+          const docs=docsForStage(selected,stage);
+          return<div key={stage} style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
+              <div style={{width:28,height:28,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",background:reached?"#2a8a4a":"#e8e8e8",color:reached?"#fff":"#999",fontSize:13,fontWeight:700}}>{reached?"✓":i+1}</div>
+              {i<LOGISTICS_STAGES.length-1&&<div style={{width:2,flex:1,minHeight:24,background:reached&&i<curStage?"#2a8a4a":"#e8e8e8",marginTop:2}}/>}
+            </div>
+            <div style={{flex:1,paddingBottom:18}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <span style={{fontSize:13,fontWeight:reached?700:500,color:reached?"#1a3a6a":"#999"}}>{stage}</span>
+                {!reached&&<button onClick={()=>setStage(selected,i)} style={{fontSize:10,padding:"4px 10px",borderRadius:14,border:"1px solid #2a8a4a",background:"#eaffea",color:"#1a6a2a",cursor:"pointer",fontWeight:600}}>Mark reached</button>}
+                {reached&&i===curStage&&i>0&&<button onClick={()=>setStage(selected,i-1)} style={{fontSize:9,padding:"3px 8px",borderRadius:14,border:"1px solid #ccc",background:"#f5f5f5",color:"#888",cursor:"pointer"}}>Undo</button>}
+              </div>
+              <div style={{marginTop:6,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                {docs.map((d,di)=><Thumb key={di} att={d}/>)}
+                <button onClick={()=>uploadDoc(selected,stage)} disabled={uploading} style={{fontSize:10,padding:"5px 10px",borderRadius:7,border:"1.5px dashed #aaa",background:"#fafafa",color:"#666",cursor:"pointer"}}>{LOGISTICS_DOCS[stage].icon} Upload {LOGISTICS_DOCS[stage].label}</button>
+              </div>
+            </div>
+          </div>;
+        })}
+      </div>
+      <div style={{display:"flex",justifyContent:"flex-end"}}><button className="bgh" onClick={()=>setSelectedId(null)}>Back to list</button></div>
+    </div>;
+  }
+
+  return<div>
+    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+      <span style={{fontSize:26}}>🚚</span>
+      <div><h2 style={{margin:0,fontSize:18,color:"#1a3a6a"}}>Logistics Tracker</h2>
+        <div style={{fontSize:11,color:"#6a8aaa"}}>Despatch → Transit → Delivered → Payment</div></div>
+    </div>
+    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+      {shipments.length===0&&<div style={{textAlign:"center",padding:30,color:"#999",fontSize:13}}>No Sales - Payment invoices yet.</div>}
+      {shipments.map(e=>{
+        const stageIdx=getLogisticsStageIdx(e);
+        const stageName=stageIdx>=0?LOGISTICS_STAGES[stageIdx]:"Not despatched";
+        const stageColor=stageIdx>=3?"#2a8a4a":stageIdx>=2?"#2a6a8a":stageIdx>=0?"#8a6a2a":"#999";
+        return<div key={e.id} onClick={()=>setSelectedId(e.id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px",background:"#f8f8f8",borderRadius:8,cursor:"pointer",border:"1px solid #eee"}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,fontWeight:600,color:"#333",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.title||"Invoice"}</div>
+            <div style={{fontSize:10,color:"#999"}}>{e.person||e.vendor||"—"} · {e.date}</div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:10,fontWeight:700,color:stageColor,padding:"3px 9px",borderRadius:12,background:stageColor+"15"}}>{stageName}</span>
+            <span style={{color:"#bbb"}}>›</span>
+          </div>
+        </div>;
+      })}
+    </div>
+    <div style={{display:"flex",justifyContent:"flex-end",marginTop:16}}><button className="bgh" onClick={onClose}>Close</button></div>
+  </div>;
+}
+
 // ── AI PANEL ──────────────────────────────────────────────────────────────────
-function AIPanel({entries,onClose,onShowAgeing,onShowMatcher}){
+function AIPanel({entries,onClose,onShowAgeing,onShowMatcher,onShowLogistics}){
   const [q,setQ]=useState("");
   const [loading,setLoading]=useState(false);
   const [result,setResult]=useState("");
@@ -857,6 +979,7 @@ function AIPanel({entries,onClose,onShowAgeing,onShowMatcher}){
     <div style={{display:"flex",gap:6,marginBottom:14}}>
       {onShowAgeing&&<button onClick={()=>{onClose();onShowAgeing();}} style={{padding:"6px 13px",borderRadius:20,border:"1.5px solid #e89a9a",background:"#fff0f0",color:"#7a1a1a",cursor:"pointer",fontSize:11,fontWeight:700}}>📊 Open Ageing Report</button>}
       {onShowMatcher&&<button onClick={()=>{onClose();onShowMatcher();}} style={{padding:"6px 13px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontSize:11,fontWeight:700}}>💳 Match a Payment</button>}
+      {onShowLogistics&&<button onClick={()=>{onClose();onShowLogistics();}} style={{padding:"6px 13px",borderRadius:20,border:"1.5px solid #a8c8e8",background:"#f0f6ff",color:"#1a3a6a",cursor:"pointer",fontSize:11,fontWeight:700}}>🚚 Track Logistics</button>}
     </div>
     <div style={{display:"flex",gap:8,marginBottom:12}}>
       <textarea className="inp" value={q} rows={2} placeholder="Ask anything about your data…" onChange={e=>setQ(e.target.value)} style={{resize:"none"}}/>
@@ -1197,6 +1320,7 @@ function App(){
   const [showAI,setShowAI]=useState(false);
   const [showAgeing,setShowAgeing]=useState(false);
   const [showMatcher,setShowMatcher]=useState(false);
+  const [showLogistics,setShowLogistics]=useState(false);
   const [showDD,setShowDD]=useState(false);
   const [showShare,setShowShare]=useState(false);
   const [search,setSearch]=useState("");
@@ -1468,6 +1592,7 @@ function App(){
           <button onClick={()=>setShowAI(true)} className="ai-btn" style={{fontSize:11,padding:"6px 11px"}}>🧠 AI</button>
           <button onClick={()=>setShowAgeing(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #e89a9a",background:"#fff0f0",color:"#7a1a1a",cursor:"pointer",fontWeight:600}}>📊 Ageing</button>
           <button onClick={()=>setShowMatcher(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontWeight:600}}>💳 Match</button>
+          <button onClick={()=>setShowLogistics(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c8e8",background:"#f0f6ff",color:"#1a3a6a",cursor:"pointer",fontWeight:600}}>🚚 Logistics</button>
           <button onClick={()=>setShowShare(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>🔗 Share</button>
           <button onClick={()=>setShowDD(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>⚙️</button>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
@@ -1615,9 +1740,10 @@ function App(){
       </div>
     </div>}
     <Modal open={showDupes} onClose={()=>setShowDupes(false)}><DupeFinder entries={entries} onDelete={delEntry} onClose={()=>setShowDupes(false)}/></Modal>
-    <Modal open={showAI} onClose={()=>setShowAI(false)} wide><AIPanel entries={entries} onClose={()=>setShowAI(false)} onShowAgeing={()=>setShowAgeing(true)} onShowMatcher={()=>setShowMatcher(true)}/></Modal>
+    <Modal open={showAI} onClose={()=>setShowAI(false)} wide><AIPanel entries={entries} onClose={()=>setShowAI(false)} onShowAgeing={()=>setShowAgeing(true)} onShowMatcher={()=>setShowMatcher(true)} onShowLogistics={()=>setShowLogistics(true)}/></Modal>
     <Modal open={showAgeing} onClose={()=>setShowAgeing(false)} wide><AgeingReport entries={entries} onClose={()=>setShowAgeing(false)} onMarkPaid={markPaid}/></Modal>
     <Modal open={showMatcher} onClose={()=>setShowMatcher(false)} wide><PaymentMatcher entries={entries} onClose={()=>setShowMatcher(false)} onMarkPaid={markPaid}/></Modal>
+    <Modal open={showLogistics} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={saveEntry}/></Modal>
     <Modal open={showDD} onClose={()=>setShowDD(false)} wide><DropdownManager dropdowns={dropdowns} onSave={saveDropdowns} onClose={()=>setShowDD(false)}/></Modal>
     <Modal open={showShare} onClose={()=>setShowShare(false)} wide><SharePanel/></Modal>
   </div>;
