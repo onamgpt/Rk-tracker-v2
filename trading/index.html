@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>RK Trading — AIM Portfolio Manager</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{--bg:#0d1421;--card:#16202f;--card2:#1c2940;--gold:#e8c468;--green:#4ade80;--red:#f87171;--blue:#60a5fa;--txt:#e2e8f0;--dim:#8b9bb3;--border:#2a3950}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--txt);font-size:15px;padding-bottom:40px}
+.header{background:linear-gradient(135deg,#16202f,#0d1421);padding:18px 16px 14px;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50}
+.header h1{font-size:20px;color:var(--gold)}
+.header .sub{font-size:12px;color:var(--dim);margin-top:2px}
+.tabs{display:flex;gap:6px;padding:10px 12px;overflow-x:auto;background:var(--bg);position:sticky;top:62px;z-index:49;border-bottom:1px solid var(--border)}
+.tab{padding:8px 14px;border-radius:20px;background:var(--card);color:var(--dim);font-size:13px;font-weight:600;white-space:nowrap;border:1px solid var(--border);cursor:pointer}
+.tab.active{background:var(--gold);color:#0d1421;border-color:var(--gold)}
+.page{display:none;padding:14px 12px}
+.page.active{display:block}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h3{font-size:14px;color:var(--gold);margin-bottom:10px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:6px 0}
+.lbl{color:var(--dim);font-size:13px}
+.val{font-weight:600;font-size:14px}
+.big{font-size:24px;font-weight:700}
+.green{color:var(--green)}.red{color:var(--red)}.gold{color:var(--gold)}.blue{color:var(--blue)}
+button{background:var(--gold);color:#0d1421;border:none;border-radius:10px;padding:11px 18px;font-size:14px;font-weight:700;cursor:pointer;width:100%;margin-top:8px}
+button.sec{background:var(--card2);color:var(--txt);border:1px solid var(--border)}
+button.small{width:auto;padding:7px 14px;font-size:12px;margin:0}
+button:disabled{opacity:.5}
+input,select{width:100%;background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:11px;color:var(--txt);font-size:15px;margin-top:6px}
+.field{margin-bottom:10px}
+.field label{font-size:12px;color:var(--dim);font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--dim);font-size:11px;text-transform:uppercase;padding:6px 4px;border-bottom:1px solid var(--border)}
+td{padding:8px 4px;border-bottom:1px solid #1e2c42}
+.sig{display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700}
+.sig.buy{background:rgba(74,222,128,.15);color:var(--green)}
+.sig.sell{background:rgba(248,113,113,.15);color:var(--red)}
+.sig.hold{background:rgba(139,155,179,.15);color:var(--dim)}
+.status{padding:8px 12px;border-radius:10px;background:var(--card2);font-size:12px;color:var(--dim);margin-bottom:10px;border:1px solid var(--border)}
+.holding-item{background:var(--card2);border-radius:10px;padding:10px;margin-bottom:8px}
+.del{color:var(--red);font-size:12px;cursor:pointer;float:right}
+.bar{height:8px;background:var(--card2);border-radius:4px;overflow:hidden;margin-top:4px}
+.bar>div{height:100%;border-radius:4px}
+.muted{font-size:11px;color:var(--dim);margin-top:6px;line-height:1.5}
+h4{font-size:13px;margin:12px 0 6px;color:var(--blue)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📈 RK Trading</h1>
+  <div class="sub">AIM Portfolio Manager · FS0303 · Lichello System</div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-page="portfolio" onclick="showPage('portfolio')">💼 Portfolio</div>
+  <div class="tab" data-page="signals" onclick="showPage('signals')">🎯 AIM Signals</div>
+  <div class="tab" data-page="backtest" onclick="showPage('backtest')">⏮ Backtest</div>
+  <div class="tab" data-page="screener" onclick="showPage('screener')">🔍 Screener</div>
+  <div class="tab" data-page="settings" onclick="showPage('settings')">⚙️ Settings</div>
+</div>
+
+<!-- PORTFOLIO -->
+<div class="page active" id="page-portfolio">
+  <div class="status" id="pf-status">Add your holdings below — prices update live from NSE</div>
+  <div class="card">
+    <div class="row"><span class="lbl">Total Value</span><span class="big gold" id="pf-total">₹0</span></div>
+    <div class="row"><span class="lbl">Invested</span><span class="val" id="pf-invested">₹0</span></div>
+    <div class="row"><span class="lbl">P&L</span><span class="val" id="pf-pnl">₹0</span></div>
+    <div class="row"><span class="lbl">Cash Reserve (AIM pool)</span><span class="val blue" id="pf-cash">₹0</span></div>
+  </div>
+  <div class="card">
+    <h3>Holdings</h3>
+    <div id="holdings-list"></div>
+    <button class="sec" onclick="document.getElementById('add-form').style.display='block'">+ Add Holding</button>
+    <button class="sec" onclick="document.getElementById('trade-form').style.display='block'" style="margin-top:6px">✏️ Record Manual Trade</button>
+    <div id="trade-form" style="display:none;margin-top:10px;background:#1c2940;padding:12px;border-radius:10px">
+      <div style="font-size:13px;color:#e8c468;font-weight:700;margin-bottom:8px">Record a trade you already executed in Zerodha</div>
+      <div class="field"><label>NSE Symbol</label><input id="t-sym" placeholder="ARVINDFASN" autocapitalize="characters"></div>
+      <div class="grid2">
+        <div class="field"><label>Action</label><select id="t-action"><option value="SELL">SELL</option><option value="BUY">BUY</option></select></div>
+        <div class="field"><label>Shares</label><input id="t-shares" type="number" placeholder="13"></div>
+      </div>
+      <div class="field"><label>Price executed at ₹</label><input id="t-price" type="number" placeholder="350"></div>
+      <button onclick="recordManualTrade()">✅ Update Portfolio</button>
+      <button class="sec" onclick="document.getElementById('trade-form').style.display='none'" style="margin-top:6px">Cancel</button>
+    </div>
+    <div id="add-form" style="display:none;margin-top:10px">
+      <div class="field"><label>NSE Symbol (e.g. SHK, VEDL, RELIANCE)</label><input id="h-sym" placeholder="SHK" autocapitalize="characters"></div>
+      <div class="grid2">
+        <div class="field"><label>Quantity</label><input id="h-qty" type="number" placeholder="100"></div>
+        <div class="field"><label>Avg Buy Price ₹</label><input id="h-avg" type="number" placeholder="150"></div>
+      </div>
+      <button onclick="addHolding()">Save Holding</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Cash Reserve</h3>
+    <div class="field"><label>Single AIM cash pool ₹ (shared across all stocks)</label><input id="cash-input" type="number" placeholder="100000"></div>
+    <button class="sec" onclick="saveCash()">Update Cash</button>
+  </div>
+  <button onclick="syncTradesFromZerodha()">⚡ Sync Today\u2019s Trades from Zerodha</button>
+  <button class="sec" onclick="refreshPrices()">🔄 Refresh Live Prices</button>
+  <button class="sec" onclick="sendReport()">📤 Send Report to Telegram</button>
+</div>
+
+<!-- AIM SIGNALS -->
+<div class="page" id="page-signals">
+  <div class="status">AIM rules: single cash pool · sell only if profitable · 5% midpoint trigger to avoid overtrading</div>
+  <div id="signals-list"></div>
+  <button onclick="runAIM()">🎯 Calculate AIM Signals</button>
+  <button class="sec" onclick="downloadAIMReport()">⬇ Download Report (Sells first, Buys next)</button>
+</div>
+
+<!-- BACKTEST -->
+<div class="page" id="page-backtest">
+  <div class="card">
+    <h3>Backtest AIM vs Buy & Hold</h3>
+    <div class="field"><label>NSE Symbol</label><input id="bt-sym" placeholder="SHK" autocapitalize="characters"></div>
+    <div class="grid2">
+      <div class="field"><label>Initial Investment ₹</label><input id="bt-amount" type="number" value="500000"></div>
+      <div class="field"><label>Period</label><select id="bt-range"><option value="1y">1 Year</option><option value="2y" selected>2 Years</option><option value="5y">5 Years</option></select></div>
+    </div>
+    <button onclick="runBacktest()">⏮ Run Backtest</button>
+  </div>
+  <div id="bt-results"></div>
+</div>
+
+<!-- SCREENER -->
+<div class="page" id="page-screener">
+  <div class="status">Scans stocks for AIM entry opportunities — below 1-year midpoint + volatile = high score</div>
+  <div class="card">
+    <div class="field"><label>Universe</label>
+      <select id="scr-universe">
+        <option value="top70">Quick Scan — Top 70 (1 min)</option>
+        <option value="full">FULL NSE Market — all ~2000 stocks (5-8 min)</option>
+      </select>
+    </div>
+    <div class="muted">Full market scan needs Zerodha connected today (Settings tab) — it loads the official complete NSE list from Zerodha, including BSE Ltd and every listed stock.</div>
+  </div>
+  <button onclick="runScreener()">🔍 Scan Stocks</button>
+  <button class="sec" onclick="SCR_CANCEL=true">⏹ Stop Scan</button>
+  <div id="screener-results" style="margin-top:10px"></div>
+</div>
+
+<!-- SETTINGS -->
+<div class="page" id="page-settings">
+  <div class="card">
+    <h3>Zerodha Kite API</h3>
+    <div class="field"><label>Client ID</label><input id="set-client" value="FS0303"></div>
+    <div class="muted">API key and secret are securely stored in Netlify — never exposed here.</div>
+    <div id="kite-status" class="status" style="margin-top:8px">Not connected to Zerodha</div>
+    <button onclick="kiteLogin()">🔐 Connect Zerodha Account</button>
+    <button class="sec" onclick="importKiteHoldings()">📥 Import Holdings from Zerodha</button>
+    <div class="muted" style="margin-top:6px">Tap Connect once per day (Kite sessions expire daily). After connecting, tap Import to sync your actual holdings automatically.</div>
+  </div>
+  <div class="card">
+    <h3>Daily Telegram Report</h3>
+    <div class="muted">Morning report with portfolio value, P&L and AIM signals can be sent to your Telegram (already connected to your bot). Tap below to test.</div>
+    <button class="sec" onclick="sendReport()">📤 Send Test Report</button>
+  </div>
+  <div class="card">
+    <h3>AIM Parameters</h3>
+    <div class="field"><label>SAFE % (minimum trade buffer, default 10)</label><input id="set-safe" type="number" value="10"></div>
+    <div class="field"><label>Midpoint trigger % (min move to signal, default 5)</label><input id="set-trigger" type="number" value="5"></div>
+    <button class="sec" onclick="saveSettings()">Save Parameters</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ───────────────────────── STORAGE ─────────────────────────
+var K = "rk_trading_v1";
+function load(){ try{ return JSON.parse(localStorage.getItem(K)) || defaults(); }catch(e){ return defaults(); } }
+function save(s){ try{ localStorage.setItem(K, JSON.stringify(s)); }catch(e){} }
+function defaults(){
+  return {
+    holdings: [
+      {sym:"SHK", qty:0, avg:0, pc:0},
+      {sym:"VEDL", qty:0, avg:0, pc:0}
+    ],
+    cash: 0, prices: {}, settings: {client:"FS0303", key:"", secret:"", safe:10, trigger:5}
+  };
+}
+var S = load();
+
+// ───────────────────────── NAV ─────────────────────────
+function showPage(p){
+  var pages = document.querySelectorAll(".page");
+  for(var i=0;i<pages.length;i++) pages[i].classList.remove("active");
+  document.getElementById("page-"+p).classList.add("active");
+  var tabs = document.querySelectorAll(".tab");
+  for(var j=0;j<tabs.length;j++) tabs[j].classList.toggle("active", tabs[j].getAttribute("data-page")===p);
+}
+
+// ───────────────────────── HELPERS ─────────────────────────
+function inr(n){ return "₹" + Math.round(n).toLocaleString("en-IN"); }
+function pct(n){ return (n>=0?"+":"") + n.toFixed(1) + "%"; }
+
+function fetchQuote(sym){
+  return fetch("/.netlify/functions/yahoo?action=quote&symbol=" + encodeURIComponent(sym + ".NS"))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var res = d.chart && d.chart.result && d.chart.result[0];
+      if(!res) return null;
+      return res.meta.regularMarketPrice || null;
+    }).catch(function(){ return null; });
+}
+
+function fetchHistory(sym, range){
+  return fetch("/.netlify/functions/yahoo?action=history&symbol=" + encodeURIComponent(sym + ".NS") + "&range=" + range)
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var res = d.chart && d.chart.result && d.chart.result[0];
+      if(!res) return null;
+      var ts = res.timestamp || [];
+      var closes = (res.indicators.quote[0].close) || [];
+      var out = [];
+      for(var i=0;i<ts.length;i++){
+        if(closes[i] !== null && closes[i] !== undefined){
+          out.push({date: new Date(ts[i]*1000), close: closes[i]});
+        }
+      }
+      return out;
+    }).catch(function(){ return null; });
+}
+
+// ───────────────────────── PORTFOLIO ─────────────────────────
+function renderHoldings(){
+  var el = document.getElementById("holdings-list");
+  if(S.holdings.length===0){ el.innerHTML = '<div class="muted">No holdings yet</div>'; return; }
+  var html = "";
+  for(var i=0;i<S.holdings.length;i++){
+    var h = S.holdings[i];
+    var ltp = S.prices[h.sym] || 0;
+    var value = ltp * h.qty;
+    var cost = h.avg * h.qty;
+    var pnl = value - cost;
+    var cls = pnl>=0 ? "green" : "red";
+    html += '<div class="holding-item">'
+      + '<span class="del" onclick="delHolding(' + i + ')">✕ remove</span>'
+      + '<strong>' + h.sym + '</strong> · ' + h.qty + ' shares @ ' + inr(h.avg)
+      + '<div class="row"><span class="lbl">LTP ' + (ltp? inr(ltp): "—") + '</span>'
+      + '<span class="val ' + cls + '">' + (ltp? inr(pnl) + " (" + (cost>0? pct(pnl/cost*100):"") + ")" : "tap refresh") + '</span></div>'
+      + '</div>';
+  }
+  el.innerHTML = html;
+  updateTotals();
+}
+
+function updateTotals(){
+  var total=0, invested=0;
+  for(var i=0;i<S.holdings.length;i++){
+    var h = S.holdings[i];
+    total += (S.prices[h.sym]||0) * h.qty;
+    invested += h.avg * h.qty;
+  }
+  var pnl = total - invested;
+  document.getElementById("pf-total").textContent = inr(total + S.cash);
+  document.getElementById("pf-invested").textContent = inr(invested);
+  var pnlEl = document.getElementById("pf-pnl");
+  pnlEl.textContent = inr(pnl) + (invested>0? " ("+pct(pnl/invested*100)+")" : "");
+  pnlEl.className = "val " + (pnl>=0? "green":"red");
+  document.getElementById("pf-cash").textContent = inr(S.cash);
+}
+
+function addHolding(){
+  var sym = document.getElementById("h-sym").value.trim().toUpperCase();
+  var qty = parseFloat(document.getElementById("h-qty").value)||0;
+  var avg = parseFloat(document.getElementById("h-avg").value)||0;
+  if(!sym || qty<=0 || avg<=0){ alert("Fill all fields"); return; }
+  // merge if exists
+  var found = false;
+  for(var i=0;i<S.holdings.length;i++){
+    if(S.holdings[i].sym===sym){
+      var h = S.holdings[i];
+      var newQty = h.qty + qty;
+      h.avg = (h.avg*h.qty + avg*qty)/newQty;
+      h.qty = newQty;
+      found = true;
+    }
+  }
+  if(!found) S.holdings.push({sym:sym, qty:qty, avg:avg, pc: qty*avg});
+  save(S);
+  document.getElementById("h-sym").value="";
+  document.getElementById("h-qty").value="";
+  document.getElementById("h-avg").value="";
+  document.getElementById("add-form").style.display="none";
+  renderHoldings();
+  refreshPrices();
+}
+
+function delHolding(i){
+  if(!confirm("Remove " + S.holdings[i].sym + "?")) return;
+  S.holdings.splice(i,1);
+  save(S);
+  renderHoldings();
+}
+
+function saveCash(){
+  var v = parseFloat(document.getElementById("cash-input").value)||0;
+  S.cash = v; save(S); updateTotals();
+  document.getElementById("pf-status").textContent = "✅ Cash reserve updated: " + inr(v);
+}
+
+function refreshPrices(){
+  var st = document.getElementById("pf-status");
+  st.textContent = "📡 Fetching live NSE prices...";
+  var done = 0, total = S.holdings.length;
+  if(total===0){ st.textContent = "Add holdings first"; return; }
+  S.holdings.forEach(function(h){
+    fetchQuote(h.sym).then(function(p){
+      if(p) S.prices[h.sym] = p;
+      done++;
+      if(done===total){
+        save(S);
+        renderHoldings();
+        st.textContent = "✅ Prices updated · " + new Date().toLocaleTimeString("en-IN");
+      }
+    });
+  });
+}
+
+// ───────────────────────── AIM ENGINE ─────────────────────────
+// Lichello AIM with KRR corrections:
+// 1. SINGLE shared cash pool (not per-stock)
+// 2. SELL only if LTP > avg buy price (profitability check)
+// 3. Midpoint trigger: skip signals smaller than trigger% of stock value
+function aimSignal(h, ltp, safePct, trigPct){
+  if(!ltp || h.qty<=0) return {action:"HOLD", reason:"No price/quantity", amount:0, shares:0};
+  var stockValue = ltp * h.qty;
+  // Portfolio Control: initialise to cost basis if missing
+  var pc = h.pc && h.pc>0 ? h.pc : h.avg*h.qty;
+  var advice = pc - stockValue;             // + => buy, - => sell
+  var safe = stockValue * (safePct/100);
+  var trigger = stockValue * (trigPct/100);
+
+  if(Math.abs(advice) <= Math.max(safe, trigger)){
+    return {action:"HOLD", reason:"Within SAFE/trigger band", amount:0, shares:0, pc:pc};
+  }
+  if(advice > 0){
+    var buyAmt = advice - safe;
+    if(buyAmt > S.cash) buyAmt = S.cash;     // single shared pool
+    if(buyAmt < trigger) return {action:"HOLD", reason:"Buy below trigger or cash low", amount:0, shares:0, pc:pc};
+    var shares = Math.floor(buyAmt/ltp);
+    if(shares<1) return {action:"HOLD", reason:"Less than 1 share", amount:0, shares:0, pc:pc};
+    return {action:"BUY", reason:"Price below portfolio control", amount:shares*ltp, shares:shares, pc:pc};
+  } else {
+    // SELL — only if profitable
+    if(ltp <= h.avg) return {action:"HOLD", reason:"Sell blocked: LTP ≤ avg cost " + inr(h.avg), amount:0, shares:0, pc:pc};
+    var sellAmt = (-advice) - safe;
+    if(sellAmt < trigger) return {action:"HOLD", reason:"Sell below trigger", amount:0, shares:0, pc:pc};
+    var sh = Math.floor(sellAmt/ltp);
+    if(sh<1) return {action:"HOLD", reason:"Less than 1 share", amount:0, shares:0, pc:pc};
+    if(sh>h.qty) sh = h.qty;
+    return {action:"SELL", reason:"Profit booking above portfolio control", amount:sh*ltp, shares:sh, pc:pc};
+  }
+}
+
+var LAST_SIGNALS = [];
+function runAIM(){
+  LAST_SIGNALS = [];
+  var el = document.getElementById("signals-list");
+  el.innerHTML = '<div class="status">📡 Fetching prices and calculating...</div>';
+  var safePct = S.settings.safe||10, trigPct = S.settings.trigger||5;
+  var html = "";
+  var pending = S.holdings.filter(function(h){return h.qty>0;});
+  if(pending.length===0){ el.innerHTML='<div class="status">Add holdings with quantity first (Portfolio tab)</div>'; return; }
+  var done=0;
+  pending.forEach(function(h){
+    fetchQuote(h.sym).then(function(ltp){
+      if(ltp) S.prices[h.sym]=ltp;
+      var sig = aimSignal(h, ltp, safePct, trigPct);
+      LAST_SIGNALS.push({sym:h.sym, ltp:ltp, qty:h.qty, avg:h.avg, sig:sig});
+      var cls = sig.action==="BUY"?"buy":(sig.action==="SELL"?"sell":"hold");
+      html += '<div class="card">'
+        + '<div class="row"><strong>' + h.sym + '</strong><span class="sig ' + cls + '">' + sig.action + '</span></div>'
+        + '<div class="row"><span class="lbl">LTP</span><span class="val">' + (ltp? inr(ltp):"—") + '</span></div>'
+        + '<div class="row"><span class="lbl">Holding</span><span class="val">' + h.qty + ' @ ' + inr(h.avg) + '</span></div>'
+        + '<div class="row"><span class="lbl">Portfolio Control</span><span class="val blue">' + inr(sig.pc||h.avg*h.qty) + '</span></div>'
+        + (sig.shares>0 ? '<div class="row"><span class="lbl">Order</span><span class="val gold">' + sig.action + ' ' + sig.shares + ' shares ≈ ' + inr(sig.amount) + '</span></div>' : '')
+        + (sig.shares>0 ? '<button onclick="placeKiteOrder(&quot;' + h.sym + '&quot;,&quot;' + sig.action + '&quot;,' + sig.shares + ',' + ltp + ')">⚡ Place ' + sig.action + ' Order in Zerodha</button>' : '')
+        + '<div class="muted">' + sig.reason + '</div>'
+        + '</div>';
+      done++;
+      if(done===pending.length){
+        save(S);
+        el.innerHTML = html + '<div class="muted">Execute manually in Zerodha Kite. After executing, update holdings + cash in Portfolio tab.</div>';
+      }
+    });
+  });
+}
+
+// ───────────────────────── BACKTEST ─────────────────────────
+function runBacktest(){
+  var sym = document.getElementById("bt-sym").value.trim().toUpperCase();
+  var amount = parseFloat(document.getElementById("bt-amount").value)||500000;
+  var range = document.getElementById("bt-range").value;
+  var el = document.getElementById("bt-results");
+  if(!sym){ alert("Enter symbol"); return; }
+  el.innerHTML = '<div class="status">📡 Downloading ' + range + ' of ' + sym + ' history from NSE...</div>';
+
+  fetchHistory(sym, range).then(function(data){
+    if(!data || data.length<60){ el.innerHTML='<div class="status">❌ Could not fetch history for '+sym+'. Check symbol.</div>'; return; }
+
+    // AIM backtest — monthly checks (every ~21 trading days)
+    var startPrice = data[0].close;
+    var shares = Math.floor((amount/2)/startPrice);   // 50% stock
+    var cash = amount - shares*startPrice;            // 50% cash
+    var pc = shares*startPrice;                       // portfolio control
+    var safePct = (S.settings.safe||10)/100;
+    var trigPct = (S.settings.trigger||5)/100;
+    var trades = [];
+    var avgCost = startPrice;
+
+    for(var i=21;i<data.length;i+=21){
+      var price = data[i].close;
+      var stockValue = shares*price;
+      var advice = pc - stockValue;
+      var safe = stockValue*safePct;
+      var trigger = stockValue*trigPct;
+      if(Math.abs(advice) <= Math.max(safe,trigger)) continue;
+
+      if(advice>0){
+        var buyAmt = Math.min(advice-safe, cash);
+        if(buyAmt<trigger) continue;
+        var buySh = Math.floor(buyAmt/price);
+        if(buySh<1) continue;
+        avgCost = (avgCost*shares + price*buySh)/(shares+buySh);
+        shares += buySh; cash -= buySh*price;
+        pc += (buySh*price)/2;                        // Lichello: PC up by half the buy
+        trades.push({d:data[i].date, a:"BUY", sh:buySh, p:price});
+      } else {
+        if(price<=avgCost) continue;                  // profitability check
+        var sellAmt = (-advice)-safe;
+        if(sellAmt<trigger) continue;
+        var sellSh = Math.floor(sellAmt/price);
+        if(sellSh<1) continue;
+        if(sellSh>shares) sellSh=shares;
+        shares -= sellSh; cash += sellSh*price;
+        trades.push({d:data[i].date, a:"SELL", sh:sellSh, p:price});
+      }
+    }
+
+    var endPrice = data[data.length-1].close;
+    var aimFinal = shares*endPrice + cash;
+    // Buy & hold comparison
+    var bhShares = Math.floor(amount/startPrice);
+    var bhFinal = bhShares*endPrice + (amount - bhShares*startPrice);
+    var aimRet = (aimFinal-amount)/amount*100;
+    var bhRet = (bhFinal-amount)/amount*100;
+    var winner = aimFinal>=bhFinal ? "AIM" : "Buy & Hold";
+
+    var html = '<div class="card"><h3>' + sym + ' — ' + range + ' Backtest</h3>'
+      + '<div class="row"><span class="lbl">Start price → End price</span><span class="val">' + inr(startPrice) + ' → ' + inr(endPrice) + '</span></div>'
+      + '<div class="row"><span class="lbl">AIM Final Value</span><span class="val ' + (aimRet>=0?'green':'red') + '">' + inr(aimFinal) + ' (' + pct(aimRet) + ')</span></div>'
+      + '<div class="row"><span class="lbl">Buy & Hold Final</span><span class="val ' + (bhRet>=0?'green':'red') + '">' + inr(bhFinal) + ' (' + pct(bhRet) + ')</span></div>'
+      + '<div class="row"><span class="lbl">Winner</span><span class="val gold">' + winner + '</span></div>'
+      + '<div class="row"><span class="lbl">Trades made</span><span class="val">' + trades.length + '</span></div>'
+      + '<div class="row"><span class="lbl">Final position</span><span class="val">' + shares + ' shares + ' + inr(cash) + ' cash</span></div>'
+      + '</div>';
+
+    if(trades.length>0){
+      html += '<div class="card"><h3>Trade Log</h3><table><tr><th>Date</th><th>Action</th><th>Shares</th><th>Price</th></tr>';
+      for(var t=0;t<trades.length;t++){
+        var tr = trades[t];
+        html += '<tr><td>' + tr.d.toLocaleDateString("en-IN",{month:"short",year:"2-digit"}) + '</td>'
+          + '<td><span class="sig ' + (tr.a==="BUY"?"buy":"sell") + '">' + tr.a + '</span></td>'
+          + '<td>' + tr.sh + '</td><td>' + inr(tr.p) + '</td></tr>';
+      }
+      html += '</table></div>';
+    }
+    html += '<div class="muted">AIM works best on volatile sideways stocks. In strong uptrends Buy & Hold usually wins — AIM trades safety for steadiness. Past performance does not guarantee future results.</div>';
+    el.innerHTML = html;
+  });
+}
+
+// ───────────────────────── SCREENER ─────────────────────────
+var NIFTY = ["RELIANCE","TCS","HDFCBANK","ICICIBANK","INFY","ITC","SBIN","BHARTIARTL","LT","HCLTECH",
+"BAJFINANCE","ASIANPAINT","TITAN","SUNPHARMA","TATAMOTORS","NTPC","ONGC","MARUTI","POWERGRID","COALINDIA",
+"CIPLA","GRASIM","JSWSTEEL","BPCL","TATASTEEL","TECHM","WIPRO","HEROMOTOCO","DRREDDY","BRITANNIA",
+"EICHERMOT","SBILIFE","HINDALCO","TATACONSUM","APOLLOHOSP","ADANIPORTS","TATAPOWER","IOC","VEDL","PIDILITIND",
+"GODREJCP","DABUR","SIEMENS","BEL","IRCTC","PNB","GAIL","BANKBARODA","CANBK","INDIGO",
+"LUPIN","AUROPHARMA","TVSMOTOR","SRF","BIOCON","ACC","VOLTAS","MUTHOOTFIN","ABB","DLF",
+"PFC","RECLTD","SAIL","FEDERALBNK","ASHOKLEY","BHARATFORG","ESCORTS","EXIDEIND","HAVELLS","SHK"];
+
+var SCR_CANCEL = false;
+var SCR_RESULTS = [];
+
+function downloadScreenerCSV(){
+  if(SCR_RESULTS.length===0){ alert("Run a scan first"); return; }
+  var csv = "Rank,Symbol,LTP,Pos_vs_52wk_pct,Daily_Vol_pct,AIM_Score\n";
+  for(var i=0;i<SCR_RESULTS.length;i++){
+    var r = SCR_RESULTS[i];
+    csv += (i+1) + "," + r.sym + "," + r.ltp.toFixed(2) + "," + r.posPct.toFixed(1) + "," + r.vol.toFixed(2) + "," + Math.round(r.score) + "\n";
+  }
+  var blob = new Blob([csv], {type:"text/csv"});
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "AIM-Screener-" + new Date().toISOString().slice(0,10) + ".csv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+function downloadScreenerPDF(){
+  if(SCR_RESULTS.length===0){ alert("Run a scan first"); return; }
+  try{
+    var doc = new jspdf.jsPDF();
+    var now = new Date();
+    doc.setFontSize(16);
+    doc.text("RK Trading - AIM Screener Report", 14, 15);
+    doc.setFontSize(9);
+    doc.text(now.toLocaleDateString("en-IN") + " " + now.toLocaleTimeString("en-IN") + " | " + SCR_RESULTS.length + " stocks ranked best to least", 14, 22);
+    doc.setFontSize(8);
+    var y = 30;
+    doc.text("Rank  Symbol            LTP        vs52wk   Vol    Score", 14, y);
+    y += 5;
+    var top = SCR_RESULTS.slice(0, 200);
+    for(var i=0;i<top.length;i++){
+      var r = top[i];
+      var line = String(i+1).padEnd(6) + r.sym.padEnd(18) + ("Rs"+r.ltp.toFixed(0)).padEnd(11) + (Math.round(r.posPct)+"%").padEnd(9) + r.vol.toFixed(1).padEnd(7) + Math.round(r.score);
+      doc.text(line, 14, y);
+      y += 4.5;
+      if(y > 285){ doc.addPage(); y = 15; }
+    }
+    doc.save("AIM-Screener-" + now.toISOString().slice(0,10) + ".pdf");
+  }catch(e){ alert("PDF error: " + e.message + " — use CSV instead"); }
+}
+
+function getFullNSEList(){
+  var token = S.settings.kiteToken;
+  if(!token) return Promise.resolve(null);
+  return fetch("/.netlify/functions/kite", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({action:"instruments", access_token:token})
+  }).then(function(r){return r.json();}).then(function(d){
+    return (d.symbols && d.symbols.length>100) ? d.symbols : null;
+  }).catch(function(){ return null; });
+}
+
+function runScreener(){
+  SCR_CANCEL = false;
+  var el = document.getElementById("screener-results");
+  var universe = document.getElementById("scr-universe").value;
+  el.innerHTML = '<div class="status">Preparing stock list...</div>';
+
+  var listPromise;
+  if(universe === "full"){
+    listPromise = getFullNSEList().then(function(syms){
+      if(!syms){
+        el.innerHTML = '<div class="status">❌ Full list needs Zerodha connected today. Connect in Settings, or use Quick Scan.</div>';
+        return null;
+      }
+      return syms;
+    });
+  } else {
+    listPromise = Promise.resolve(NIFTY);
+  }
+
+  listPromise.then(function(symbols){
+    if(!symbols) return;
+    var results = [];
+    var done = 0, failed = 0;
+    var total = symbols.length;
+    el.innerHTML = '<div class="status">📡 Scanning ' + total + ' stocks — you can leave this tab open...</div>';
+
+    function processBatch(start){
+      if(SCR_CANCEL){ finish(true); return; }
+      var batch = symbols.slice(start, start+12);
+      if(batch.length===0){ finish(false); return; }
+      var bd = 0;
+      batch.forEach(function(sym){
+        fetchHistory(sym, "1y").then(function(data){
+          if(data && data.length>50){
+            var closes = data.map(function(x){return x.close;});
+            var hi = Math.max.apply(null, closes);
+            var lo = Math.min.apply(null, closes);
+            var ltp = closes[closes.length-1];
+            var posPct = (hi>lo)? (ltp-lo)/(hi-lo)*100 : 50;
+            var vol = 0;
+            for(var i=1;i<closes.length;i++){ vol += Math.abs(closes[i]-closes[i-1])/closes[i-1]; }
+            vol = vol/closes.length*100;
+            var score = (100-posPct)*0.6 + vol*40*0.4;
+            results.push({sym:sym, ltp:ltp, posPct:posPct, vol:vol, score:score});
+          } else { failed++; }
+          bd++; done++;
+          if(done % 24 === 0 || done===total){
+            el.innerHTML = '<div class="status">📡 Scanned ' + done + '/' + total + ' · found ' + results.length + ' valid · ETA ' + Math.ceil((total-done)/12*0.8/60) + ' min</div>';
+          }
+          if(bd===batch.length){ setTimeout(function(){ processBatch(start+12); }, 250); }
+        });
+      });
+    }
+
+    function finish(cancelled){
+      // SANITY FILTERS: remove ETFs/data glitches and operator penny stocks
+      // Real stocks: daily vol 0.5-8%, price >= Rs5
+      var clean = results.filter(function(r){
+        return r.ltp>=5 && r.vol>=0.5 && r.vol<=8 && r.posPct>=0 && r.posPct<=100;
+      });
+      clean.sort(function(a,b){ return b.score-a.score; });
+      SCR_RESULTS = clean;
+      var removed = results.length - clean.length;
+      var show = clean.slice(0, 200);
+      var html2 = '<div class="card"><h3>' + (cancelled? "⏹ Partial · ":"") + 'AIM Candidates — Best to Least (' + clean.length + ' valid, ' + removed + ' anomalies removed)</h3>'
+        + '<div style="display:flex;gap:8px;margin-bottom:10px"><button class="small" onclick="downloadScreenerCSV()">⬇ CSV (all ' + clean.length + ')</button>'
+        + '<button class="small sec" onclick="downloadScreenerPDF()">⬇ PDF (top 200)</button></div>'
+        + '<table><tr><th>#</th><th>Stock</th><th>LTP</th><th>vs 52wk</th><th>Vol</th><th>Score</th></tr>';
+      for(var i=0;i<show.length;i++){
+        var r = show[i];
+        var posCls = r.posPct<40 ? "green" : (r.posPct>70 ? "red":"");
+        html2 += '<tr><td>' + (i+1) + '</td><td><strong>' + r.sym + '</strong></td><td>' + inr(r.ltp) + '</td>'
+          + '<td class="' + posCls + '">' + Math.round(r.posPct) + '%</td>'
+          + '<td>' + r.vol.toFixed(1) + '</td>'
+          + '<td><strong>' + Math.round(r.score) + '</strong></td></tr>';
+      }
+      html2 += '</table><div class="muted">Sorted best to least by AIM score (low in 52wk range + healthy volatility). Showing top 200 — CSV has all. Filters removed ETFs, data glitches and sub-₹5 stocks. Backtest before investing.</div></div>';
+      el.innerHTML = html2;
+    }
+
+    processBatch(0);
+  });
+}
+
+// ───────────────────────── TELEGRAM REPORT ─────────────────────────
+function sendReport(){
+  var total=0, invested=0;
+  var lines = "📈 <b>RK Trading Report</b>\n" + new Date().toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"long"}) + "\n\n";
+  for(var i=0;i<S.holdings.length;i++){
+    var h=S.holdings[i];
+    if(h.qty<=0) continue;
+    var ltp = S.prices[h.sym]||0;
+    var v = ltp*h.qty, c = h.avg*h.qty;
+    total+=v; invested+=c;
+    lines += "• " + h.sym + ": " + h.qty + " @ ₹" + Math.round(ltp) + " = ₹" + Math.round(v).toLocaleString("en-IN")
+      + " (" + (c>0? ((v-c)/c*100).toFixed(1):"0") + "%)\n";
+  }
+  var pnl = total-invested;
+  lines += "\n💼 Stock value: ₹" + Math.round(total).toLocaleString("en-IN");
+  lines += "\n💰 Cash pool: ₹" + Math.round(S.cash).toLocaleString("en-IN");
+  lines += "\n📊 P&L: " + (pnl>=0?"+":"") + "₹" + Math.round(pnl).toLocaleString("en-IN");
+  lines += "\n\n<i>Tap AIM Signals in app for trade advice</i>";
+
+  fetch("/.netlify/functions/telegram", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({message:lines})
+  }).then(function(r){return r.json();}).then(function(d){
+    alert(d.ok ? "✅ Sent to Telegram" : "Failed — try again");
+  }).catch(function(){ alert("Failed — check connection"); });
+}
+
+// ───────────────────────── SETTINGS ─────────────────────────
+function saveSettings(){
+  S.settings.client = document.getElementById("set-client").value.trim();
+  S.settings.key = document.getElementById("set-key").value.trim();
+  S.settings.secret = document.getElementById("set-secret").value.trim();
+  S.settings.safe = parseFloat(document.getElementById("set-safe").value)||10;
+  S.settings.trigger = parseFloat(document.getElementById("set-trigger").value)||5;
+  save(S);
+  alert("✅ Settings saved");
+}
+
+
+
+// ───────────────────────── AIM REPORT (sells first, buys next) ─────────────────────────
+function downloadAIMReport(){
+  if(LAST_SIGNALS.length===0){ alert("Tap Calculate AIM Signals first"); return; }
+  var sells = LAST_SIGNALS.filter(function(s){return s.sig.action==="SELL";});
+  var buys  = LAST_SIGNALS.filter(function(s){return s.sig.action==="BUY";});
+  var holds = LAST_SIGNALS.filter(function(s){return s.sig.action==="HOLD";});
+  var now = new Date();
+  var lines = "RK TRADING - AIM SIGNALS REPORT\n";
+  lines += now.toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"long",year:"numeric"}) + " " + now.toLocaleTimeString("en-IN") + "\n";
+  lines += "Execute SELLS FIRST (frees cash), then BUYS.\n";
+  lines += "==========================================\n\n";
+  lines += "STEP 1 - SELL ORDERS (" + sells.length + ")\n------------------------\n";
+  if(sells.length===0) lines += "None today.\n";
+  sells.forEach(function(s,i){
+    lines += (i+1) + ". SELL " + s.sig.shares + " x " + s.sym + " @ ~Rs" + Math.round(s.ltp) + " = Rs" + Math.round(s.sig.amount).toLocaleString("en-IN") + "\n";
+  });
+  lines += "\nSTEP 2 - BUY ORDERS (" + buys.length + ")\n------------------------\n";
+  if(buys.length===0) lines += "None today.\n";
+  buys.forEach(function(s,i){
+    lines += (i+1) + ". BUY " + s.sig.shares + " x " + s.sym + " @ ~Rs" + Math.round(s.ltp) + " = Rs" + Math.round(s.sig.amount).toLocaleString("en-IN") + "\n";
+  });
+  lines += "\nHOLD (" + holds.length + "): " + holds.map(function(s){return s.sym;}).join(", ") + "\n";
+  lines += "\nCash pool: Rs" + Math.round(S.cash).toLocaleString("en-IN") + "\n";
+  lines += "\nAfter executing, update quantity/avg in Portfolio tab.\n";
+
+  // Download as .txt
+  try{
+    var blob = new Blob([lines], {type:"text/plain"});
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "AIM-Report-" + now.toISOString().slice(0,10) + ".txt";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }catch(e){}
+
+  // Also send to Telegram (HTML format)
+  var tmsg = lines.replace(/\n/g, "\n");
+  fetch("/.netlify/functions/telegram", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({message: "📋 <b>AIM Report</b>\n\n" + lines})
+  }).catch(function(){});
+}
+
+
+
+
+// ───────────────────────── AUTO-SYNC TODAY'S TRADES FROM ZERODHA ─────────────────────────
+// Pulls today's order book, applies every COMPLETE order to the algorithm:
+// qty, weighted avg (buys), cash pool, AIM Portfolio Control. Dedupe by order_id.
+function syncTradesFromZerodha(){
+  var token = S.settings.kiteToken;
+  if(!token){ alert("Connect Zerodha first (Settings tab)"); return; }
+  if(!S.appliedOrders) S.appliedOrders = [];
+  var st = document.getElementById("pf-status");
+  st.textContent = "⚡ Fetching today's trades from Zerodha...";
+  fetch("/.netlify/functions/kite", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({action:"orders", access_token:token})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(!d.data){ st.textContent = "❌ " + (d.message||"Could not fetch orders"); return; }
+    var applied = 0, skipped = 0, summary = "";
+    d.data.forEach(function(o){
+      if(o.status !== "COMPLETE") return;
+      if(S.appliedOrders.indexOf(o.order_id) > -1){ skipped++; return; }
+      var sym = o.tradingsymbol;
+      var qty = o.filled_quantity || o.quantity || 0;
+      var price = o.average_price || o.price || 0;
+      var action = o.transaction_type;  // BUY or SELL
+      if(!sym || qty<=0 || price<=0) return;
+      // Ensure holding exists (for buys of new stocks)
+      var exists = false;
+      for(var i=0;i<S.holdings.length;i++){ if(S.holdings[i].sym===sym){exists=true;break;} }
+      if(!exists && action==="BUY"){ S.holdings.push({sym:sym, qty:0, avg:0, pc:0}); }
+      if(!exists && action==="SELL"){ return; }  // can't sell what app doesn't track
+      applyTradeLocally(sym, action, qty, price, true);
+      S.appliedOrders.push(o.order_id);
+      applied++;
+      summary += action + " " + qty + " x " + sym + " @ ₹" + Math.round(price) + "\n";
+    });
+    // keep dedupe list small
+    if(S.appliedOrders.length > 500) S.appliedOrders = S.appliedOrders.slice(-300);
+    save(S);
+    renderHoldings();
+    document.getElementById("cash-input").value = S.cash;
+    if(applied>0){
+      st.textContent = "✅ " + applied + " trades applied · cash pool ₹" + Math.round(S.cash).toLocaleString("en-IN");
+      alert("✅ Applied " + applied + " trades:\n\n" + summary + "\nCash pool now: ₹" + Math.round(S.cash).toLocaleString("en-IN") + "\n\nAIM Portfolio Control updated for every stock.");
+      fetch("/.netlify/functions/telegram", {method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({message:"⚡ <b>Trades Synced</b>\n" + summary + "Cash pool: ₹" + Math.round(S.cash).toLocaleString("en-IN")})}).catch(function(){});
+    } else {
+      st.textContent = skipped>0 ? "✅ All today's trades already applied" : "No completed trades found today";
+    }
+  }).catch(function(e){ st.textContent = "❌ " + e.message; });
+}
+
+// ───────────────────────── RECORD MANUAL TRADE ─────────────────────────
+function recordManualTrade(){
+  var sym    = document.getElementById("t-sym").value.trim().toUpperCase();
+  var action = document.getElementById("t-action").value;
+  var shares = parseInt(document.getElementById("t-shares").value)||0;
+  var price  = parseFloat(document.getElementById("t-price").value)||0;
+  if(!sym||shares<=0||price<=0){ alert("Fill all fields"); return; }
+  var found = false;
+  for(var i=0;i<S.holdings.length;i++){
+    if(S.holdings[i].sym===sym){ found=true; break; }
+  }
+  if(!found){ alert(sym+" not found in portfolio. Add it first via + Add Holding."); return; }
+  applyTradeLocally(sym, action, shares, price);
+  document.getElementById("trade-form").style.display="none";
+  document.getElementById("t-sym").value="";
+  document.getElementById("t-shares").value="";
+  document.getElementById("t-price").value="";
+}
+
+// ───────────────────────── AUTO PORTFOLIO UPDATE AFTER TRADE ─────────────────────────
+// Updates: share qty, weighted avg (buys), cash pool, AIM Portfolio Control
+// Lichello rule: PC increases by HALF of every buy amount; PC unchanged on sells
+function applyTradeLocally(sym, action, shares, price, silent){
+  var amount = shares * price;
+  for(var i=0;i<S.holdings.length;i++){
+    var h = S.holdings[i];
+    if(h.sym !== sym) continue;
+    if(!h.pc || h.pc<=0) h.pc = h.avg * h.qty;   // initialise PC if missing
+    if(action === "BUY"){
+      h.avg = (h.avg*h.qty + amount) / (h.qty + shares);
+      h.qty = h.qty + shares;
+      h.pc  = h.pc + amount/2;                    // Lichello: PC up by half the buy
+      S.cash = Math.max(0, S.cash - amount);
+    } else if(action === "SELL"){
+      h.qty = Math.max(0, h.qty - shares);
+      S.cash = S.cash + amount;                   // sale proceeds into single pool
+      // avg and PC unchanged on sells per AIM
+    }
+    break;
+  }
+  save(S);
+  renderHoldings();
+  document.getElementById("cash-input").value = S.cash;
+  if(silent) return;
+  alert("✅ Portfolio updated\n" + sym + ": new position saved\nCash pool: ₹" + Math.round(S.cash).toLocaleString("en-IN") + "\n\nNote: market fill price may differ slightly — tap Import Holdings tomorrow to reconcile exact averages from Zerodha.");
+  fetch("/.netlify/functions/telegram", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({message:"📊 <b>Portfolio Updated</b>\n" + action + " " + shares + " x " + sym + " @ ~₹" + Math.round(price) + "\nCash pool: ₹" + Math.round(S.cash).toLocaleString("en-IN")})}).catch(function(){});
+}
+
+// ───────────────────────── ONE-TAP ORDER (manual press, double confirm) ─────────────────────────
+function placeKiteOrder(sym, action, shares, ltp){
+  var token = S.settings.kiteToken;
+  if(!token){ alert("Connect Zerodha first (Settings tab)"); return; }
+  var approx = Math.round(shares*ltp).toLocaleString("en-IN");
+  var msg1 = action + " " + shares + " shares of " + sym + " at MARKET price (~Rs" + approx + ")?\n\nThis places a REAL order in your Zerodha account.";
+  if(!confirm(msg1)) return;
+  if(!confirm("FINAL CONFIRMATION:\n" + action + " " + shares + " x " + sym + "\n\nProceed?")) return;
+
+  fetch("/.netlify/functions/kite", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({action:"placeOrder", access_token:token,
+      order:{tradingsymbol:sym, transaction_type:action, quantity:shares}})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.data && d.data.order_id){
+      if(confirm("✅ Order placed! ID: " + d.data.order_id + "\n\nUpdate portfolio now?\n(Updates shares, cash pool and AIM control in one tap)")){
+        applyTradeLocally(sym, action, shares, ltp);
+      }
+      fetch("/.netlify/functions/telegram", {method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({message:"⚡ <b>Order Placed</b>\n" + action + " " + shares + " x " + sym + "\nOrder ID: " + d.data.order_id})}).catch(function(){});
+    } else {
+      alert("❌ Order failed: " + (d.message || JSON.stringify(d).slice(0,200)));
+    }
+  }).catch(function(e){ alert("❌ Error: " + e.message); });
+}
+
+// ───────────────────────── KITE API ─────────────────────────
+function kiteLogin(){
+  fetch("/.netlify/functions/kite", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({action:"loginUrl"})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.url){
+      // Open Zerodha login — after login Zerodha redirects back with request_token
+      window.open(d.url, "_blank");
+      document.getElementById("kite-status").textContent = "✅ Login opened — after Zerodha login, paste the request_token from the redirect URL below";
+      // Show token input
+      var inp = document.createElement("input");
+      inp.id = "kite-token-input";
+      inp.placeholder = "Paste request_token from redirect URL";
+      inp.style.marginTop = "8px";
+      var btn = document.createElement("button");
+      btn.textContent = "✅ Submit Token";
+      btn.style.marginTop = "6px";
+      btn.className = "sec";
+      btn.onclick = function(){
+        var tok = document.getElementById("kite-token-input").value.trim();
+        if(!tok){alert("Paste token first");return;}
+        exchangeToken(tok);
+      };
+      var card = document.getElementById("kite-status").parentNode;
+      card.appendChild(inp);
+      card.appendChild(btn);
+    }
+  }).catch(function(e){ alert("Error: "+e.message); });
+}
+
+function exchangeToken(requestToken){
+  document.getElementById("kite-status").textContent = "🔄 Exchanging token...";
+  fetch("/.netlify/functions/kite", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({action:"getToken", request_token:requestToken})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.data && d.data.access_token){
+      S.settings.kiteToken = d.data.access_token;
+      S.settings.kiteConnected = new Date().toISOString();
+      save(S);
+      document.getElementById("kite-status").textContent = "✅ Connected to Zerodha! Token valid for today.";
+    } else {
+      document.getElementById("kite-status").textContent = "❌ Failed: " + (d.message||JSON.stringify(d));
+    }
+  }).catch(function(e){
+    document.getElementById("kite-status").textContent = "❌ Error: "+e.message;
+  });
+}
+
+function importKiteHoldings(){
+  var token = S.settings.kiteToken;
+  if(!token){ alert("Connect Zerodha first"); return; }
+  document.getElementById("kite-status").textContent = "📥 Importing holdings from Zerodha...";
+  fetch("/.netlify/functions/kite", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({action:"holdings", access_token:token})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(!d.data){ document.getElementById("kite-status").textContent = "❌ " + (d.message||"Failed"); return; }
+    var imported = 0;
+    d.data.forEach(function(h){
+      if(!h.tradingsymbol || h.quantity<=0) return;
+      var sym = h.tradingsymbol;
+      var found = false;
+      for(var i=0;i<S.holdings.length;i++){
+        if(S.holdings[i].sym===sym){
+          S.holdings[i].qty = h.quantity;
+          S.holdings[i].avg = h.average_price;
+          S.holdings[i].pc = S.holdings[i].pc || h.average_price * h.quantity;
+          found = true;
+        }
+      }
+      if(!found){
+        S.holdings.push({sym:sym, qty:h.quantity, avg:h.average_price, pc:h.average_price*h.quantity});
+      }
+      S.prices[sym] = h.last_price;
+      imported++;
+    });
+    save(S);
+    renderHoldings();
+    document.getElementById("kite-status").textContent = "✅ Imported " + imported + " holdings from Zerodha";
+    showPage("portfolio");
+  }).catch(function(e){
+    document.getElementById("kite-status").textContent = "❌ " + e.message;
+  });
+}
+
+// ───────────────────────── INIT ─────────────────────────
+(function init(){
+  // Auto-capture request_token when Zerodha redirects back
+  var urlParams = new URLSearchParams(window.location.search);
+  var reqToken = urlParams.get("request_token");
+  var status = urlParams.get("status");
+  if(reqToken && status === "success"){
+    // Clean URL
+    window.history.replaceState({}, document.title, window.location.pathname);
+    // Switch to settings and exchange token
+    showPage("settings");
+    document.getElementById("kite-status").textContent = "🔄 Zerodha redirected — exchanging token...";
+    setTimeout(function(){ exchangeToken(reqToken); }, 500);
+  }
+  document.getElementById("cash-input").value = S.cash || "";
+  document.getElementById("set-client").value = S.settings.client||"FS0303";
+  document.getElementById("set-key").value = S.settings.key||"";
+  document.getElementById("set-secret").value = S.settings.secret||"";
+  document.getElementById("set-safe").value = S.settings.safe||10;
+  document.getElementById("set-trigger").value = S.settings.trigger||5;
+  renderHoldings();
+})();
+</script>
+</body>
+</html>
