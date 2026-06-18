@@ -171,7 +171,7 @@ function saveDD(d){localStorage.setItem(LS_DD,JSON.stringify(d));}
 // ── GOOGLE SHEETS API ─────────────────────────────────────────────────────────
 async function sheetsAPI(action,data={}){
   try{
-    const r=await fetch("/.netlify/functions/sheets",{
+    const r=await fetch("/.netlify/functions/db",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({action,...data})
