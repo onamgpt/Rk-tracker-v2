@@ -994,7 +994,13 @@ function LedgerUpload({entries,onClose,onSaveEntry}){
   const isDuplicate=(row)=>{
     // Match by invoice number first (most reliable), then by date+amount+name
     return entries.some(e=>{
-      if(row.invoiceNo&&e.notes&&String(e.notes).includes(row.invoiceNo))return true;
+      // Require invoice number to be at least 5 chars before trusting a substring match alone
+      // (a short number like "101" could coincidentally appear inside an unrelated longer invoice number).
+      // Also require the amount to match as a sanity check even when matching by invoice number.
+      if(row.invoiceNo&&row.invoiceNo.length>=5&&e.notes&&String(e.notes).includes(row.invoiceNo)){
+        const eAmtCheck=parseAmt(e.amount), rAmtCheck=parseAmt(row.amount);
+        if(Math.abs(eAmtCheck-rAmtCheck)<1)return true;
+      }
       const eAmt=parseAmt(e.amount), rAmt=parseAmt(row.amount);
       const sameAmt=Math.abs(eAmt-rAmt)<1;
       const sameDate=e.date===row.date;
