@@ -1,9 +1,0 @@
-{
-  "name": "rk-tracker-v2",
-  "version": "1.0.2",
-  "private": true,
-  "dependencies": {
-    "@netlify/database": "^1.0.0",
-    "@netlify/blobs": "^8.1.0"
-  }
-}
