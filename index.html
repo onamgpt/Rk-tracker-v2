@@ -724,10 +724,14 @@ function PaymentMatcher({entries,onClose,onMarkPaid}){
     }).map(e=>{
       const eAmt=parseAmt(e.amount);
       const exact=Math.abs(eAmt-payment.amount)<0.01;
-      const eName=(e.person||e.vendor||"").toLowerCase();
-      const pName=(payment.name||"").toLowerCase();
-      const nameExact=pName&&eName&&(eName===pName||eName.includes(pName)||pName.includes(eName));
-      return {entry:e,exact:exact&&nameExact};
+      const eName=(e.person||e.vendor||"").toLowerCase().trim();
+      const pName=(payment.name||"").toLowerCase().trim();
+      // For AUTO-marking paid, require a genuinely exact name match (not just substring overlap) -
+      // a bank SMS saying just "STK" should NOT auto-confirm "STK Fragrances Pvt Ltd" was paid.
+      // Substring/fuzzy matches still show up as candidates for manual confirmation (see findCandidates above),
+      // but only count as "exact" here if the full normalized names truly match.
+      const nameExact=!!(pName&&eName&&eName===pName);
+      return {entry:e,exact:!!(exact&&nameExact)};
     });
   };
 
