@@ -598,6 +598,7 @@ function ScanBill({onResult,onMultiResult}){
 
 // ── AGEING REPORT ────────────────────────────────────────────────────────────
 function AgeingReport({entries,onClose,onMarkPaid}){
+  const [localPaid,setLocalPaid]=useState(new Set());
   const today=new Date();
   const daysSince=(dateStr)=>{
     if(!dateStr)return null;
@@ -606,7 +607,7 @@ function AgeingReport({entries,onClose,onMarkPaid}){
     return Math.round((today.setHours(0,0,0,0)-new Date(d).setHours(0,0,0,0))/86400000);
   };
 
-  const unpaid=entries.filter(e=>e.category==="Sales - Payment"&&e.paymentStatus!=="Paid"&&e.date);
+  const unpaid=entries.filter(e=>e.category==="Sales - Payment"&&e.paymentStatus!=="Paid"&&e.date&&!localPaid.has(e.id));
   const buckets=[
     {label:"0–30 days",min:0,max:30,color:"#2a8a2a"},
     {label:"31–45 days",min:31,max:45,color:"#7a8a2a"},
@@ -671,7 +672,7 @@ function AgeingReport({entries,onClose,onMarkPaid}){
             </div>
             <div style={{textAlign:"right",marginLeft:8}}>
               <div style={{fontSize:12,fontWeight:700,color:"#444"}}>{e.amount?(String(e.amount).includes("₹")?e.amount:"₹"+e.amount):"—"}</div>
-              {onMarkPaid&&<button onClick={()=>onMarkPaid(e)} style={{fontSize:9,padding:"2px 8px",marginTop:2,borderRadius:10,border:"1px solid #2a8a2a",background:"#eaffea",color:"#1a6a1a",cursor:"pointer"}}>Mark Paid</button>}
+              {onMarkPaid&&<button onClick={()=>{onMarkPaid(e);setLocalPaid(p=>new Set([...p,e.id]));}} style={{fontSize:9,padding:"2px 8px",marginTop:2,borderRadius:10,border:"1px solid #2a8a2a",background:"#eaffea",color:"#1a6a1a",cursor:"pointer",fontWeight:600}}>✅ Mark Paid</button>}
             </div>
           </div>)}
         </div>
@@ -1584,7 +1585,7 @@ function App(){
     sheetsAPI("getDropdowns").then(r=>{if(r.dropdowns)setDropdowns(p=>({...p,...r.dropdowns}));}).catch(()=>{});
   },[]);
 
-  const saveEntry=async(entry)=>{
+  const saveEntry=async(entry,opts)=>{
     setSaving(true);
     // Upload any base64 attachments to Google Drive first
     var finalEntry=Object.assign({},entry);
@@ -1612,7 +1613,7 @@ function App(){
     if(entry.person&&!dropdowns.persons.includes(entry.person))addToDropdown("persons",entry.person);
     if(entry.vendor&&!dropdowns.vendors.includes(entry.vendor))addToDropdown("vendors",entry.vendor);
     if(entry.account&&!dropdowns.accounts.includes(entry.account))addToDropdown("accounts",entry.account);
-    setSaving(false);setShowForm(false);setEditE(null);
+    setSaving(false);if(!opts||!opts.silent){setShowForm(false);setEditE(null);}
   };
 
   const delEntry=async(id)=>{
@@ -1626,7 +1627,7 @@ function App(){
 
   const markPaid=async(entry)=>{
     const updated={...entry,paymentStatus:"Paid"};
-    await saveEntry(updated);
+    await saveEntry(updated,{silent:true});
   };
 
   const toggleSel=(id)=>{setSelIds(p=>p.indexOf(id)>-1?p.filter(x=>x!==id):p.concat([id]));};
@@ -1960,8 +1961,8 @@ function App(){
     <Modal open={showAI} onClose={()=>setShowAI(false)} wide><AIPanel entries={entries} onClose={()=>setShowAI(false)} onShowAgeing={()=>setShowAgeing(true)} onShowMatcher={()=>setShowMatcher(true)} onShowLogistics={()=>setShowLogistics(true)} onShowLedger={()=>setShowLedger(true)}/></Modal>
     <Modal open={showAgeing} onClose={()=>setShowAgeing(false)} wide><AgeingReport entries={entries} onClose={()=>setShowAgeing(false)} onMarkPaid={markPaid}/></Modal>
     <Modal open={showMatcher} onClose={()=>setShowMatcher(false)} wide><PaymentMatcher entries={entries} onClose={()=>setShowMatcher(false)} onMarkPaid={markPaid}/></Modal>
-    <Modal open={showLogistics} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={saveEntry}/></Modal>
-    <Modal open={showLedger} onClose={()=>setShowLedger(false)} wide><LedgerUpload entries={entries} onClose={()=>setShowLedger(false)} onSaveEntry={saveEntry}/></Modal>
+    <Modal open={showLogistics} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
+    <Modal open={showLedger} onClose={()=>setShowLedger(false)} wide><LedgerUpload entries={entries} onClose={()=>setShowLedger(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
     <Modal open={showDD} onClose={()=>setShowDD(false)} wide><DropdownManager dropdowns={dropdowns} onSave={saveDropdowns} onClose={()=>setShowDD(false)}/></Modal>
     <Modal open={showShare} onClose={()=>setShowShare(false)} wide><SharePanel/></Modal>
   </div>;
