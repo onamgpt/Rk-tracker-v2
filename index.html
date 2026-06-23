@@ -1544,58 +1544,23 @@ function exportPDF(entries,label){
 // ─────────────────────────────────────────────────────────────────────────────
 function EmailScan({entries,onClose,onSaveEntry}){
   const [scanning,setScanning]=useState(false);
-  const [emails,setEmails]=useState([]); // [{subject,from,date,body,parsed,skip}]
+  const [emails,setEmails]=useState([]);
   const [statusMsg,setStatusMsg]=useState("");
-  const [gmailToken,setGmailToken]=useState(localStorage.getItem("gmailToken")||"");
-  const [showTokenInput,setShowTokenInput]=useState(!localStorage.getItem("gmailToken"));
-
-  const saveToken=(t)=>{
-    const tok=t.trim();
-    localStorage.setItem("gmailToken",tok);
-    setGmailToken(tok);
-    setShowTokenInput(false);
-  };
 
   const scanGmail=async()=>{
-    if(!gmailToken){setShowTokenInput(true);return;}
     setScanning(true);setEmails([]);setStatusMsg("Scanning Gmail for #trackerv2 emails…");
     try{
-      // Fetch recent emails with #trackerv2 in subject or body (last 20)
-      const qRes=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=%23trackerv2&maxResults=20`,{
-        headers:{Authorization:"Bearer "+gmailToken}
-      });
-      if(qRes.status===401){setShowTokenInput(true);setScanning(false);setStatusMsg("Token expired. Please re-enter.");localStorage.removeItem("gmailToken");return;}
-      const qData=await qRes.json();
-      const msgs=qData.messages||[];
-      if(msgs.length===0){setStatusMsg("No emails with #trackerv2 found.");setScanning(false);return;}
-      setStatusMsg(`Found ${msgs.length} email(s). Parsing…`);
-
-      const parsed=[];
-      for(const m of msgs.slice(0,10)){
-        const mRes=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`,{
-          headers:{Authorization:"Bearer "+gmailToken}
-        });
-        const mData=await mRes.json();
-        const headers=mData.payload?.headers||[];
-        const subject=(headers.find(h=>h.name==="Subject")||{}).value||"(no subject)";
-        const from=(headers.find(h=>h.name==="From")||{}).value||"";
-        const dateHdr=(headers.find(h=>h.name==="Date")||{}).value||"";
-        // Extract plain text body
-        let body="";
-        const extractBody=(part)=>{
-          if(part.mimeType==="text/plain"&&part.body?.data){
-            try{body+=atob(part.body.data.replace(/-/g,"+").replace(/_/g,"/"));}catch(e){}
-          }
-          (part.parts||[]).forEach(extractBody);
-        };
-        extractBody(mData.payload);
-        // Parse date
-        const rawDate=new Date(dateHdr);
-        const entryDate=!isNaN(rawDate.getTime())?rawDate.toISOString().slice(0,10):today();
-        // Determine if duplicate
-        const isDup=entries.some(e=>e.notes&&e.notes.includes(m.id));
-        parsed.push({gmailId:m.id,subject,from,date:entryDate,body:body.slice(0,600),isDup,skip:isDup});
+      const res=await sheetsAPI("scanEmails");
+      if(!res||res.error||res.ok===false){
+        setStatusMsg("Error: "+((res&&(res.error))||"could not reach Gmail. Make sure the Apps Script scanEmails action is deployed."));
+        setScanning(false);return;
       }
+      const rows=res.emails||[];
+      if(rows.length===0){setStatusMsg("No emails with #trackerv2 found in the last 60 days.");setScanning(false);return;}
+      const parsed=rows.map(m=>{
+        const isDup=entries.some(e=>e.notes&&e.notes.includes(m.gmailId));
+        return {gmailId:m.gmailId,subject:m.subject||"(no subject)",from:m.from||"",date:parseDate(m.date)||today(),body:(m.body||"").slice(0,600),isDup,skip:isDup};
+      });
       setEmails(parsed);
       setStatusMsg(`${parsed.length} email(s) ready. ${parsed.filter(e=>e.isDup).length} already imported.`);
     }catch(err){setStatusMsg("Error: "+err.message);}
@@ -1654,32 +1619,17 @@ Body: ${email.body}`;
     setScanning(false);
   };
 
-  if(showTokenInput){
-    return<div style={{padding:16}}>
-      <h2 style={{fontSize:17,color:"#5a3a1a",margin:"0 0 8px"}}>📧 Gmail Email Scan</h2>
-      <p style={{fontSize:12,color:"#777",marginBottom:12}}>To scan emails, provide a Gmail OAuth access token.<br/>
-        <b>How:</b> Go to <a href="https://developers.google.com/oauthplayground/" target="_blank" style={{color:"#1a5a8a"}}>OAuth Playground</a> → select Gmail API (readonly) → Exchange for access token → paste here.
-      </p>
-      <input id="gtok" className="inp" placeholder="Paste Gmail access token here…" style={{width:"100%",marginBottom:8}}/>
-      <button className="scan-btn" style={{width:"100%"}} onClick={()=>saveToken(document.getElementById("gtok").value)}>Save Token & Scan</button>
-      <button onClick={()=>setShowTokenInput(false)} style={{marginTop:8,width:"100%",padding:8,border:"1px solid #ddd",borderRadius:8,background:"#fafafa",cursor:"pointer",fontSize:12}}>Cancel</button>
-    </div>;
-  }
-
   return<div>
     <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
       <span style={{fontSize:26}}>📧</span>
       <div><h2 style={{margin:0,fontSize:18,color:"#5a3a1a"}}>Email → Entry</h2>
-        <div style={{fontSize:11,color:"#aa8a5a"}}>Scan Gmail for emails tagged #trackerv2</div>
+        <div style={{fontSize:11,color:"#aa8a5a"}}>Scan Gmail for emails tagged #trackerv2 (last 60 days)</div>
       </div>
     </div>
 
     <button onClick={scanGmail} disabled={scanning} className="scan-btn" style={{width:"100%",marginBottom:12}}>
       {scanning?"⏳ Scanning…":"📬 Scan Gmail for #trackerv2 Emails"}
     </button>
-    {gmailToken&&<div style={{fontSize:10,color:"#aaa",marginBottom:8,textAlign:"right"}}>
-      Token saved · <span onClick={()=>{localStorage.removeItem("gmailToken");setGmailToken("");setShowTokenInput(true);}} style={{color:"#c00",cursor:"pointer"}}>Reset token</span>
-    </div>}
 
     {statusMsg&&<div style={{fontSize:12,color:"#5a3a1a",background:"#fff8f0",padding:"8px 12px",borderRadius:8,marginBottom:12}}>{statusMsg}</div>}
 
@@ -1707,7 +1657,6 @@ Body: ${email.body}`;
     </div>}
   </div>;
 }
-
 
 function App(){
   if(IS_VIEW_MODE) return<ShareableView/>;
