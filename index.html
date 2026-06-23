@@ -962,15 +962,29 @@ function LogisticsTracker({entries,onClose,onUpdateEntry}){
         const stageIdx=getLogisticsStageIdx(e);
         const stageName=stageIdx>=0?LOGISTICS_STAGES[stageIdx]:"Not despatched";
         const stageColor=stageIdx>=3?"#2a8a4a":stageIdx>=2?"#2a6a8a":stageIdx>=0?"#8a6a2a":"#999";
-        return<div key={e.id} onClick={()=>setSelectedId(e.id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px",background:"#f8f8f8",borderRadius:8,cursor:"pointer",border:"1px solid #eee"}}>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{fontSize:13,fontWeight:600,color:"#333",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.title||"Invoice"}</div>
-            <div style={{fontSize:10,color:"#999"}}>{e.person||e.vendor||"—"} · {e.date}</div>
+        const nextStage=stageIdx<LOGISTICS_STAGES.length-1?LOGISTICS_STAGES[stageIdx+1]:null;
+        const STAGE_ICONS=["🚛","🛣️","📦","💰"];
+        return<div key={e.id} style={{background:"#f8f8f8",borderRadius:10,border:"1px solid #eee",marginBottom:4,overflow:"hidden"}}>
+          <div onClick={()=>setSelectedId(e.id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px",cursor:"pointer"}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:600,color:"#333",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.title||"Invoice"}</div>
+              <div style={{fontSize:10,color:"#999"}}>{e.person||e.vendor||"—"} · {e.date} · {e.amount?(String(e.amount).includes("₹")?e.amount:"₹"+e.amount):"—"}</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:10,fontWeight:700,color:stageColor,padding:"3px 9px",borderRadius:12,background:stageColor+"15"}}>{STAGE_ICONS[stageIdx]||"📋"} {stageName}</span>
+              <span style={{color:"#bbb",fontSize:12}}>›</span>
+            </div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:10,fontWeight:700,color:stageColor,padding:"3px 9px",borderRadius:12,background:stageColor+"15"}}>{stageName}</span>
-            <span style={{color:"#bbb"}}>›</span>
-          </div>
+          {stageIdx<3&&<div style={{display:"flex",gap:4,padding:"0 13px 9px",flexWrap:"wrap"}}>
+            {LOGISTICS_STAGES.map((s,i)=>{
+              if(i<=stageIdx)return null;
+              const isNext=i===stageIdx+1;
+              return<button key={s} onClick={async(ev)=>{ev.stopPropagation();await setStage(e,i);}} style={{fontSize:10,padding:"4px 10px",borderRadius:14,border:isNext?"1.5px solid #2a8a4a":"1px solid #ccc",background:isNext?"#eaffea":"#f5f5f5",color:isNext?"#1a6a2a":"#888",cursor:"pointer",fontWeight:isNext?700:500}}>
+                {STAGE_ICONS[i]} Mark: {s}
+              </button>;
+            })}
+          </div>}
+          {stageIdx===3&&<div style={{fontSize:10,color:"#2a8a4a",padding:"0 13px 9px",fontWeight:700}}>✅ Complete — Payment Received</div>}
         </div>;
       })}
     </div>
@@ -1241,7 +1255,16 @@ function EntryForm({initial,onSave,onClose,dropdowns,onAddToDropdown,saving}){
       <div><label className="lbl">Date *</label><input className="inp" type="date" value={f.date} onChange={e=>set("date",e.target.value)}/></div>
       <div><label className="lbl">Month</label><select className="inp" value={f.month} onChange={e=>set("month",e.target.value)}><option value="">— Select —</option>{MONTHS.map(m=><option key={m}>{m}</option>)}</select></div>
     </div>
-    <div style={{marginBottom:12}}><label className="lbl">Title *</label><input className="inp" type="text" value={f.title} placeholder="What is this about?" onChange={e=>set("title",e.target.value)}/></div>
+    {(()=>{
+      const isSales=f.category&&(f.category.startsWith("Sales")||f.category==="Sales - Payment"||f.category==="Sales - Order");
+      const isPurchase=f.category&&(f.category.startsWith("Business - Purchase")||f.category.includes("Purchase"));
+      const lbl=isSales?"📤 Title — To (Customer)":isPurchase?"📥 Title — From (Vendor)":"Title";
+      const ph=isSales?"To: [Customer name] — e.g. To: Ramesh Stores — Invoice #42":isPurchase?"From: [Vendor/Supplier] — e.g. From: ABC Supplies — Bill #99":"What is this about?";
+      return<div style={{marginBottom:12}}>
+        <label className="lbl">{lbl} <span style={{fontSize:10,fontWeight:400,color:"#999"}}>{isSales?"(who you sold to)":(isPurchase?"(who you bought from)":"")}</span></label>
+        <input className="inp" type="text" value={f.title} placeholder={ph} onChange={e=>set("title",e.target.value)}/>
+      </div>;
+    })()}
     <div style={G2}>
       <div>
         <label className="lbl">Category</label>
@@ -1253,8 +1276,8 @@ function EntryForm({initial,onSave,onClose,dropdowns,onAddToDropdown,saving}){
       <div><Combo label="Task Type" value={f.taskType} onChange={v=>set("taskType",v)} options={dropdowns.taskTypes} onAddNew={v=>addNew("taskTypes",v)}/></div>
     </div>
     <div style={G2}>
-      <div><Combo label="Person" value={f.person} onChange={v=>set("person",v)} options={allPersons} onAddNew={v=>addNew("persons",v)}/></div>
-      <div><Combo label="Vendor" value={f.vendor} onChange={v=>set("vendor",v)} options={allVendors} onAddNew={v=>addNew("vendors",v)}/></div>
+      <div><Combo label={f.category&&(f.category.startsWith("Sales")||f.category.includes("Sales"))?"👤 Person / Customer (To)":"Person"} value={f.person} onChange={v=>set("person",v)} options={allPersons} onAddNew={v=>addNew("persons",v)}/></div>
+      <div><Combo label={f.category&&(f.category.includes("Purchase")||f.category.includes("Business - Purchase"))?"🏭 Vendor / Supplier (From)":"Vendor"} value={f.vendor} onChange={v=>set("vendor",v)} options={allVendors} onAddNew={v=>addNew("vendors",v)}/></div>
     </div>
     <div style={G2}>
       <div><Combo label="Account / Bank" value={f.account} onChange={v=>set("account",v)} options={allAccounts} onAddNew={v=>addNew("accounts",v)}/></div>
@@ -1783,9 +1806,9 @@ function App(){
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           <button onClick={()=>setShowAI(true)} className="ai-btn" style={{fontSize:11,padding:"6px 11px"}}>🧠 AI</button>
-          <button onClick={()=>setShowAgeing(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #e89a9a",background:"#fff0f0",color:"#7a1a1a",cursor:"pointer",fontWeight:600}}>📊 Ageing</button>
-          <button onClick={()=>setShowMatcher(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontWeight:600}}>💳 Match</button>
-          <button onClick={()=>setShowLogistics(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c8e8",background:"#f0f6ff",color:"#1a3a6a",cursor:"pointer",fontWeight:600}}>🚚 Logistics</button>
+          <button onClick={()=>setShowAgeing(true)} title="Ageing Report: Shows all unpaid Sales-Payment invoices grouped by overdue days (0-30, 30-60, 60+ days). Use this to chase payments." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #e89a9a",background:"#fff0f0",color:"#7a1a1a",cursor:"pointer",fontWeight:600}}>📊 Ageing</button>
+          <button onClick={()=>setShowMatcher(true)} title="Payment Matcher: Paste an SMS bank credit alert (e.g. 'Cr ₹50,000 by NEFT') and it finds the matching unpaid invoice automatically." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontWeight:600}}>💳 Match</button>
+          <button onClick={()=>setShowLogistics(true)} title="Logistics Tracker: Track every Sales-Payment invoice through 4 stages — Despatched → In Transit → Delivered → Payment Received. Upload LR copy, paid LR, POD, and payment proof at each stage." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c8e8",background:"#f0f6ff",color:"#1a3a6a",cursor:"pointer",fontWeight:600}}>🚚 Logistics</button>
           <button onClick={()=>setShowLedger(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #d8c8a8",background:"#fff8f0",color:"#5a3a1a",cursor:"pointer",fontWeight:600}}>📑 Ledger</button>
           <button onClick={()=>setShowShare(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>🔗 Share</button>
           <button onClick={()=>setShowDD(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>⚙️</button>
