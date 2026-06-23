@@ -107,7 +107,24 @@ const MONTHS=["January","February","March","April","May","June","July","August",
 
 function genId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
 function today(){return new Date().toISOString().slice(0,10);}
-function fmtDate(d){if(!d)return"—";return new Date(d+"T00:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});}
+function parseDate(d){
+  if(!d)return null;
+  d=String(d).trim();
+  // Already YYYY-MM-DD
+  if(/^\d{4}-\d{2}-\d{2}$/.test(d))return d;
+  // DD-MM-YYYY or DD/MM/YYYY
+  const m=d.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if(m)return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+  // DD-MMM-YYYY (e.g. 15-Jun-2025)
+  const months={jan:"01",feb:"02",mar:"03",apr:"04",may:"05",jun:"06",jul:"07",aug:"08",sep:"09",oct:"10",nov:"11",dec:"12"};
+  const m2=d.match(/^(\d{1,2})[-\s]([A-Za-z]{3})[-\s](\d{4})$/);
+  if(m2&&months[m2[2].toLowerCase()])return m2[3]+"-"+months[m2[2].toLowerCase()]+"-"+m2[1].padStart(2,"0");
+  // Try native parse as last resort
+  const dt=new Date(d);
+  if(!isNaN(dt.getTime()))return dt.toISOString().slice(0,10);
+  return null;
+}
+function fmtDate(d){if(!d)return"—";const p=parseDate(d);if(!p)return String(d);return new Date(p+"T00:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});}
 function fmtDT(d){if(!d)return"—";return new Date(d).toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});}
 function isOverdue(r){return r&&new Date(r)<new Date();}
 
@@ -602,12 +619,13 @@ function AgeingReport({entries,onClose,onMarkPaid}){
   const today=new Date();
   const daysSince=(dateStr)=>{
     if(!dateStr)return null;
-    const d=new Date(dateStr);
+    const p=parseDate(dateStr);if(!p)return null;
+    const d=new Date(p+"T00:00:00");
     if(isNaN(d.getTime()))return null;
-    return Math.round((today.setHours(0,0,0,0)-new Date(d).setHours(0,0,0,0))/86400000);
+    return Math.round((today.setHours(0,0,0,0)-new Date(p+"T00:00:00").setHours(0,0,0,0))/86400000);
   };
 
-  const unpaid=entries.filter(e=>e.category==="Sales - Payment"&&e.paymentStatus!=="Paid"&&e.date&&!localPaid.has(e.id));
+  const unpaid=entries.filter(e=>(e.category==="Sales - Payment"||e.category==="Sales - Order")&&e.paymentStatus!=="Paid"&&e.date&&!localPaid.has(e.id));
   const buckets=[
     {label:"0–30 days",min:0,max:30,color:"#2a8a2a"},
     {label:"31–45 days",min:31,max:45,color:"#7a8a2a"},
@@ -709,7 +727,7 @@ function PaymentMatcher({entries,onClose,onMarkPaid}){
     return isNaN(n)?0:n;
   };
 
-  const unpaid=entries.filter(e=>e.category==="Sales - Payment"&&e.paymentStatus!=="Paid");
+  const unpaid=entries.filter(e=>(e.category==="Sales - Payment"||e.category==="Sales - Order")&&e.paymentStatus!=="Paid");
 
   const findCandidates=(payment)=>{
     // payment: {amount:number, name:string}
@@ -879,7 +897,7 @@ function LogisticsTracker({entries,onClose,onUpdateEntry}){
   const [selectedId,setSelectedId]=useState(null);
   const [uploading,setUploading]=useState(false);
 
-  const shipments=entries.filter(e=>e.category==="Sales - Payment");
+  const shipments=entries.filter(e=>e.category==="Sales - Payment"||e.category==="Sales - Order");
   const selected=shipments.find(e=>e.id===selectedId);
 
   const setStage=async(entry,stageIdx)=>{
@@ -1072,7 +1090,7 @@ function LedgerUpload({entries,onClose,onSaveEntry}){
       const entry={
         id:genId(),
         title:(ledgerType==="sales"?"Sale: ":"Purchase: ")+(row.name||"Unknown")+(row.invoiceNo?" ("+row.invoiceNo+")":""),
-        date:row.date||today(),
+        date:parseDate(row.date)||today(),
         category:ledgerType==="sales"?"Sales - Payment":"Business - Purchase",
         person:ledgerType==="sales"?(row.name||""):"",
         vendor:ledgerType==="purchase"?(row.name||""):"",
@@ -1521,6 +1539,176 @@ function exportPDF(entries,label){
 }
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// EmailScan — scan Gmail for emails tagged #trackerv2 and create entries
+// ─────────────────────────────────────────────────────────────────────────────
+function EmailScan({entries,onClose,onSaveEntry}){
+  const [scanning,setScanning]=useState(false);
+  const [emails,setEmails]=useState([]); // [{subject,from,date,body,parsed,skip}]
+  const [statusMsg,setStatusMsg]=useState("");
+  const [gmailToken,setGmailToken]=useState(localStorage.getItem("gmailToken")||"");
+  const [showTokenInput,setShowTokenInput]=useState(!localStorage.getItem("gmailToken"));
+
+  const saveToken=(t)=>{
+    const tok=t.trim();
+    localStorage.setItem("gmailToken",tok);
+    setGmailToken(tok);
+    setShowTokenInput(false);
+  };
+
+  const scanGmail=async()=>{
+    if(!gmailToken){setShowTokenInput(true);return;}
+    setScanning(true);setEmails([]);setStatusMsg("Scanning Gmail for #trackerv2 emails…");
+    try{
+      // Fetch recent emails with #trackerv2 in subject or body (last 20)
+      const qRes=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=%23trackerv2&maxResults=20`,{
+        headers:{Authorization:"Bearer "+gmailToken}
+      });
+      if(qRes.status===401){setShowTokenInput(true);setScanning(false);setStatusMsg("Token expired. Please re-enter.");localStorage.removeItem("gmailToken");return;}
+      const qData=await qRes.json();
+      const msgs=qData.messages||[];
+      if(msgs.length===0){setStatusMsg("No emails with #trackerv2 found.");setScanning(false);return;}
+      setStatusMsg(`Found ${msgs.length} email(s). Parsing…`);
+
+      const parsed=[];
+      for(const m of msgs.slice(0,10)){
+        const mRes=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`,{
+          headers:{Authorization:"Bearer "+gmailToken}
+        });
+        const mData=await mRes.json();
+        const headers=mData.payload?.headers||[];
+        const subject=(headers.find(h=>h.name==="Subject")||{}).value||"(no subject)";
+        const from=(headers.find(h=>h.name==="From")||{}).value||"";
+        const dateHdr=(headers.find(h=>h.name==="Date")||{}).value||"";
+        // Extract plain text body
+        let body="";
+        const extractBody=(part)=>{
+          if(part.mimeType==="text/plain"&&part.body?.data){
+            try{body+=atob(part.body.data.replace(/-/g,"+").replace(/_/g,"/"));}catch(e){}
+          }
+          (part.parts||[]).forEach(extractBody);
+        };
+        extractBody(mData.payload);
+        // Parse date
+        const rawDate=new Date(dateHdr);
+        const entryDate=!isNaN(rawDate.getTime())?rawDate.toISOString().slice(0,10):today();
+        // Determine if duplicate
+        const isDup=entries.some(e=>e.notes&&e.notes.includes(m.id));
+        parsed.push({gmailId:m.id,subject,from,date:entryDate,body:body.slice(0,600),isDup,skip:isDup});
+      }
+      setEmails(parsed);
+      setStatusMsg(`${parsed.length} email(s) ready. ${parsed.filter(e=>e.isDup).length} already imported.`);
+    }catch(err){setStatusMsg("Error: "+err.message);}
+    setScanning(false);
+  };
+
+  const parseEmailToEntry=async(email)=>{
+    const prompt=`You are parsing a sales order / invoice email for Onam Agarbathi Pvt. Ltd. 
+Extract these fields from the email and return ONLY valid JSON:
+{
+  "title": "concise title starting with To: [customer name] or From: [vendor]",
+  "category": "Sales - Order" or "Sales - Payment" or "Business - Purchase" (pick best fit),
+  "amount": number or null,
+  "person": "customer name if sales",
+  "vendor": "vendor name if purchase",
+  "notes": "invoice number, product details, any key info",
+  "paymentStatus": "Payment Pending" or "Paid"
+}
+
+Email Subject: ${email.subject}
+From: ${email.from}
+Date: ${email.date}
+Body: ${email.body}`;
+    const txt=await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.","","");
+    try{
+      let clean=txt.replace(/\`\`\`json/g,"").replace(/\`\`\`/g,"").trim();
+      return JSON.parse(clean);
+    }catch(e){return null;}
+  };
+
+  const importAll=async()=>{
+    const toImport=emails.filter(e=>!e.skip);
+    if(toImport.length===0){setStatusMsg("Nothing to import.");return;}
+    setScanning(true);setStatusMsg(`Importing ${toImport.length} email(s)…`);
+    let created=0;
+    for(const email of toImport){
+      const parsed=await parseEmailToEntry(email);
+      const entry={
+        id:genId(),
+        title:parsed?.title||email.subject,
+        date:email.date,
+        category:parsed?.category||"Sales - Order",
+        person:parsed?.person||"",
+        vendor:parsed?.vendor||"",
+        amount:parsed?.amount?String(parsed.amount):"",
+        paymentStatus:parsed?.paymentStatus||"Payment Pending",
+        notes:(parsed?.notes||"")+" [From email: "+email.subject+"] [gmailId:"+email.gmailId+"]",
+        createdAt:new Date().toISOString(),
+        tags:[]
+      };
+      await onSaveEntry(entry);
+      created++;
+    }
+    setStatusMsg(`✅ Imported ${created} email(s) as entries.`);
+    setEmails(prev=>prev.map(e=>({...e,skip:true})));
+    setScanning(false);
+  };
+
+  if(showTokenInput){
+    return<div style={{padding:16}}>
+      <h2 style={{fontSize:17,color:"#5a3a1a",margin:"0 0 8px"}}>📧 Gmail Email Scan</h2>
+      <p style={{fontSize:12,color:"#777",marginBottom:12}}>To scan emails, provide a Gmail OAuth access token.<br/>
+        <b>How:</b> Go to <a href="https://developers.google.com/oauthplayground/" target="_blank" style={{color:"#1a5a8a"}}>OAuth Playground</a> → select Gmail API (readonly) → Exchange for access token → paste here.
+      </p>
+      <input id="gtok" className="inp" placeholder="Paste Gmail access token here…" style={{width:"100%",marginBottom:8}}/>
+      <button className="scan-btn" style={{width:"100%"}} onClick={()=>saveToken(document.getElementById("gtok").value)}>Save Token & Scan</button>
+      <button onClick={()=>setShowTokenInput(false)} style={{marginTop:8,width:"100%",padding:8,border:"1px solid #ddd",borderRadius:8,background:"#fafafa",cursor:"pointer",fontSize:12}}>Cancel</button>
+    </div>;
+  }
+
+  return<div>
+    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+      <span style={{fontSize:26}}>📧</span>
+      <div><h2 style={{margin:0,fontSize:18,color:"#5a3a1a"}}>Email → Entry</h2>
+        <div style={{fontSize:11,color:"#aa8a5a"}}>Scan Gmail for emails tagged #trackerv2</div>
+      </div>
+    </div>
+
+    <button onClick={scanGmail} disabled={scanning} className="scan-btn" style={{width:"100%",marginBottom:12}}>
+      {scanning?"⏳ Scanning…":"📬 Scan Gmail for #trackerv2 Emails"}
+    </button>
+    {gmailToken&&<div style={{fontSize:10,color:"#aaa",marginBottom:8,textAlign:"right"}}>
+      Token saved · <span onClick={()=>{localStorage.removeItem("gmailToken");setGmailToken("");setShowTokenInput(true);}} style={{color:"#c00",cursor:"pointer"}}>Reset token</span>
+    </div>}
+
+    {statusMsg&&<div style={{fontSize:12,color:"#5a3a1a",background:"#fff8f0",padding:"8px 12px",borderRadius:8,marginBottom:12}}>{statusMsg}</div>}
+
+    {emails.length>0&&<div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <span style={{fontSize:12,fontWeight:700,color:"#333"}}>{emails.filter(e=>!e.skip).length} new to import</span>
+        <button onClick={importAll} disabled={scanning||emails.every(e=>e.skip)} className="scan-btn" style={{padding:"8px 16px",fontSize:12}}>✅ Import All New</button>
+      </div>
+      {emails.map((email,i)=>(
+        <div key={email.gmailId} style={{background:email.skip?"#f5f5f5":"#f8fff8",borderRadius:10,border:"1px solid "+(email.skip?"#ddd":"#a8d8a8"),padding:"10px 13px",marginBottom:8,opacity:email.skip?0.6:1}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:600,color:"#333",marginBottom:2}}>{email.subject}</div>
+              <div style={{fontSize:10,color:"#888"}}>{email.from} · {fmtDate(email.date)}</div>
+              <div style={{fontSize:10,color:"#aaa",marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{email.body.slice(0,80)}…</div>
+            </div>
+            <label style={{display:"flex",alignItems:"center",gap:4,fontSize:11,marginLeft:8,cursor:"pointer",flexShrink:0}}>
+              <input type="checkbox" checked={!email.skip} onChange={()=>setEmails(prev=>prev.map((e,j)=>j===i?{...e,skip:!e.skip}:e))}/>
+              Import
+            </label>
+          </div>
+          {email.isDup&&<div style={{fontSize:10,color:"#aa6600",marginTop:4}}>⚠️ Already imported</div>}
+        </div>
+      ))}
+    </div>}
+  </div>;
+}
+
+
 function App(){
   if(IS_VIEW_MODE) return<ShareableView/>;
 
@@ -1538,6 +1726,7 @@ function App(){
   const [showMatcher,setShowMatcher]=useState(false);
   const [showLogistics,setShowLogistics]=useState(false);
   const [showLedger,setShowLedger]=useState(false);
+  const [showEmailScan,setShowEmailScan]=useState(false);
   const [showDD,setShowDD]=useState(false);
   const [showShare,setShowShare]=useState(false);
   const [search,setSearch]=useState("");
@@ -1811,6 +2000,7 @@ function App(){
           <button onClick={()=>setShowMatcher(true)} title="Payment Matcher: Paste an SMS bank credit alert (e.g. 'Cr ₹50,000 by NEFT') and it finds the matching unpaid invoice automatically." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontWeight:600}}>💳 Match</button>
           <button onClick={()=>setShowLogistics(true)} title="Logistics Tracker: Track every Sales-Payment invoice through 4 stages — Despatched → In Transit → Delivered → Payment Received. Upload LR copy, paid LR, POD, and payment proof at each stage." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c8e8",background:"#f0f6ff",color:"#1a3a6a",cursor:"pointer",fontWeight:600}}>🚚 Logistics</button>
           <button onClick={()=>setShowLedger(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #d8c8a8",background:"#fff8f0",color:"#5a3a1a",cursor:"pointer",fontWeight:600}}>📑 Ledger</button>
+          <button onClick={()=>setShowEmailScan(true)} title="Scan Gmail for emails tagged #trackerv2 and create entries automatically" style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c0e8",background:"#f0f4ff",color:"#1a2a6a",cursor:"pointer",fontWeight:600}}>📧 Email</button>
           <button onClick={()=>setShowShare(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>🔗 Share</button>
           <button onClick={()=>setShowDD(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>⚙️</button>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
@@ -1963,6 +2153,7 @@ function App(){
     <Modal open={showMatcher} onClose={()=>setShowMatcher(false)} wide><PaymentMatcher entries={entries} onClose={()=>setShowMatcher(false)} onMarkPaid={markPaid}/></Modal>
     <Modal open={showLogistics} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
     <Modal open={showLedger} onClose={()=>setShowLedger(false)} wide><LedgerUpload entries={entries} onClose={()=>setShowLedger(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
+    <Modal open={showEmailScan} onClose={()=>setShowEmailScan(false)} wide><EmailScan entries={entries} onClose={()=>setShowEmailScan(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
     <Modal open={showDD} onClose={()=>setShowDD(false)} wide><DropdownManager dropdowns={dropdowns} onSave={saveDropdowns} onClose={()=>setShowDD(false)}/></Modal>
     <Modal open={showShare} onClose={()=>setShowShare(false)} wide><SharePanel/></Modal>
   </div>;
