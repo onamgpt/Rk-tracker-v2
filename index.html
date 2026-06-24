@@ -1564,7 +1564,7 @@ function exportPDF(entries,label){
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-// EmailScan — scan Gmail for emails tagged #trackerv2 and create entries
+// EmailScan — scan Gmail for emails tagged #Trackerv23 and create entries
 // ─────────────────────────────────────────────────────────────────────────────
 function EmailScan({entries,onClose,onSaveEntry}){
   const [scanning,setScanning]=useState(false);
@@ -1572,7 +1572,7 @@ function EmailScan({entries,onClose,onSaveEntry}){
   const [statusMsg,setStatusMsg]=useState("");
 
   const scanGmail=async()=>{
-    setScanning(true);setEmails([]);setStatusMsg("Scanning Gmail for #trackerv2 emails…");
+    setScanning(true);setEmails([]);setStatusMsg("Scanning Gmail for #Trackerv23 emails…");
     try{
       const res=await sheetsAPI("scanEmails");
       if(!res||res.error||res.ok===false){
@@ -1580,7 +1580,7 @@ function EmailScan({entries,onClose,onSaveEntry}){
         setScanning(false);return;
       }
       const rows=res.emails||[];
-      if(rows.length===0){setStatusMsg("No emails with #trackerv2 found in the last 60 days.");setScanning(false);return;}
+      if(rows.length===0){setStatusMsg("No emails with #Trackerv23 found in the last 60 days.");setScanning(false);return;}
       const parsed=rows.map(m=>{
         const isDup=entries.some(e=>e.notes&&e.notes.includes(m.gmailId));
         return {gmailId:m.gmailId,subject:m.subject||"(no subject)",from:m.from||"",date:parseDate(m.date)||today(),body:(m.body||"").slice(0,600),isDup,skip:isDup};
@@ -1686,12 +1686,12 @@ Body: ${email.body}`;
     <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
       <span style={{fontSize:26}}>📧</span>
       <div><h2 style={{margin:0,fontSize:18,color:"#5a3a1a"}}>Email → Entry</h2>
-        <div style={{fontSize:11,color:"#aa8a5a"}}>Scan Gmail for emails tagged #trackerv2 (last 60 days)</div>
+        <div style={{fontSize:11,color:"#aa8a5a"}}>Scan Gmail for emails tagged #Trackerv23 (last 60 days)</div>
       </div>
     </div>
 
     <button onClick={scanGmail} disabled={scanning} className="scan-btn" style={{width:"100%",marginBottom:12}}>
-      {scanning?"⏳ Scanning…":"📬 Scan Gmail for #trackerv2 Emails"}
+      {scanning?"⏳ Scanning…":"📬 Scan Gmail for #Trackerv23 Emails"}
     </button>
 
     {statusMsg&&<div style={{fontSize:12,color:"#5a3a1a",background:"#fff8f0",padding:"8px 12px",borderRadius:8,marginBottom:12}}>{statusMsg}</div>}
@@ -2013,7 +2013,7 @@ function App(){
           <button onClick={()=>setShowMatcher(true)} title="Payment Matcher: Paste an SMS bank credit alert (e.g. 'Cr ₹50,000 by NEFT') and it finds the matching unpaid invoice automatically." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontWeight:600}}>💳 Match</button>
           <button onClick={()=>setShowLogistics(true)} title="Logistics Tracker: Track every Sales-Payment invoice through 4 stages — Despatched → In Transit → Delivered → Payment Received. Upload LR copy, paid LR, POD, and payment proof at each stage." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c8e8",background:"#f0f6ff",color:"#1a3a6a",cursor:"pointer",fontWeight:600}}>🚚 Logistics</button>
           <button onClick={()=>setShowLedger(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #d8c8a8",background:"#fff8f0",color:"#5a3a1a",cursor:"pointer",fontWeight:600}}>📑 Ledger</button>
-          <button onClick={()=>setShowEmailScan(true)} title="Scan Gmail for emails tagged #trackerv2 and create entries automatically" style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c0e8",background:"#f0f4ff",color:"#1a2a6a",cursor:"pointer",fontWeight:600}}>📧 Email</button>
+          <button onClick={()=>setShowEmailScan(true)} title="Scan Gmail for emails tagged #Trackerv23 and create entries automatically" style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c0e8",background:"#f0f4ff",color:"#1a2a6a",cursor:"pointer",fontWeight:600}}>📧 Email</button>
           <button onClick={()=>setShowShare(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>🔗 Share</button>
           <button onClick={()=>setShowDD(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>⚙️</button>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
