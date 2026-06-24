@@ -12,7 +12,7 @@ exports.handler = async (event) => {
 
   // ⚠️ REPLACE this with the Web App URL of the standalone Email Intel script
   // (the one ending in /exec). Until then, calls return a clear error.
-  const INTEL_URL = "PASTE_EMAIL_INTEL_EXEC_URL_HERE";
+  const INTEL_URL = "https://script.google.com/macros/s/AKfycbzrHnwD0oLRxGNyJ7UlagG9SSvmr5l3_NUgKB3ZDYhWn4m0APmrrmKUdkE3fQK1F7yI/exec";
 
   if (INTEL_URL.indexOf("PASTE_") === 0) {
     return { statusCode: 200, headers: h, body: JSON.stringify({ ok: false, error: "Intel script URL not set yet" }) };
