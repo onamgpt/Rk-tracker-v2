@@ -22,7 +22,7 @@ exports.handler = async (event) => {
   });
 
   try {
-    const { prompt, system, imageBase64, imageType } = JSON.parse(event.body || "{}");
+    const { prompt, system, imageBase64, imageType, pdfBase64 } = JSON.parse(event.body || "{}");
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return { statusCode: 500, headers: h, body: JSON.stringify({ error: "API key not set in Netlify environment variables" }) };
 
@@ -31,10 +31,13 @@ exports.handler = async (event) => {
       const imgData = imageBase64.length > 1000000 ? imageBase64.slice(0, 1000000) : imageBase64;
       content.push({ type: "image", source: { type: "base64", media_type: imageType || "image/jpeg", data: imgData } });
     }
+    if (pdfBase64) {
+      content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfBase64 } });
+    }
     content.push({ type: "text", text: prompt || "Hello" });
 
     const reqBody = JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
+      model: pdfBase64 ? "claude-sonnet-4-6" : "claude-haiku-4-5-20251001",
       max_tokens: 1500,
       system: system || "You are a helpful assistant for Onam Agarbathi Pvt. Ltd., a Bangalore incense manufacturer.",
       messages: [{ role: "user", content }]
