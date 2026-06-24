@@ -935,7 +935,7 @@ function getLogisticsStageIdx(entry){
   return idx; // -1 means not yet despatched
 }
 
-function LogisticsTracker({entries,onClose,onUpdateEntry}){
+function LogisticsTracker({entries,onClose,onUpdateEntry,onNewSalesOrder}){
   const [selectedId,setSelectedId]=useState(null);
   const [uploading,setUploading]=useState(false);
 
@@ -1017,8 +1017,14 @@ function LogisticsTracker({entries,onClose,onUpdateEntry}){
       <div><h2 style={{margin:0,fontSize:18,color:"#1a3a6a"}}>Logistics Tracker</h2>
         <div style={{fontSize:11,color:"#6a8aaa"}}>Despatch → Transit → Delivered → Payment</div></div>
     </div>
+    <button onClick={()=>{onClose&&onClose();onNewSalesOrder&&onNewSalesOrder();}} style={{width:"100%",padding:"11px",marginBottom:10,borderRadius:10,border:"none",background:"#1a5a8a",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>+ New Sales Order to Track</button>
     <div style={{display:"flex",flexDirection:"column",gap:6}}>
-      {shipments.length===0&&<div style={{textAlign:"center",padding:30,color:"#999",fontSize:13}}>No Sales - Payment invoices yet.</div>}
+      {shipments.length===0&&<div style={{textAlign:"center",padding:"24px 16px",color:"#999",fontSize:12,lineHeight:1.6,background:"#fafafa",borderRadius:10}}>
+        <div style={{fontSize:30,marginBottom:8}}>🚚</div>
+        <b style={{color:"#666"}}>Nothing to track yet</b><br/>
+        Logistics tracks each sale from <b>despatch → payment</b>.<br/>
+        Tap <b>+ New Sales Order</b> above (or create any entry with category <b>Sales - Order</b> / <b>Sales - Payment</b>), and it appears here with stage buttons.
+      </div>}
       {shipments.map(e=>{
         const stageIdx=getLogisticsStageIdx(e);
         const stageName=stageIdx>=0?LOGISTICS_STAGES[stageIdx]:"Not despatched";
@@ -2188,7 +2194,7 @@ function App(){
     <Modal open={showAI} onClose={()=>setShowAI(false)} wide><AIPanel entries={entries} onClose={()=>setShowAI(false)} onShowAgeing={()=>setShowAgeing(true)} onShowMatcher={()=>setShowMatcher(true)} onShowLogistics={()=>setShowLogistics(true)} onShowLedger={()=>setShowLedger(true)}/></Modal>
     <Modal open={showAgeing} onClose={()=>setShowAgeing(false)} wide><AgeingReport entries={entries} onClose={()=>setShowAgeing(false)} onMarkPaid={markPaid}/></Modal>
     <Modal open={showMatcher} onClose={()=>setShowMatcher(false)} wide><PaymentMatcher entries={entries} onClose={()=>setShowMatcher(false)} onMarkPaid={markPaid}/></Modal>
-    <Modal open={showLogistics} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
+    <Modal open={showLogistics} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={(e)=>saveEntry(e,{silent:true})} onNewSalesOrder={()=>{setEditE({category:"Sales - Order",paymentStatus:"Payment Pending"});setShowForm(true);}}/></Modal>
     <Modal open={showLedger} onClose={()=>setShowLedger(false)} wide><LedgerUpload entries={entries} onClose={()=>setShowLedger(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
     <Modal open={showEmailScan} onClose={()=>setShowEmailScan(false)} wide><EmailScan entries={entries} onClose={()=>setShowEmailScan(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
     <Modal open={showDD} onClose={()=>setShowDD(false)} wide><DropdownManager dropdowns={dropdowns} onSave={saveDropdowns} onClose={()=>setShowDD(false)}/></Modal>
