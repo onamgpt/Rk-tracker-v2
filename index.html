@@ -204,13 +204,13 @@ async function sheetsAPI(action,data={}){
 }
 
 // ── CLAUDE API ────────────────────────────────────────────────────────────────
-async function claudeAPI(prompt,system,imageBase64,imageType){
+async function claudeAPI(prompt,system,imageBase64,imageType,pdfBase64){
   // Route through Netlify function to avoid CORS on iPhone Safari
   try{
     const r=await fetch("/.netlify/functions/claude",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt,system,imageBase64,imageType})
+      body:JSON.stringify({prompt,system,imageBase64,imageType,pdfBase64})
     });
     if(!r.ok) throw new Error("Server error: "+r.status);
     const d=await r.json();
@@ -1568,24 +1568,37 @@ function EmailScan({entries,onClose,onSaveEntry}){
   };
 
   const parseEmailToEntry=async(email)=>{
-    const prompt=`You are parsing a sales order / invoice email for Onam Agarbathi Pvt. Ltd. 
-Extract these fields from the email and return ONLY valid JSON:
+    // Pick first readable attachment (PDF preferred, else image) for AI to read.
+    const atts=(email.attachments||[]).filter(a=>a.base64&&(a.type||"").match(/pdf|image/));
+    const pdfAtt=atts.find(a=>(a.type||"").indexOf("pdf")>-1);
+    const imgAtt=atts.find(a=>(a.type||"").indexOf("image")>-1);
+    const prompt=`You are parsing a sales order / invoice for Onam Agarbathi Pvt. Ltd. 
+Use BOTH the email text AND any attached invoice/document to extract these fields. Return ONLY valid JSON:
 {
-  "title": "concise title starting with To: [customer name] or From: [vendor]",
+  "title": "concise title starting with To: [customer name] for sales, or From: [vendor] for purchase",
   "category": "Sales - Order" or "Sales - Payment" or "Business - Purchase" (pick best fit),
-  "amount": number or null,
+  "amount": "amount with ₹ if present",
   "person": "customer name if sales",
   "vendor": "vendor name if purchase",
-  "notes": "invoice number, product details, any key info",
-  "paymentStatus": "Payment Pending" or "Paid"
+  "invoiceNo": "invoice/order number if any",
+  "notes": "products, quantities, GSTIN, payment terms, any key info from email AND attachment",
+  "paymentStatus": "Payment Pending" or "Paid",
+  "summary": "one-line summary for the intelligence log"
 }
 
 Email Subject: ${email.subject}
 From: ${email.from}
 Date: ${email.date}
 Body: ${email.body}`;
-    const txt=await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.","","");
+    let txt;
     try{
+      if(pdfAtt){
+        txt=await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.","","",pdfAtt.base64);
+      }else if(imgAtt){
+        txt=await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.",imgAtt.base64,imgAtt.type,"");
+      }else{
+        txt=await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.","","","");
+      }
       let clean=txt.replace(/\`\`\`json/g,"").replace(/\`\`\`/g,"").trim();
       return JSON.parse(clean);
     }catch(e){return null;}
@@ -1594,10 +1607,16 @@ Body: ${email.body}`;
   const importAll=async()=>{
     const toImport=emails.filter(e=>!e.skip);
     if(toImport.length===0){setStatusMsg("Nothing to import.");return;}
-    setScanning(true);setStatusMsg(`Importing ${toImport.length} email(s)…`);
+    setScanning(true);
     let created=0;
-    for(const email of toImport){
+    for(let k=0;k<toImport.length;k++){
+      const email=toImport[k];
+      setStatusMsg(`Reading email ${k+1} of ${toImport.length}${(email.attachments||[]).some(a=>a.base64)?" (+ attachment)":""}…`);
       const parsed=await parseEmailToEntry(email);
+      // Store readable attachments on the entry (so they live with the record).
+      const storedAtts=(email.attachments||[])
+        .filter(a=>a.base64&&a.data)
+        .map(a=>({name:a.name,type:a.type,data:a.data,base64:a.base64}));
       const entry={
         id:genId(),
         title:parsed?.title||email.subject,
@@ -1607,14 +1626,34 @@ Body: ${email.body}`;
         vendor:parsed?.vendor||"",
         amount:parsed?.amount?String(parsed.amount):"",
         paymentStatus:parsed?.paymentStatus||"Payment Pending",
-        notes:(parsed?.notes||"")+" [From email: "+email.subject+"] [gmailId:"+email.gmailId+"]",
+        notes:(parsed?.notes||"")
+          +(parsed?.invoiceNo?(" | Inv: "+parsed.invoiceNo):"")
+          +" [From email: "+email.subject+"]"
+          +(storedAtts.length?(" ["+storedAtts.length+" attachment(s)]"):"")
+          +" [gmailId:"+email.gmailId+"]",
+        attachments:storedAtts,
         createdAt:new Date().toISOString(),
         tags:[]
       };
       await onSaveEntry(entry);
+      // Write to the Intelligence log so the AI can pick it up later.
+      try{
+        await sheetsAPI("logIntel",{intel:{
+          date:email.date,
+          source:"email",
+          title:entry.title,
+          vendor:parsed?.vendor||"",
+          customer:parsed?.person||"",
+          amount:parsed?.amount||"",
+          invoiceNo:parsed?.invoiceNo||"",
+          category:entry.category,
+          summary:parsed?.summary||email.subject,
+          gmailId:email.gmailId
+        }});
+      }catch(e){/* non-fatal */}
       created++;
     }
-    setStatusMsg(`✅ Imported ${created} email(s) as entries.`);
+    setStatusMsg(`✅ Imported ${created} email(s) — attachments stored + logged to Intelligence.`);
     setEmails(prev=>prev.map(e=>({...e,skip:true})));
     setScanning(false);
   };
@@ -1645,6 +1684,7 @@ Body: ${email.body}`;
               <div style={{fontSize:13,fontWeight:600,color:"#333",marginBottom:2}}>{email.subject}</div>
               <div style={{fontSize:10,color:"#888"}}>{email.from} · {fmtDate(email.date)}</div>
               <div style={{fontSize:10,color:"#aaa",marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{email.body.slice(0,80)}…</div>
+              {(email.attachments||[]).filter(a=>a.base64).length>0&&<div style={{fontSize:10,color:"#2a7",marginTop:3,fontWeight:600}}>📎 {(email.attachments||[]).filter(a=>a.base64).length} attachment(s) will be read & stored</div>}
             </div>
             <label style={{display:"flex",alignItems:"center",gap:4,fontSize:11,marginLeft:8,cursor:"pointer",flexShrink:0}}>
               <input type="checkbox" checked={!email.skip} onChange={()=>setEmails(prev=>prev.map((e,j)=>j===i?{...e,skip:!e.skip}:e))}/>
