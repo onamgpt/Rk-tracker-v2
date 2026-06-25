@@ -16,7 +16,7 @@ exports.handler = async (event) => {
       res.on("end", () => resolve(data));
     });
     req.on("error", reject);
-    req.setTimeout(25000, () => { req.destroy(); reject(new Error("Timeout")); });
+    req.setTimeout(24000, () => { req.destroy(); reject(new Error("Timeout")); });
     req.write(body);
     req.end();
   });
@@ -56,7 +56,7 @@ exports.handler = async (event) => {
     }, reqBody);
 
     const d = JSON.parse(raw);
-    if (d.error) return { statusCode: 500, headers: h, body: JSON.stringify({ error: d.error.message }) };
+    if (d.error) return { statusCode: 200, headers: h, body: JSON.stringify({ text: "", error: d.error.message }) };
     return { statusCode: 200, headers: h, body: JSON.stringify({ text: d.content?.[0]?.text || "" }) };
   } catch (e) {
     return { statusCode: 500, headers: h, body: JSON.stringify({ error: e.message }) };
