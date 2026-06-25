@@ -1642,20 +1642,31 @@ Date: ${email.date}
 Body: ${email.body}`;
     // Detect Google Drive / cloud links (these are NOT real attachments and can't be read).
     const driveLinks=(email.body||"").match(/https?:\/\/(drive|docs)\.google\.com\/[^\s)]+/g)||[];
-    let txt;
+    async function attempt(){
+      if(pdfAtt) return await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.","","",pdfAtt.base64);
+      if(imgAtt) return await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.",imgAtt.base64,imgAtt.type,"");
+      return await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.","","","");
+    }
+    function tryParse(t){
+      try{ let c=String(t||"").replace(/\`\`\`json/g,"").replace(/\`\`\`/g,"").trim();
+        const s=c.indexOf("{"),e=c.lastIndexOf("}"); if(s>=0&&e>s)c=c.substring(s,e+1);
+        return JSON.parse(c);
+      }catch(e){return null;}
+    }
+    let obj=null;
     try{
-      if(pdfAtt){
-        txt=await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.","","",pdfAtt.base64);
-      }else if(imgAtt){
-        txt=await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.",imgAtt.base64,imgAtt.type,"");
-      }else{
-        txt=await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.","","","");
+      let txt=await attempt();
+      obj=tryParse(txt);
+      // retry once if empty/failed (covers a timed-out or truncated first call)
+      if(!obj||(!obj.amount&&!obj.person&&!obj.vendor&&!obj.title)){
+        let txt2=await attempt();
+        const obj2=tryParse(txt2);
+        if(obj2)obj=obj2;
       }
-      let clean=txt.replace(/\`\`\`json/g,"").replace(/\`\`\`/g,"").trim();
-      const obj=JSON.parse(clean);
-      if(driveLinks.length)obj._driveLinks=driveLinks;
-      return obj;
-    }catch(e){return driveLinks.length?{_driveLinks:driveLinks}:null;}
+    }catch(e){obj=null;}
+    if(obj&&driveLinks.length)obj._driveLinks=driveLinks;
+    if(!obj&&driveLinks.length)obj={_driveLinks:driveLinks};
+    return obj;
   };
 
   const importAll=async()=>{
@@ -1671,19 +1682,10 @@ Body: ${email.body}`;
       const storedAtts=(email.attachments||[])
         .filter(a=>a.base64&&a.data)
         .map(a=>({name:a.name,type:a.type,data:a.data,base64:a.base64}));
-      // Clean date — strip any time component / timezone, normalise to YYYY-MM-DD
-      const cleanDate=parseDate(String(email.date||"").slice(0,10))||today();
-      // Detect placeholder titles the AI returns when it cannot read details
-      const rawTitle=(parsed&&parsed.title)?String(parsed.title):"";
-      const isPlaceholder=/not specified|not found|pending|\[.*\]/i.test(rawTitle);
-      // Build a sensible title: prefer real extracted, else clean the subject
-      const subjClean=String(email.subject||"Email order").replace(/#Trackerv23/ig,"").replace(/fwd:|re:/ig,"").trim();
-      const finalTitle=(rawTitle&&!isPlaceholder)?rawTitle:subjClean||"Email order";
-      const needsReview=isPlaceholder||!parsed||(!parsed.amount&&!parsed.person&&!parsed.vendor);
       const entry={
         id:genId(),
-        title:finalTitle,
-        date:cleanDate,
+        title:parsed?.title||email.subject,
+        date:email.date,
         category:parsed?.category||"Sales - Order",
         person:parsed?.person||"",
         vendor:parsed?.vendor||"",
@@ -1692,7 +1694,6 @@ Body: ${email.body}`;
         notes:(parsed?.notes||"")
           +(parsed?.invoiceNo?(" | Inv: "+parsed.invoiceNo):"")
           +((parsed&&parsed._driveLinks&&parsed._driveLinks.length)?(" | Drive file(s): "+parsed._driveLinks.join(" ")):"")
-          +(needsReview?" ⚠️ NEEDS REVIEW: AI could not read order details from attachment — open and fill manually.":"")
           +" [From email: "+email.subject+"]"
           +(storedAtts.length?(" ["+storedAtts.length+" attachment(s)]"):" [no readable attachment]")
           +" [gmailId:"+email.gmailId+"]",
