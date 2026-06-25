@@ -1625,7 +1625,7 @@ function EmailScan({entries,onClose,onSaveEntry}){
 Use BOTH the email text AND any attached invoice/document to extract these fields. Return ONLY valid JSON:
 {
   "title": "concise title starting with To: [customer name] for sales, or From: [vendor] for purchase",
-  "category": "Sales - Order" or "Sales - Payment" or "Business - Purchase" (pick best fit),
+  "category": "Sales - Order" or "Sales - Payment" or "Business - Purchase". RULES: if the email/attachment is a SALES ORDER, purchase order, or order from a customer/buyer (e.g. CRPF, CSD, a dealer) → ALWAYS use "Sales - Order". If it is a payment receipt/invoice for a sale → "Sales - Payment". If WE are buying materials → "Business - Purchase". When the words "sales order" or "order" appear, default to "Sales - Order".
   "amount": "amount with ₹ if present",
   "person": "customer name if sales",
   "vendor": "vendor name if purchase",
