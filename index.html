@@ -1671,10 +1671,19 @@ Body: ${email.body}`;
       const storedAtts=(email.attachments||[])
         .filter(a=>a.base64&&a.data)
         .map(a=>({name:a.name,type:a.type,data:a.data,base64:a.base64}));
+      // Clean date — strip any time component / timezone, normalise to YYYY-MM-DD
+      const cleanDate=parseDate(String(email.date||"").slice(0,10))||today();
+      // Detect placeholder titles the AI returns when it cannot read details
+      const rawTitle=(parsed&&parsed.title)?String(parsed.title):"";
+      const isPlaceholder=/not specified|not found|pending|\[.*\]/i.test(rawTitle);
+      // Build a sensible title: prefer real extracted, else clean the subject
+      const subjClean=String(email.subject||"Email order").replace(/#Trackerv23/ig,"").replace(/fwd:|re:/ig,"").trim();
+      const finalTitle=(rawTitle&&!isPlaceholder)?rawTitle:subjClean||"Email order";
+      const needsReview=isPlaceholder||!parsed||(!parsed.amount&&!parsed.person&&!parsed.vendor);
       const entry={
         id:genId(),
-        title:parsed?.title||email.subject,
-        date:email.date,
+        title:finalTitle,
+        date:cleanDate,
         category:parsed?.category||"Sales - Order",
         person:parsed?.person||"",
         vendor:parsed?.vendor||"",
@@ -1683,6 +1692,7 @@ Body: ${email.body}`;
         notes:(parsed?.notes||"")
           +(parsed?.invoiceNo?(" | Inv: "+parsed.invoiceNo):"")
           +((parsed&&parsed._driveLinks&&parsed._driveLinks.length)?(" | Drive file(s): "+parsed._driveLinks.join(" ")):"")
+          +(needsReview?" ⚠️ NEEDS REVIEW: AI could not read order details from attachment — open and fill manually.":"")
           +" [From email: "+email.subject+"]"
           +(storedAtts.length?(" ["+storedAtts.length+" attachment(s)]"):" [no readable attachment]")
           +" [gmailId:"+email.gmailId+"]",
