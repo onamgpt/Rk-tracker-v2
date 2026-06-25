@@ -1625,7 +1625,7 @@ function EmailScan({entries,onClose,onSaveEntry}){
 Use BOTH the email text AND any attached invoice/document to extract these fields. Return ONLY valid JSON:
 {
   "title": "concise title starting with To: [customer name] for sales, or From: [vendor] for purchase",
-  "category": "Sales - Order" or "Sales - Payment" or "Business - Purchase". RULES: if the email/attachment is a SALES ORDER, purchase order, or order from a customer/buyer (e.g. CRPF, CSD, a dealer) → ALWAYS use "Sales - Order". If it is a payment receipt/invoice for a sale → "Sales - Payment". If WE are buying materials → "Business - Purchase". When the words "sales order" or "order" appear, default to "Sales - Order".
+  "category": "Sales - Order" or "Sales - Payment" or "Business - Purchase" (pick best fit),
   "amount": "amount with ₹ if present",
   "person": "customer name if sales",
   "vendor": "vendor name if purchase",
@@ -1639,6 +1639,8 @@ Email Subject: ${email.subject}
 From: ${email.from}
 Date: ${email.date}
 Body: ${email.body}`;
+    // Detect Google Drive / cloud links (these are NOT real attachments and can't be read).
+    const driveLinks=(email.body||"").match(/https?:\/\/(drive|docs)\.google\.com\/[^\s)]+/g)||[];
     let txt;
     try{
       if(pdfAtt){
@@ -1649,8 +1651,10 @@ Body: ${email.body}`;
         txt=await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.","","","");
       }
       let clean=txt.replace(/\`\`\`json/g,"").replace(/\`\`\`/g,"").trim();
-      return JSON.parse(clean);
-    }catch(e){return null;}
+      const obj=JSON.parse(clean);
+      if(driveLinks.length)obj._driveLinks=driveLinks;
+      return obj;
+    }catch(e){return driveLinks.length?{_driveLinks:driveLinks}:null;}
   };
 
   const importAll=async()=>{
@@ -1677,8 +1681,9 @@ Body: ${email.body}`;
         paymentStatus:parsed?.paymentStatus||"Payment Pending",
         notes:(parsed?.notes||"")
           +(parsed?.invoiceNo?(" | Inv: "+parsed.invoiceNo):"")
+          +((parsed&&parsed._driveLinks&&parsed._driveLinks.length)?(" | Drive file(s): "+parsed._driveLinks.join(" ")):"")
           +" [From email: "+email.subject+"]"
-          +(storedAtts.length?(" ["+storedAtts.length+" attachment(s)]"):"")
+          +(storedAtts.length?(" ["+storedAtts.length+" attachment(s)]"):" [no readable attachment]")
           +" [gmailId:"+email.gmailId+"]",
         attachments:storedAtts,
         createdAt:new Date().toISOString(),
