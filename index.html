@@ -1101,9 +1101,10 @@ function LedgerUpload({entries,onClose,onSaveEntry}){
         `Return ONLY a valid JSON array, one object per transaction row: `+
         `[{"date":"YYYY-MM-DD","name":"${isSales?"customer":"vendor"} name","amount":number,"invoiceNo":"invoice/voucher number if present","notes":"any other relevant detail"}]. `+
         `Skip header rows, subtotal rows, and blank rows. Include every real transaction row found.`;
+      const isPDF=(att.type||"").indexOf("pdf")>-1;
       const txt=await claudeAPI(prompt,
         "You are a ledger data extraction assistant for Onam Agarbathi Pvt. Ltd. Return ONLY valid JSON, no markdown, no explanation.",
-        att.base64,att.type);
+        isPDF?"":att.base64, isPDF?"":att.type, isPDF?att.base64:"");
       let rows=[];
       try{
         let clean=txt.replace(/```json/g,"").replace(/```/g,"").trim();
@@ -1837,38 +1838,33 @@ function App(){
 
   const saveEntry=async(entry,opts)=>{
     setSaving(true);
-    // 1) SAVE LOCALLY FIRST — instant, never blocked by network. This is the fix for
-    //    the "saving for 10 min" hang: the entry is in the list before any upload.
-    setEntries(p=>{const ex=p.find(x=>x.id===entry.id);const updated=ex?p.map(x=>x.id===entry.id?entry:x):[entry,...p];saveCache(updated);return updated;});
+    // Upload any base64 attachments to Google Drive first
+    var finalEntry=Object.assign({},entry);
+    if(entry.attachments&&entry.attachments.length>0&&url){
+      try{
+        var uploaded=await Promise.all(entry.attachments.map(function(a){
+          if(a&&a.data&&a.data.length>100&&a.type!=="drive"){
+            return uploadToDrive(a);
+          }
+          return Promise.resolve(a);
+        }));
+        finalEntry=Object.assign({},entry,{attachments:uploaded});
+        // Set link to first Drive URL if link field is empty
+        var firstDrive=uploaded.find(function(a){return a&&a.type==="drive";});
+        if(firstDrive&&!finalEntry.link){
+          finalEntry.link=firstDrive.data;
+          finalEntry.linkLabel="📎 Photo";
+        }
+      }catch(e){}
+    }
+    setEntries(p=>{const ex=p.find(x=>x.id===finalEntry.id);const updated=ex?p.map(x=>x.id===finalEntry.id?finalEntry:x):[finalEntry,...p];saveCache(updated);return updated;});
+    sheetsAPI("save",{entry:finalEntry}).then(r=>{
+      setSyncStatus(r.error?"📱 Saved locally · syncing...":"✅ Saved · backed up to Sheets");
+    }).catch(()=>setSyncStatus("📱 Saved locally"));
     if(entry.person&&!dropdowns.persons.includes(entry.person))addToDropdown("persons",entry.person);
     if(entry.vendor&&!dropdowns.vendors.includes(entry.vendor))addToDropdown("vendors",entry.vendor);
     if(entry.account&&!dropdowns.accounts.includes(entry.account))addToDropdown("accounts",entry.account);
-    // Close the form right away — user is never left staring at a spinner.
     setSaving(false);if(!opts||!opts.silent){setShowForm(false);setEditE(null);}
-
-    // 2) BACKGROUND: upload attachments to Drive (with a 25s timeout each) then sync.
-    (async()=>{
-      var finalEntry=Object.assign({},entry);
-      function withTimeout(p,ms){return Promise.race([p,new Promise(function(res){setTimeout(function(){res(null);},ms);})]);}
-      if(entry.attachments&&entry.attachments.length>0&&url){
-        try{
-          var uploaded=await Promise.all(entry.attachments.map(function(a){
-            if(a&&a.data&&a.data.length>100&&a.type!=="drive"&&a.data.indexOf("http")!==0){
-              return withTimeout(uploadToDrive(a),25000).then(function(r){return r||a;});
-            }
-            return Promise.resolve(a);
-          }));
-          finalEntry=Object.assign({},entry,{attachments:uploaded});
-          var firstDrive=uploaded.find(function(a){return a&&a.type==="drive";});
-          if(firstDrive&&!finalEntry.link){finalEntry.link=firstDrive.data;finalEntry.linkLabel="📎 Photo";}
-          // update local copy with Drive links
-          setEntries(p=>{const updated=p.map(x=>x.id===finalEntry.id?finalEntry:x);saveCache(updated);return updated;});
-        }catch(e){}
-      }
-      withTimeout(sheetsAPI("save",{entry:finalEntry}),25000).then(function(r){
-        setSyncStatus(!r?"📱 Saved locally · sync pending":(r.error?"📱 Saved locally · syncing...":"✅ Saved · backed up to Sheets"));
-      }).catch(function(){setSyncStatus("📱 Saved locally");});
-    })();
   };
 
   const delEntry=async(id)=>{
