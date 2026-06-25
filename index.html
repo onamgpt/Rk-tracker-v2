@@ -1690,8 +1690,16 @@ Body: ${email.body}`;
         tags:[]
       };
       await intelAPI("saveEntry",{entry});
-      // Also add to the app's local list immediately so it shows without waiting for sync.
-      try{ if(onSaveEntry) await onSaveEntry(entry); }catch(e){}
+      // Add to the app's local list immediately. Pass a LIGHT copy without heavy base64
+      // attachments so the local save can't stall on a Drive upload — the actual file is
+      // already stored via the email script + referenced in notes.
+      try{
+        if(onSaveEntry){
+          const lightAtts=(entry.attachments||[]).map(a=>({name:a.name,type:a.type,data:(a.data&&a.data.indexOf("http")===0)?a.data:"",note:"stored via email"}));
+          const lightEntry=Object.assign({},entry,{attachments:lightAtts});
+          await onSaveEntry(lightEntry);
+        }
+      }catch(e){}
       // Write to the Intelligence log so the AI can pick it up later.
       try{
         await intelAPI("logIntel",{intel:{
