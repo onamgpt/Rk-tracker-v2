@@ -1910,54 +1910,64 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
   };
 
   const parseEmailToEntry=async(email)=>{
-    // Pick first readable attachment (PDF preferred, else image) for AI to read.
     const atts=(email.attachments||[]).filter(a=>a.base64&&(a.type||"").match(/pdf|image/));
     const pdfAtt=atts.find(a=>(a.type||"").indexOf("pdf")>-1);
     const imgAtt=atts.find(a=>(a.type||"").indexOf("image")>-1);
-    const prompt=`You are parsing a sales order / invoice for Onam Agarbathi Pvt. Ltd. 
-Use BOTH the email text AND any attached invoice/document to extract these fields. Return ONLY valid JSON:
-{
-  "title": "concise title starting with To: [customer name] for sales, or From: [vendor] for purchase",
-  "category": "Sales - Order" or "Sales - Payment" or "Business - Purchase" (pick best fit),
-  "amount": "amount with ₹ if present",
-  "person": "customer name if sales",
-  "vendor": "vendor name if purchase",
-  "invoiceNo": "invoice/order number if any",
-  "notes": "products, quantities, GSTIN, payment terms, any key info from email AND attachment",
-  "paymentStatus": "Payment Pending" or "Paid",
-  "summary": "one-line summary for the intelligence log"
-}
-
-Email Subject: ${email.subject}
-From: ${email.from}
-Date: ${email.date}
-Body: ${email.body}`;
-    // Detect Google Drive / cloud links (these are NOT real attachments and can't be read).
-    const driveLinks=(email.body||"").match(/https?:\/\/(drive|docs)\.google\.com\/[^\s)]+/g)||[];
-    async function attempt(){
-      if(pdfAtt) return await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.","","",pdfAtt.base64);
-      if(imgAtt) return await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.",imgAtt.base64,imgAtt.type,"");
-      return await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.","","","");
-    }
+    const driveLinks=((email.body||"")+(email.subject||"")).match(/https?:\/\/(drive|docs)\.google\.com\/[^\s)<"]+/g)||[];
+    const prompt="You are an expert Indian accountant parsing a business email for Onam Agarbathi Pvt. Ltd. (incense manufacturer, Bangalore).\n"+
+"RULES:\n"+
+"- Email FROM a supplier/vendor (Chemixil, raw material, chemical, packaging) = category Business - Purchase\n"+
+"- Email about SALES order to dealer/customer = Sales - Order\n"+
+"- Payment confirmation = Sales - Payment or Business - Purchase\n"+
+"- Title must be SHORT: VendorName Invoice Rs.Amount for purchase, CustomerName Order for sales\n"+
+"- NEVER use 'From: Onam Agarbathi' as title — Onam is the buyer not seller\n"+
+"- Extract EXACT rupee total (Grand Total / Amount Chargeable / Total)\n"+
+"- Vendor = company on letterhead / FROM field. NOT the consignee\n"+
+"- Payment terms: 60 days credit → reminderDays=60, 30 days → 30, immediate → 0\n"+
+"- Read attached image/PDF carefully for vendor, invoice no, total, GST, payment terms\n"+
+"Return ONLY valid JSON no markdown:\n"+
+'{"title":"Chemixil Invoice Rs.350528","category":"Business - Purchase","amount":"350528","vendor":"Chemixil Corporation","person":"","invoiceNo":"26-27/453","gstinVendor":"29AADFC0308A1Z8","paymentTerms":"60 days","reminderDays":60,"paymentStatus":"Payment Pending","notes":"Sp Comp BL-11 334kg at Rs.887/kg | CGST 9% Rs.26735 | SGST 9% Rs.26735 | Total Rs.350528","summary":"Chemixil raw material purchase Rs.3.5L 60 day credit"}\n'+
+"\nEmail Subject: "+email.subject+"\nFrom: "+email.from+"\nDate: "+email.date+"\nBody: "+(email.body||"").slice(0,800);
     function tryParse(t){
-      try{ let c=String(t||"").replace(/\`\`\`json/g,"").replace(/\`\`\`/g,"").trim();
-        const s=c.indexOf("{"),e=c.lastIndexOf("}"); if(s>=0&&e>s)c=c.substring(s,e+1);
+      try{
+        let c=String(t||"").replace(/```json/g,"").replace(/```/g,"").trim();
+        const s=c.indexOf("{"),e=c.lastIndexOf("}");
+        if(s>=0&&e>s)c=c.substring(s,e+1);
         return JSON.parse(c);
       }catch(e){return null;}
+    }
+    async function attempt(){
+      if(pdfAtt) return await claudeAPI(prompt,"Return ONLY valid JSON no markdown.","","",pdfAtt.base64);
+      if(imgAtt) return await claudeAPI(prompt,"Return ONLY valid JSON no markdown.",imgAtt.base64,imgAtt.type,"");
+      if(driveLinks.length>0){
+        try{
+          const driveId=driveLinks[0].match(/[-\w]{25,}/)?.[0];
+          if(driveId){
+            const imgRes=await fetch("/.netlify/functions/intel",{
+              method:"POST",headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({action:"fetchDriveFile",driveId})
+            });
+            const imgData=await imgRes.json();
+            if(imgData.base64){
+              return await claudeAPI(prompt,"Return ONLY valid JSON no markdown.",imgData.base64,imgData.mimeType||"image/jpeg","");
+            }
+          }
+        }catch(e){}
+      }
+      return await claudeAPI(prompt,"Return ONLY valid JSON no markdown.","","","");
     }
     let obj=null;
     try{
       let txt=await attempt();
       obj=tryParse(txt);
-      // retry once if empty/failed (covers a timed-out or truncated first call)
-      if(!obj||(!obj.amount&&!obj.person&&!obj.vendor&&!obj.title)){
+      if(!obj||(!obj.amount&&!obj.vendor&&!obj.title)){
         let txt2=await attempt();
         const obj2=tryParse(txt2);
-        if(obj2)obj=obj2;
+        if(obj2&&(obj2.amount||obj2.vendor))obj=obj2;
       }
     }catch(e){obj=null;}
-    if(obj&&driveLinks.length)obj._driveLinks=driveLinks;
-    if(!obj&&driveLinks.length)obj={_driveLinks:driveLinks};
+    if(obj)obj._driveLinks=driveLinks;
+    else if(driveLinks.length)obj={_driveLinks:driveLinks};
     return obj;
   };
 
@@ -1968,69 +1978,68 @@ Body: ${email.body}`;
     let created=0;
     for(let k=0;k<toImport.length;k++){
       const email=toImport[k];
-      setStatusMsg(`Reading email ${k+1} of ${toImport.length}${(email.attachments||[]).some(a=>a.base64)?" (+ attachment)":""}…`);
+      setStatusMsg("Reading email "+(k+1)+" of "+toImport.length+" — extracting invoice details…");
       const parsed=await parseEmailToEntry(email);
-      // Store readable attachments on the entry (so they live with the record).
-      const storedAtts=(email.attachments||[])
-        .filter(a=>a.base64&&a.data)
-        .map(a=>({name:a.name,type:a.type,data:a.data,base64:a.base64}));
+      // Build reminder date from payment terms
+      let reminderDate="",reminderNote="";
+      const rdays=parsed&&parsed.reminderDays?parseInt(parsed.reminderDays):0;
+      if(rdays>0){
+        const rd=new Date(email.date);rd.setDate(rd.getDate()+rdays);
+        reminderDate=rd.toISOString().slice(0,10);
+        reminderNote="Pay by "+rd.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})+" ("+rdays+" day credit)";
+      }
+      const storedAtts=(email.attachments||[]).filter(a=>a.base64&&a.data).map(a=>({name:a.name,type:a.type,data:a.data,base64:a.base64}));
+      const driveAtts=((parsed&&parsed._driveLinks)||[]).map(l=>({name:"Invoice (Drive)",type:"drive",data:l}));
+      const allAtts=[...storedAtts,...driveAtts];
+      const cleanTitle=parsed&&parsed.title?parsed.title:(parsed&&parsed.vendor?(parsed.vendor+(parsed.amount?" Rs."+Number(parsed.amount).toLocaleString("en-IN"):"")):email.subject);
       const entry={
         id:genId(),
-        title:parsed?.title||email.subject,
+        title:cleanTitle,
         date:email.date,
-        category:parsed?.category||"Sales - Order",
-        person:parsed?.person||"",
-        vendor:parsed?.vendor||"",
-        amount:parsed?.amount?String(parsed.amount):"",
-        paymentStatus:parsed?.paymentStatus||"Payment Pending",
-        notes:(parsed?.notes||"")
-          +(parsed?.invoiceNo?(" | Inv: "+parsed.invoiceNo):"")
-          +((parsed&&parsed._driveLinks&&parsed._driveLinks.length)?(" | Drive file(s): "+parsed._driveLinks.join(" ")):"")
-          +" [From email: "+email.subject+"]"
-          +(storedAtts.length?(" ["+storedAtts.length+" attachment(s)]"):" [no readable attachment]")
-          +" [gmailId:"+email.gmailId+"]",
-        attachments:storedAtts,
+        category:(parsed&&parsed.category)||"Business - Purchase",
+        person:(parsed&&parsed.person)||"",
+        vendor:(parsed&&parsed.vendor)||"",
+        amount:(parsed&&parsed.amount)?String(parsed.amount):"",
+        paymentStatus:(parsed&&parsed.paymentStatus)||"Payment Pending",
+        reminder:reminderDate,
+        reminderNote:reminderNote,
+        link:((parsed&&parsed._driveLinks)||[])[0]||"",
+        linkLabel:((parsed&&parsed._driveLinks)||[]).length?"Invoice":"",
+        notes:((parsed&&parsed.notes)||"")+
+          ((parsed&&parsed.invoiceNo)?(" | Inv: "+parsed.invoiceNo):"")+
+          ((parsed&&parsed.gstinVendor)?(" | GSTIN: "+parsed.gstinVendor):"")+
+          ((parsed&&parsed.paymentTerms)?(" | Terms: "+parsed.paymentTerms):"")+
+          " [gmailId:"+email.gmailId+"]",
+        attachments:allAtts,
         createdAt:new Date().toISOString(),
-        tags:[]
+        tags:["Payment Due"]
       };
       await intelAPI("saveEntry",{entry});
-      // Add to the app's local list immediately. Pass a LIGHT copy without heavy base64
-      // attachments so the local save can't stall on a Drive upload — the actual file is
-      // already stored via the email script + referenced in notes.
       try{
         if(onSaveEntry){
-          const lightAtts=(entry.attachments||[]).map(a=>({name:a.name,type:a.type,data:(a.data&&a.data.indexOf("http")===0)?a.data:"",note:"stored via email"}));
-          const lightEntry=Object.assign({},entry,{attachments:lightAtts});
-          await onSaveEntry(lightEntry);
+          const lightAtts=allAtts.map(a=>({name:a.name,type:a.type,data:(a.data&&typeof a.data==="string"&&a.data.startsWith("http"))?a.data:""}));
+          await onSaveEntry(Object.assign({},entry,{attachments:lightAtts}));
         }
       }catch(e){}
-      // Write to the Intelligence log so the AI can pick it up later.
       try{
         await intelAPI("logIntel",{intel:{
-          date:email.date,
-          source:"email",
-          title:entry.title,
-          vendor:parsed?.vendor||"",
-          customer:parsed?.person||"",
-          amount:parsed?.amount||"",
-          invoiceNo:parsed?.invoiceNo||"",
-          category:entry.category,
-          summary:parsed?.summary||email.subject,
+          date:email.date,source:"email",title:entry.title,
+          vendor:(parsed&&parsed.vendor)||"",customer:(parsed&&parsed.person)||"",
+          amount:(parsed&&parsed.amount)||"",invoiceNo:(parsed&&parsed.invoiceNo)||"",
+          category:entry.category,summary:(parsed&&parsed.summary)||email.subject,
           gmailId:email.gmailId
         }});
-      }catch(e){/* non-fatal */}
-      // remember we imported this email so re-scans skip it (survives reload)
+      }catch(e){}
       try{
         const s=JSON.parse(localStorage.getItem("importedGmailIds")||"[]");
         if(!s.includes(email.gmailId)){s.push(email.gmailId);localStorage.setItem("importedGmailIds",JSON.stringify(s.slice(-500)));}
       }catch(e){}
       created++;
     }
-    setStatusMsg(`✅ Imported ${created} email(s). Refreshing list…`);
+    setStatusMsg("Imported "+created+" email(s). Refreshing list…");
     setEmails(prev=>prev.map(e=>({...e,skip:true})));
-    // Pull the new rows from the sheet into the home list right away.
     try{ if(onRefresh) await onRefresh(); }catch(e){}
-    setStatusMsg(`✅ Imported ${created} email(s) — now in your entries list + Intelligence log.`);
+    setStatusMsg("Imported "+created+" email(s) — now in your entries list + Intelligence log.");
     setScanning(false);
   };
 
