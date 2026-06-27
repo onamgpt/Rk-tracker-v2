@@ -61,10 +61,25 @@ exports.handler = async (event) => {
     var action = body.action || "ping";
     var raw;
 
-    if (action === "saveEntry" || action === "logIntel") {
+    if (action === "fetchDriveFile") {
+      const driveId = body.driveId;
+      if (!driveId) return { statusCode: 400, headers: h, body: JSON.stringify({ error: "No driveId" }) };
+      const fileData = await new Promise((resolve, reject) => {
+        const tryFetch = (url) => {
+          https.get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
+            if (res.statusCode === 301 || res.statusCode === 302) { tryFetch(res.headers.location); return; }
+            const chunks = [];
+            res.on("data", c => chunks.push(c));
+            res.on("end", () => resolve({ buffer: Buffer.concat(chunks), type: res.headers["content-type"] || "image/jpeg" }));
+          }).on("error", reject);
+        };
+        tryFetch("https://drive.google.com/uc?export=download&id=" + driveId);
+      });
+      const b64 = fileData.buffer.toString("base64");
+      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, base64: b64, mimeType: fileData.type }) };
+    } else if (action === "saveEntry" || action === "logIntel") {
       raw = await makePost(INTEL_URL, JSON.stringify(body));
     } else {
-      // scanEmails, getIntel, ping → GET with action param
       raw = await makeGet(INTEL_URL + "?action=" + encodeURIComponent(action));
     }
 
