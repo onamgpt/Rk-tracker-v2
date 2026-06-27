@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="RK Tracker"/>
 <meta name="theme-color" content="#2a1800"/>
-<title>RK Life Tracker</title>
+<title>RK Life Tracker</title><!-- build:2.4 -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -1377,7 +1377,22 @@ function EntryForm({initial,onSave,onClose,dropdowns,onAddToDropdown,saving}){
     </div>
     <div style={{marginBottom:18}}>
       <label className="lbl">📎 Attachments — Camera / Gallery / Files</label>
-      <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+      <div style={{position:"sticky",top:0,zIndex:100,background:"#fdf8ef",padding:"8px 0 10px",marginBottom:6,borderBottom:"2px solid #e0c87a",display:"flex",gap:8,justifyContent:"space-between",alignItems:"center"}}>
+      <span style={{fontSize:12,color:"#7a6a3a",fontWeight:700}}>{f.title||"New Entry"}</span>
+      <div style={{display:"flex",gap:8}}>
+        <button className="bgh" onClick={onClose} style={{fontSize:12,padding:"8px 16px"}}>✕ Cancel</button>
+        <button className="bg" disabled={saving||busy} onClick={async()=>{
+            if(!f.title.trim()){alert("Please add a title.");return;}
+            if(!f.date){alert("Please set a date.");return;}
+            if(f.tags&&f.tags.length>0){onSave(f);return;}
+            setBusy(true);const autoTags=await suggestTags(f);setBusy(false);
+            onSave(autoTags.length>0?{...f,tags:autoTags}:f);
+          }} style={{fontSize:12,padding:"8px 20px",opacity:(saving||busy)?.7:1}}>
+          {busy?"🏷️ Tagging…":saving?"Saving…":"💾 Save"}
+        </button>
+      </div>
+    </div>
+    <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
         <button onClick={()=>{const i=document.createElement("input");i.type="file";i.accept="image/*";i.capture="environment";i.onchange=e=>handleFiles(e.target.files);i.click();}}
           style={{padding:"8px 14px",borderRadius:8,border:"none",background:"#2a7a2a",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}}>📷 Camera</button>
         <button onClick={()=>fileRef.current.click()}
@@ -2124,33 +2139,35 @@ function App(){
 
   const saveEntry=async(entry,opts)=>{
     setSaving(true);
-    // Upload any base64 attachments to Google Drive first
+    // STEP 1: Save locally immediately — never wait for Drive
     var finalEntry=Object.assign({},entry);
-    if(entry.attachments&&entry.attachments.length>0&&url){
-      try{
-        var uploaded=await Promise.all(entry.attachments.map(function(a){
-          if(a&&a.data&&a.data.length>100&&a.type!=="drive"){
-            return uploadToDrive(a);
-          }
-          return Promise.resolve(a);
-        }));
-        finalEntry=Object.assign({},entry,{attachments:uploaded});
-        // Set link to first Drive URL if link field is empty
-        var firstDrive=uploaded.find(function(a){return a&&a.type==="drive";});
-        if(firstDrive&&!finalEntry.link){
-          finalEntry.link=firstDrive.data;
-          finalEntry.linkLabel="📎 Photo";
-        }
-      }catch(e){}
-    }
     setEntries(p=>{const ex=p.find(x=>x.id===finalEntry.id);const updated=ex?p.map(x=>x.id===finalEntry.id?finalEntry:x):[finalEntry,...p];saveCache(updated);return updated;});
-    sheetsAPI("save",{entry:finalEntry}).then(r=>{
-      setSyncStatus(r.error?"📱 Saved locally · syncing...":"✅ Saved · backed up to Sheets");
-    }).catch(()=>setSyncStatus("📱 Saved locally"));
+    setSaving(false);
+    if(!opts||!opts.silent){setShowForm(false);setEditE(null);}
+    setSyncStatus("📱 Saved locally · uploading…");
+    // STEP 2: Upload attachments to Drive in background (non-blocking)
+    var uploadPromise=Promise.resolve(finalEntry);
+    if(entry.attachments&&entry.attachments.length>0&&url){
+      uploadPromise=Promise.all(entry.attachments.map(function(a){
+        if(a&&a.data&&a.data.length>100&&a.type!=="drive"){return uploadToDrive(a);}
+        return Promise.resolve(a);
+      })).then(function(uploaded){
+        var withDrive=Object.assign({},entry,{attachments:uploaded});
+        var firstDrive=uploaded.find(function(a){return a&&a.type==="drive";});
+        if(firstDrive&&!withDrive.link){withDrive.link=firstDrive.data;withDrive.linkLabel="📎 Photo";}
+        setEntries(p=>{const updated=p.map(x=>x.id===withDrive.id?withDrive:x);saveCache(updated);return updated;});
+        return withDrive;
+      }).catch(function(){return finalEntry;});
+    }
+    // STEP 3: Save to Sheets in background
+    uploadPromise.then(function(entryWithDrive){
+      sheetsAPI("save",{entry:entryWithDrive}).then(r=>{
+        setSyncStatus(r.error?"📱 Saved locally · sync pending":"✅ Saved · backed up to Sheets");
+      }).catch(()=>setSyncStatus("📱 Saved locally"));
+    });
     if(entry.person&&!dropdowns.persons.includes(entry.person))addToDropdown("persons",entry.person);
     if(entry.vendor&&!dropdowns.vendors.includes(entry.vendor))addToDropdown("vendors",entry.vendor);
     if(entry.account&&!dropdowns.accounts.includes(entry.account))addToDropdown("accounts",entry.account);
-    setSaving(false);if(!opts||!opts.silent){setShowForm(false);setEditE(null);}
   };
 
   const delEntry=async(id)=>{
