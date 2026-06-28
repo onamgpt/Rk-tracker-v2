@@ -1609,6 +1609,334 @@ function exportPDF(entries,label){
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
+
+// ── LocationTracker — scan location emails, calculate distance, log allowance ──
+// SALES TEAM CONFIG — update Monday with real emails + allowances
+const SALES_CONFIG = {
+  // email (lowercase) → { name, hq, hqLat, hqLng }
+  emailMap: {
+    // UPDATE MONDAY — replace these with real email addresses
+    "biju@gmail.com":       { name:"Biju",      hq:"Kottayam",    hqLat:9.5916,  hqLng:76.5222 },
+    "satish@gmail.com":     { name:"Satish",    hq:"Calicut",     hqLat:11.2588, hqLng:75.7804 },
+    "sugeesh@gmail.com":    { name:"Sugeesh",   hq:"Calicut",     hqLat:11.2588, hqLng:75.7804 },
+    "sunil@gmail.com":      { name:"Sunil",     hq:"Calicut",     hqLat:11.2588, hqLng:75.7804 },
+    "sadasivan@gmail.com":  { name:"Sadasivan", hq:"Coimbatore",  hqLat:11.0168, hqLng:76.9558 },
+    "murugan@gmail.com":    { name:"Murugan",   hq:"Nagercoil",   hqLat:8.1833,  hqLng:77.4119 },
+    "sooraj@gmail.com":     { name:"Sooraj",    hq:"Trivandrum",  hqLat:8.5241,  hqLng:76.9366 },
+    "sebi@gmail.com":       { name:"Sebi",      hq:"TBD",         hqLat:0,       hqLng:0       },
+  },
+  // Distance bands (road distance = straight line x 1.20)
+  bands: [
+    { label:"HQ",         maxKm:100,  color:"#2a8a4a", emoji:"🏠" },
+    { label:"Ex-HQ",      maxKm:300,  color:"#2a6a8a", emoji:"🚗" },
+    { label:"Outstation", maxKm:9999, color:"#8a2a2a", emoji:"✈️" },
+  ],
+  // UPDATE MONDAY — daily allowance amounts in ₹
+  allowance: { "HQ": 0, "Ex-HQ": 0, "Outstation": 0 },
+};
+
+// Haversine straight-line distance in km
+function haversineKm(lat1, lng1, lat2, lng2) {
+  var R = 6371;
+  var dLat = (lat2 - lat1) * Math.PI / 180;
+  var dLng = (lng2 - lng1) * Math.PI / 180;
+  var a = Math.sin(dLat/2)*Math.sin(dLat/2) +
+    Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
+    Math.sin(dLng/2)*Math.sin(dLng/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// Road distance estimate = straight line x 1.20
+function roadDistanceKm(lat1, lng1, lat2, lng2) {
+  return haversineKm(lat1, lng1, lat2, lng2) * 1.20;
+}
+
+function classifyDistance(km) {
+  for (var i = 0; i < SALES_CONFIG.bands.length; i++) {
+    if (km <= SALES_CONFIG.bands[i].maxKm) return SALES_CONFIG.bands[i];
+  }
+  return SALES_CONFIG.bands[SALES_CONFIG.bands.length - 1];
+}
+
+// Extract GPS coordinates from various Google Maps link formats
+function extractCoords(text) {
+  if (!text) return null;
+  // Format: @lat,lng or ?q=lat,lng or ll=lat,lng or /place/.../@lat,lng
+  var patterns = [
+    /@(-?\d+\.\d+),(-?\d+\.\d+)/,
+    /[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/,
+    /ll=(-?\d+\.\d+),(-?\d+\.\d+)/,
+    /maps\?.*q=(-?\d+\.\d+)%2C(-?\d+\.\d+)/,
+    /\/(-?\d+\.\d{4,}),(-?\d+\.\d{4,})/,
+  ];
+  for (var i = 0; i < patterns.length; i++) {
+    var m = text.match(patterns[i]);
+    if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+  }
+  return null;
+}
+
+function LocationTracker({ onClose, onSaveEntry, entries }) {
+  const [scanning, setScanning]   = useState(false);
+  const [emails, setEmails]       = useState([]);
+  const [statusMsg, setStatusMsg] = useState("");
+  const [view, setView]           = useState("scan"); // scan | summary
+  const [importing, setImporting] = useState(false);
+
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  // Scan Gmail for #location emails
+  const scanLocationEmails = async () => {
+    setScanning(true);
+    setStatusMsg("📡 Scanning Gmail for location emails…");
+    setEmails([]);
+    try {
+      const res = await fetch("/.netlify/functions/intel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "scanLocationEmails" })
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Scan failed");
+
+      const processed = (data.emails || []).map(email => {
+        const fromEmail = (email.from || "").toLowerCase().replace(/.*<|>.*/g, "").trim();
+        const salesperson = SALES_CONFIG.emailMap[fromEmail] || null;
+        const coords = extractCoords(email.body) || extractCoords(email.subject);
+        let distKm = null, band = null, allowance = 0;
+        if (coords && salesperson && salesperson.hqLat) {
+          distKm = roadDistanceKm(salesperson.hqLat, salesperson.hqLng, coords.lat, coords.lng);
+          band = classifyDistance(distKm);
+          allowance = SALES_CONFIG.allowance[band.label] || 0;
+        }
+        return { ...email, fromEmail, salesperson, coords, distKm, band, allowance };
+      });
+
+      // Filter out already imported
+      const imported = JSON.parse(localStorage.getItem("importedLocationIds") || "[]");
+      const fresh = processed.filter(e => !imported.includes(e.gmailId));
+      setEmails(fresh);
+      setStatusMsg(fresh.length === 0
+        ? "No new location emails found. Ask team to send with #location in subject."
+        : `Found ${fresh.length} location email(s) — review below`);
+    } catch(e) {
+      setStatusMsg("❌ Error: " + e.message);
+    }
+    setScanning(false);
+  };
+
+  const importAll = async () => {
+    setImporting(true);
+    let count = 0;
+    for (const email of emails) {
+      if (email.skip) continue;
+      if (!email.salesperson || !email.coords || !email.band) continue;
+
+      const entry = {
+        id: genId(),
+        title: email.salesperson.name + " — " + email.band.label + " · " +
+               (email.distKm ? Math.round(email.distKm) + "km" : "?km") +
+               (email.allowance ? " · ₹" + email.allowance : ""),
+        date: email.date,
+        category: "Sales - Expense",
+        person: email.salesperson.name,
+        amount: String(email.allowance || 0),
+        paymentStatus: "Payment Pending",
+        tags: ["Travel", email.band.label],
+        notes: "Location: " + (email.coords ? email.coords.lat + "," + email.coords.lng : "?") +
+               " | HQ: " + (email.salesperson.hq) +
+               " | Distance: " + (email.distKm ? Math.round(email.distKm) + " km (road est.)" : "?") +
+               " | Category: " + (email.band ? email.band.label : "?") +
+               " | Allowance: ₹" + (email.allowance || "TBD") +
+               " [gmailId:" + email.gmailId + "]",
+        createdAt: new Date().toISOString(),
+      };
+
+      try { if (onSaveEntry) await onSaveEntry(entry); } catch(e) {}
+
+      // Mark as imported
+      try {
+        const s = JSON.parse(localStorage.getItem("importedLocationIds") || "[]");
+        if (!s.includes(email.gmailId)) { s.push(email.gmailId); localStorage.setItem("importedLocationIds", JSON.stringify(s.slice(-500))); }
+      } catch(e) {}
+      count++;
+    }
+    setEmails(prev => prev.map(e => ({ ...e, skip: true })));
+    setStatusMsg("✅ Imported " + count + " location(s)");
+    setImporting(false);
+  };
+
+  // Monthly summary from entries
+  const now = new Date();
+  const thisMonth = now.getMonth();
+  const thisYear = now.getFullYear();
+  const locationEntries = (entries || []).filter(e =>
+    e.category === "Sales - Expense" && (e.tags || []).includes("Travel") &&
+    e.date && new Date(e.date).getMonth() === thisMonth &&
+    new Date(e.date).getFullYear() === thisYear
+  );
+
+  // Group by person
+  const byPerson = {};
+  locationEntries.forEach(e => {
+    if (!byPerson[e.person]) byPerson[e.person] = { hq:0, exhq:0, outstation:0, total:0, entries:[] };
+    const p = byPerson[e.person];
+    if ((e.tags||[]).includes("HQ")) p.hq++;
+    else if ((e.tags||[]).includes("Ex-HQ")) p.exhq++;
+    else if ((e.tags||[]).includes("Outstation")) p.outstation++;
+    p.total += parseFloat(e.amount || 0);
+    p.entries.push(e);
+  });
+
+  const fmt = n => n == null ? "—" : "₹" + Number(n).toLocaleString("en-IN");
+
+  return (
+    <div style={{ padding: 16, maxWidth: 600, margin: "0 auto" }}>
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
+        <span style={{ fontSize:28 }}>📍</span>
+        <div>
+          <h2 style={{ margin:0, fontSize:17, color:"#1a3a6a" }}>Sales Location Tracker</h2>
+          <div style={{ fontSize:11, color:"#6a8aaa" }}>Team sends #location email → auto distance + allowance</div>
+        </div>
+      </div>
+
+      {/* Tab switcher */}
+      <div style={{ display:"flex", gap:6, marginBottom:14 }}>
+        {[["scan","📡 Scan Emails"],["summary","📊 Monthly Summary"]].map(([v,l]) =>
+          <button key={v} onClick={() => setView(v)}
+            style={{ flex:1, padding:"8px 4px", borderRadius:8, border:"none", fontSize:12, fontWeight:700,
+              background: view===v ? "#1a3a6a" : "#e8eef8", color: view===v ? "#fff" : "#1a3a6a", cursor:"pointer" }}>
+            {l}
+          </button>
+        )}
+      </div>
+
+      {/* ── SCAN VIEW ── */}
+      {view === "scan" && <>
+        <div style={{ background:"#f0f8ff", borderRadius:10, padding:12, marginBottom:12, fontSize:11, color:"#2a4a6a" }}>
+          <b>📋 How it works:</b><br/>
+          1. Sales officer shares location on WhatsApp<br/>
+          2. Forwards to Gmail with <b>#location</b> in subject<br/>
+          3. You tap Scan — distance auto-calculated from their HQ<br/>
+          4. Tap Import — entry logged with allowance amount
+        </div>
+
+        <button onClick={scanLocationEmails} disabled={scanning}
+          className="bg" style={{ width:"100%", marginBottom:10 }}>
+          {scanning ? "⏳ Scanning Gmail…" : "📡 Scan Location Emails"}
+        </button>
+
+        {statusMsg && <div style={{ fontSize:12, color: statusMsg.startsWith("❌") ? "#8b0000" : "#1a5a1a",
+          background: statusMsg.startsWith("❌") ? "#fff0f0" : "#f0fff0",
+          padding:"8px 12px", borderRadius:8, marginBottom:10 }}>{statusMsg}</div>}
+
+        {emails.filter(e => !e.skip).length > 0 && <>
+          <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:12 }}>
+            {emails.filter(e => !e.skip).map((email, idx) => {
+              const band = email.band;
+              const sp = email.salesperson;
+              const hasData = sp && email.coords && band;
+              return (
+                <div key={email.gmailId} style={{ background:"#f8f8f8", borderRadius:10,
+                  border: "1.5px solid " + (hasData ? (band.color + "60") : "#ddd"), padding:12 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                    <div>
+                      <div style={{ fontSize:13, fontWeight:700, color:"#1a1a1a" }}>
+                        {sp ? sp.name : "⚠️ Unknown sender"}
+                        {band && <span style={{ marginLeft:8, fontSize:11, fontWeight:700,
+                          color:band.color, background:band.color+"20",
+                          padding:"2px 8px", borderRadius:10 }}>{band.emoji} {band.label}</span>}
+                      </div>
+                      <div style={{ fontSize:10, color:"#888", marginTop:2 }}>
+                        {email.fromEmail} · {email.date}
+                      </div>
+                    </div>
+                    {email.distKm && <div style={{ textAlign:"right" }}>
+                      <div style={{ fontSize:14, fontWeight:700, color:band?.color }}>{Math.round(email.distKm)} km</div>
+                      <div style={{ fontSize:10, color:"#888" }}>from {sp?.hq}</div>
+                    </div>}
+                  </div>
+
+                  {hasData && <div style={{ marginTop:8, display:"flex", gap:6, flexWrap:"wrap" }}>
+                    <span style={{ fontSize:10, background:"#e8f5e9", color:"#1a5a1a",
+                      padding:"3px 8px", borderRadius:8 }}>
+                      📍 {email.coords.lat.toFixed(4)}, {email.coords.lng.toFixed(4)}
+                    </span>
+                    <span style={{ fontSize:10, background:"#fff8e7", color:"#8b6914",
+                      padding:"3px 8px", borderRadius:8 }}>
+                      💰 Allowance: {email.allowance ? fmt(email.allowance) : "Set Monday"}
+                    </span>
+                  </div>}
+
+                  {!sp && <div style={{ marginTop:6, fontSize:11, color:"#8b0000",
+                    background:"#fff0f0", padding:"4px 8px", borderRadius:6 }}>
+                    ⚠️ Email not mapped — add {email.fromEmail} to SALES_CONFIG Monday
+                  </div>}
+
+                  {sp && !email.coords && <div style={{ marginTop:6, fontSize:11, color:"#8b4500",
+                    background:"#fff8f0", padding:"4px 8px", borderRadius:6 }}>
+                    ⚠️ No GPS link found in email — ask {sp.name} to share Google Maps location link
+                  </div>}
+                </div>
+              );
+            })}
+          </div>
+
+          <button onClick={importAll} disabled={importing}
+            className="bg" style={{ width:"100%" }}>
+            {importing ? "⏳ Importing…" : "✅ Import All Location Entries"}
+          </button>
+        </>}
+      </>}
+
+      {/* ── MONTHLY SUMMARY VIEW ── */}
+      {view === "summary" && <>
+        <div style={{ fontSize:13, fontWeight:700, color:"#1a3a6a", marginBottom:10 }}>
+          {MONTHS[thisMonth]} {thisYear} — Travel Allowance Summary
+        </div>
+
+        {Object.keys(byPerson).length === 0
+          ? <div style={{ textAlign:"center", padding:"24px 16px", color:"#999", fontSize:12,
+              background:"#fafafa", borderRadius:10 }}>
+              No location entries this month yet.<br/>Scan and import emails above.
+            </div>
+          : <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {Object.entries(byPerson).map(([name, data]) => (
+                <div key={name} style={{ background:"#f8f8f8", borderRadius:10,
+                  border:"1px solid #e0e8f0", padding:12 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                    <div style={{ fontSize:14, fontWeight:700, color:"#1a3a6a" }}>{name}</div>
+                    <div style={{ fontSize:15, fontWeight:700, color:"#2a6a2a" }}>{fmt(data.total)}</div>
+                  </div>
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                    {data.hq > 0 && <span style={{ fontSize:11, background:"#e8f5e9", color:"#1a5a1a",
+                      padding:"3px 10px", borderRadius:8 }}>🏠 HQ: {data.hq} days</span>}
+                    {data.exhq > 0 && <span style={{ fontSize:11, background:"#e8f0ff", color:"#2a2a8a",
+                      padding:"3px 10px", borderRadius:8 }}>🚗 Ex-HQ: {data.exhq} days</span>}
+                    {data.outstation > 0 && <span style={{ fontSize:11, background:"#ffe8e8", color:"#8a2a2a",
+                      padding:"3px 10px", borderRadius:8 }}>✈️ Outstation: {data.outstation} days</span>}
+                    <span style={{ fontSize:11, background:"#f5f5f5", color:"#555",
+                      padding:"3px 10px", borderRadius:8 }}>Total: {data.entries.length} days</span>
+                  </div>
+                </div>
+              ))}
+
+              {/* Grand total */}
+              <div style={{ background:"#1a3a6a", borderRadius:10, padding:12,
+                display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div style={{ color:"#fff", fontSize:13, fontWeight:700 }}>Total Allowance Payable</div>
+                <div style={{ color:"#f0c060", fontSize:16, fontWeight:700 }}>
+                  {fmt(Object.values(byPerson).reduce((s, p) => s + p.total, 0))}
+                </div>
+              </div>
+            </div>
+        }
+      </>}
+    </div>
+  );
+}
+
 // ── TallyUpload — upload Trial Balance, AI reads & asks, shows P&L ──────────
 function TallyUpload({onClose}){
   const [step,setStep]=useState("upload"); // upload | questions | result
@@ -2103,6 +2431,7 @@ function App(){
   const [showLedger,setShowLedger]=useState(false);
   const [showEmailScan,setShowEmailScan]=useState(false);
   const [showTally,setShowTally]=useState(false);
+  const [showLocation,setShowLocation]=useState(false);
   const [showDD,setShowDD]=useState(false);
   const [showShare,setShowShare]=useState(false);
   const [search,setSearch]=useState("");
@@ -2375,6 +2704,7 @@ function App(){
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           <button onClick={()=>setShowAI(true)} className="ai-btn" style={{fontSize:11,padding:"6px 11px"}}>🧠 AI</button>
           <button onClick={()=>setShowTally(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#1a6a3a,#0a4a2a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>📊 Tally</button>
+          <button onClick={()=>setShowLocation(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#1a3a8a,#0a2a6a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>📍 Location</button>
           <button onClick={()=>setShowAgeing(true)} title="Ageing Report: Shows all unpaid Sales-Payment invoices grouped by overdue days (0-30, 30-60, 60+ days). Use this to chase payments." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #e89a9a",background:"#fff0f0",color:"#7a1a1a",cursor:"pointer",fontWeight:600}}>📊 Ageing</button>
           <button onClick={()=>setShowMatcher(true)} title="Payment Matcher: Paste an SMS bank credit alert (e.g. 'Cr ₹50,000 by NEFT') and it finds the matching unpaid invoice automatically." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontWeight:600}}>💳 Match</button>
           <button onClick={()=>setShowLogistics(true)} title="Logistics Tracker: Track every Sales-Payment invoice through 4 stages — Despatched → In Transit → Delivered → Payment Received. Upload LR copy, paid LR, POD, and payment proof at each stage." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c8e8",background:"#f0f6ff",color:"#1a3a6a",cursor:"pointer",fontWeight:600}}>🚚 Logistics</button>
@@ -2532,6 +2862,7 @@ function App(){
     <Modal open={showMatcher} onClose={()=>setShowMatcher(false)} wide><PaymentMatcher entries={entries} onClose={()=>setShowMatcher(false)} onMarkPaid={markPaid}/></Modal>
     <Modal open={showLogistics} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={(e)=>saveEntry(e,{silent:true})} onNewSalesOrder={()=>{setEditE({category:"Sales - Order",paymentStatus:"Payment Pending"});setShowForm(true);}}/></Modal>
     <Modal open={showLedger} onClose={()=>setShowLedger(false)} wide><LedgerUpload entries={entries} onClose={()=>setShowLedger(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
+    <Modal open={showLocation} onClose={()=>setShowLocation(false)} wide><LocationTracker onClose={()=>setShowLocation(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showTally} onClose={()=>setShowTally(false)} wide><TallyUpload onClose={()=>setShowTally(false)}/></Modal>
     <Modal open={showEmailScan} onClose={()=>setShowEmailScan(false)} wide><EmailScan entries={entries} onClose={()=>setShowEmailScan(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})} onRefresh={refresh}/></Modal>
     <Modal open={showDD} onClose={()=>setShowDD(false)} wide><DropdownManager dropdowns={dropdowns} onSave={saveDropdowns} onClose={()=>setShowDD(false)}/></Modal>
