@@ -77,6 +77,9 @@ exports.handler = async (event) => {
       });
       const b64 = fileData.buffer.toString("base64");
       return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, base64: b64, mimeType: fileData.type }) };
+    } else if (action === "scanLocationEmails") {
+      // Separate scan for #location emails — subject contains "location"
+      raw = await makeGet(INTEL_URL + "?action=scanLocationEmails");
     } else if (action === "saveEntry" || action === "logIntel") {
       raw = await makePost(INTEL_URL, JSON.stringify(body));
     } else {
