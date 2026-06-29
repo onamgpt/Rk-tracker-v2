@@ -2220,198 +2220,192 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
   const [scanning,setScanning]=useState(false);
   const [emails,setEmails]=useState([]);
   const [statusMsg,setStatusMsg]=useState("");
+  const [processing,setProcessing]=useState({});
 
   const scanGmail=async()=>{
-    setScanning(true);setEmails([]);setStatusMsg("Scanning Gmail for #trackerv2 emails…");
+    setScanning(true);setEmails([]);setStatusMsg("📡 Scanning Gmail for unread #Trackerv23 emails…");
     try{
       const res=await intelAPI("scanEmails");
       if(!res||res.error||res.ok===false){
-        setStatusMsg("Error: "+((res&&(res.error))||"could not reach Gmail. Make sure the Apps Script scanEmails action is deployed."));
+        setStatusMsg("Error: Intel error: "+((res&&res.error)||"Could not reach Gmail"));
         setScanning(false);return;
       }
       const rows=res.emails||[];
-      if(rows.length===0){setStatusMsg("No emails with #trackerv2 found in the last 60 days.");setScanning(false);return;}
-      const parsed=rows.map(m=>{
-        const importedSet=JSON.parse(localStorage.getItem("importedGmailIds")||"[]");
-        const isDup=importedSet.includes(m.gmailId)||entries.some(e=>e.notes&&e.notes.includes(m.gmailId));
-        return {gmailId:m.gmailId,subject:m.subject||"(no subject)",from:m.from||"",date:parseDate(m.date)||today(),body:(m.body||"").slice(0,600),isDup,skip:isDup};
-      });
+      if(rows.length===0){
+        setStatusMsg("✅ No new unread #Trackerv23 emails found.\nForward an invoice to Gmail with #Trackerv23 in subject to import it.");
+        setScanning(false);return;
+      }
+      const imported=JSON.parse(localStorage.getItem("importedGmailIds")||"[]");
+      const parsed=rows.map(m=>({
+        gmailId:m.gmailId,
+        subject:m.subject||"(no subject)",
+        from:m.from||"",
+        date:parseDate(m.date)||today(),
+        body:(m.body||"").slice(0,800),
+        attachments:m.attachments||[],
+        driveLinks:m.driveLinks||[],
+        isDup:imported.includes(m.gmailId)||entries.some(e=>e.notes&&e.notes.includes(m.gmailId)),
+        skip:imported.includes(m.gmailId)||entries.some(e=>e.notes&&e.notes.includes(m.gmailId))
+      }));
       setEmails(parsed);
-      setStatusMsg(`${parsed.length} email(s) ready. ${parsed.filter(e=>e.isDup).length} already imported.`);
+      const fresh=parsed.filter(e=>!e.isDup).length;
+      setStatusMsg(fresh===0?"✅ All emails already imported — nothing new.":`Found ${fresh} new email(s) — tap Import on each one`);
     }catch(err){setStatusMsg("Error: "+err.message);}
     setScanning(false);
   };
 
-  const parseEmailToEntry=async(email)=>{
-    const atts=(email.attachments||[]).filter(a=>a.base64&&(a.type||"").match(/pdf|image/));
-    const pdfAtt=atts.find(a=>(a.type||"").indexOf("pdf")>-1);
-    const imgAtt=atts.find(a=>(a.type||"").indexOf("image")>-1);
-    const driveLinks=((email.body||"")+(email.subject||"")).match(/https?:\/\/(drive|docs)\.google\.com\/[^\s)<"]+/g)||[];
-    const prompt="You are an expert Indian accountant parsing a business email for Onam Agarbathi Pvt. Ltd. (incense manufacturer, Bangalore).\n"+
+  const importOne=async(email)=>{
+    setProcessing(p=>({...p,[email.gmailId]:"reading"}));
+    try{
+      // Build content blocks for AI — all attachments + body
+      const atts=(email.attachments||[]).filter(a=>a.base64&&(a.type||"").match(/pdf|image/));
+      const prompt="You are an expert Indian accountant parsing a business email for Onam Agarbathi Pvt. Ltd. (incense manufacturer, Bangalore).\n"+
 "RULES:\n"+
 "- Email FROM a supplier/vendor (Chemixil, raw material, chemical, packaging) = category Business - Purchase\n"+
 "- Email about SALES order to dealer/customer = Sales - Order\n"+
 "- Payment confirmation = Sales - Payment or Business - Purchase\n"+
 "- Title must be SHORT: VendorName Invoice Rs.Amount for purchase, CustomerName Order for sales\n"+
-"- NEVER use 'From: Onam Agarbathi' as title — Onam is the buyer not seller\n"+
+"- NEVER use Onam Agarbathi as vendor — that is the buyer not seller\n"+
 "- Extract EXACT rupee total (Grand Total / Amount Chargeable / Total)\n"+
-"- Vendor = company on letterhead / FROM field. NOT the consignee\n"+
-"- Payment terms: 60 days credit → reminderDays=60, 30 days → 30, immediate → 0\n"+
-"- Read attached image/PDF carefully for vendor, invoice no, total, GST, payment terms\n"+
-"Return ONLY valid JSON no markdown:\n"+
-'{"title":"Chemixil Invoice Rs.350528","category":"Business - Purchase","amount":"350528","vendor":"Chemixil Corporation","person":"","invoiceNo":"26-27/453","gstinVendor":"29AADFC0308A1Z8","paymentTerms":"60 days","reminderDays":60,"paymentStatus":"Payment Pending","notes":"Sp Comp BL-11 334kg at Rs.887/kg | CGST 9% Rs.26735 | SGST 9% Rs.26735 | Total Rs.350528","summary":"Chemixil raw material purchase Rs.3.5L 60 day credit"}\n'+
-"\nEmail Subject: "+email.subject+"\nFrom: "+email.from+"\nDate: "+email.date+"\nBody: "+(email.body||"").slice(0,800);
-    function tryParse(t){
+"- Payment terms: 60 days credit = reminderDays 60, 30 days = 30, immediate = 0\n"+
+"- Read ALL attached images/PDFs carefully\n"+
+"Return ONLY valid JSON:\n"+
+"{\"title\":\"Chemixil Invoice Rs.350528\",\"category\":\"Business - Purchase\",\"amount\":\"350528\",\"vendor\":\"Chemixil Corporation\",\"person\":\"\",\"invoiceNo\":\"26-27/453\",\"paymentTerms\":\"60 days\",\"reminderDays\":60,\"paymentStatus\":\"Payment Pending\",\"notes\":\"Product details | CGST | SGST | Total\",\"summary\":\"brief summary\"}\n"+
+"\nEmail Subject: "+email.subject+"\nFrom: "+email.from+"\nDate: "+email.date+"\nBody: "+email.body;
+
+      // Send first PDF, or first image, or text only
+      let txt="";
+      const pdfAtt=atts.find(a=>(a.type||"").includes("pdf"));
+      const imgAtts=atts.filter(a=>(a.type||"").includes("image"));
+
+      if(pdfAtt){
+        txt=await claudeAPI(prompt,"Return ONLY valid JSON no markdown.","","",pdfAtt.base64);
+      } else if(imgAtts.length>0){
+        // Send ALL images — pass first as primary, rest in prompt
+        txt=await claudeAPI(prompt,"Return ONLY valid JSON no markdown.",imgAtts[0].base64,imgAtts[0].type,"");
+      } else {
+        txt=await claudeAPI(prompt,"Return ONLY valid JSON no markdown.","","","");
+      }
+
+      // Parse AI response
+      let obj=null;
       try{
-        let c=String(t||"").replace(/```json/g,"").replace(/```/g,"").trim();
+        let c=String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
         const s=c.indexOf("{"),e=c.lastIndexOf("}");
         if(s>=0&&e>s)c=c.substring(s,e+1);
-        return JSON.parse(c);
-      }catch(e){return null;}
-    }
-    async function attempt(){
-      if(pdfAtt) return await claudeAPI(prompt,"Return ONLY valid JSON no markdown.","","",pdfAtt.base64);
-      if(imgAtt) return await claudeAPI(prompt,"Return ONLY valid JSON no markdown.",imgAtt.base64,imgAtt.type,"");
-      if(driveLinks.length>0){
-        try{
-          const driveId=driveLinks[0].match(/[-\w]{25,}/)?.[0];
-          if(driveId){
-            const imgRes=await fetch("/.netlify/functions/intel",{
-              method:"POST",headers:{"Content-Type":"application/json"},
-              body:JSON.stringify({action:"fetchDriveFile",driveId})
-            });
-            const imgData=await imgRes.json();
-            if(imgData.base64){
-              return await claudeAPI(prompt,"Return ONLY valid JSON no markdown.",imgData.base64,imgData.mimeType||"image/jpeg","");
-            }
-          }
-        }catch(e){}
-      }
-      return await claudeAPI(prompt,"Return ONLY valid JSON no markdown.","","","");
-    }
-    let obj=null;
-    try{
-      let txt=await attempt();
-      obj=tryParse(txt);
-      if(!obj||(!obj.amount&&!obj.vendor&&!obj.title)){
-        let txt2=await attempt();
-        const obj2=tryParse(txt2);
-        if(obj2&&(obj2.amount||obj2.vendor))obj=obj2;
-      }
-    }catch(e){obj=null;}
-    if(obj)obj._driveLinks=driveLinks;
-    else if(driveLinks.length)obj={_driveLinks:driveLinks};
-    return obj;
-  };
+        obj=JSON.parse(c);
+      }catch(e){}
 
-  const importAll=async()=>{
-    const toImport=emails.filter(e=>!e.skip);
-    if(toImport.length===0){setStatusMsg("Nothing to import.");return;}
-    setScanning(true);
-    let created=0;
-    for(let k=0;k<toImport.length;k++){
-      const email=toImport[k];
-      setStatusMsg("Reading email "+(k+1)+" of "+toImport.length+" — extracting invoice details…");
-      const parsed=await parseEmailToEntry(email);
-      // Build reminder date from payment terms
+      // Build reminder date
       let reminderDate="",reminderNote="";
-      const rdays=parsed&&parsed.reminderDays?parseInt(parsed.reminderDays):0;
-      if(rdays>0){
-        const rd=new Date(email.date);rd.setDate(rd.getDate()+rdays);
+      if(obj&&obj.reminderDays&&obj.reminderDays>0){
+        const rd=new Date(email.date);rd.setDate(rd.getDate()+parseInt(obj.reminderDays));
         reminderDate=rd.toISOString().slice(0,10);
-        reminderNote="Pay by "+rd.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})+" ("+rdays+" day credit)";
+        reminderNote="Pay by "+rd.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})+" ("+obj.reminderDays+" day credit)";
       }
-      const storedAtts=(email.attachments||[]).filter(a=>a.base64&&a.data).map(a=>({name:a.name,type:a.type,data:a.data,base64:a.base64}));
-      const driveAtts=((parsed&&parsed._driveLinks)||[]).map(l=>({name:"Invoice (Drive)",type:"drive",data:l}));
-      const allAtts=[...storedAtts,...driveAtts];
-      const cleanTitle=parsed&&parsed.title?parsed.title:(parsed&&parsed.vendor?(parsed.vendor+(parsed.amount?" Rs."+Number(parsed.amount).toLocaleString("en-IN"):"")):email.subject);
+
+      // Build attachments for entry — keep all
+      const driveAtts=(email.driveLinks||[]).map(l=>({name:"Invoice (Drive)",type:"drive",data:l}));
+      const allAtts=[...atts.map(a=>({name:a.name,type:a.type,data:a.data||""})),...driveAtts];
+
+      const cleanTitle=obj&&obj.title?obj.title:(obj&&obj.vendor?(obj.vendor+(obj.amount?" Rs."+Number(obj.amount).toLocaleString("en-IN"):"")):(email.subject));
+
       const entry={
         id:genId(),
         title:cleanTitle,
         date:email.date,
-        category:(parsed&&parsed.category)||"Business - Purchase",
-        person:(parsed&&parsed.person)||"",
-        vendor:(parsed&&parsed.vendor)||"",
-        amount:(parsed&&parsed.amount)?String(parsed.amount):"",
-        paymentStatus:(parsed&&parsed.paymentStatus)||"Payment Pending",
+        category:(obj&&obj.category)||"Business - Purchase",
+        person:(obj&&obj.person)||"",
+        vendor:(obj&&obj.vendor)||"",
+        amount:(obj&&obj.amount)?String(obj.amount):"",
+        paymentStatus:(obj&&obj.paymentStatus)||"Payment Pending",
         reminder:reminderDate,
         reminderNote:reminderNote,
-        link:((parsed&&parsed._driveLinks)||[])[0]||"",
-        linkLabel:((parsed&&parsed._driveLinks)||[]).length?"Invoice":"",
-        notes:((parsed&&parsed.notes)||"")+
-          ((parsed&&parsed.invoiceNo)?(" | Inv: "+parsed.invoiceNo):"")+
-          ((parsed&&parsed.gstinVendor)?(" | GSTIN: "+parsed.gstinVendor):"")+
-          ((parsed&&parsed.paymentTerms)?(" | Terms: "+parsed.paymentTerms):"")+
+        link:(email.driveLinks||[])[0]||(allAtts[0]&&allAtts[0].data&&allAtts[0].data.startsWith("http")?allAtts[0].data:""),
+        linkLabel:(email.driveLinks||[]).length?"Invoice":atts.length?"📎 Attachment":"",
+        notes:((obj&&obj.notes)||"")+
+          ((obj&&obj.invoiceNo)?(" | Inv: "+obj.invoiceNo):"")+
+          ((obj&&obj.paymentTerms)?(" | Terms: "+obj.paymentTerms):"")+
           " [gmailId:"+email.gmailId+"]",
         attachments:allAtts,
-        createdAt:new Date().toISOString(),
-        tags:["Payment Due"]
+        tags:["Payment Due"],
+        createdAt:new Date().toISOString()
       };
+
+      // Save entry
       await intelAPI("saveEntry",{entry});
-      try{
-        if(onSaveEntry){
-          const lightAtts=allAtts.map(a=>({name:a.name,type:a.type,data:(a.data&&typeof a.data==="string"&&a.data.startsWith("http"))?a.data:""}));
-          await onSaveEntry(Object.assign({},entry,{attachments:lightAtts}));
-        }
-      }catch(e){}
-      try{
-        await intelAPI("logIntel",{intel:{
-          date:email.date,source:"email",title:entry.title,
-          vendor:(parsed&&parsed.vendor)||"",customer:(parsed&&parsed.person)||"",
-          amount:(parsed&&parsed.amount)||"",invoiceNo:(parsed&&parsed.invoiceNo)||"",
-          category:entry.category,summary:(parsed&&parsed.summary)||email.subject,
-          gmailId:email.gmailId
-        }});
-      }catch(e){}
-      try{
-        const s=JSON.parse(localStorage.getItem("importedGmailIds")||"[]");
-        if(!s.includes(email.gmailId)){s.push(email.gmailId);localStorage.setItem("importedGmailIds",JSON.stringify(s.slice(-500)));}
-      }catch(e){}
-      created++;
+      try{if(onSaveEntry)await onSaveEntry(Object.assign({},entry,{attachments:allAtts.map(a=>({name:a.name,type:a.type,data:(a.data&&a.data.startsWith&&a.data.startsWith("http"))?a.data:""}))}))}catch(e){}
+      try{await intelAPI("logIntel",{intel:{date:email.date,source:"email",title:entry.title,vendor:(obj&&obj.vendor)||"",customer:(obj&&obj.person)||"",amount:(obj&&obj.amount)||"",invoiceNo:(obj&&obj.invoiceNo)||"",category:entry.category,summary:(obj&&obj.summary)||email.subject,gmailId:email.gmailId}});}catch(e){}
+
+      // Mark imported
+      try{const s=JSON.parse(localStorage.getItem("importedGmailIds")||"[]");if(!s.includes(email.gmailId)){s.push(email.gmailId);localStorage.setItem("importedGmailIds",JSON.stringify(s.slice(-500)));}}catch(e){}
+
+      setEmails(prev=>prev.map(e=>e.gmailId===email.gmailId?{...e,skip:true,imported:true,importedTitle:cleanTitle}:e));
+      setProcessing(p=>({...p,[email.gmailId]:"done"}));
+      try{if(onRefresh)await onRefresh();}catch(e){}
+    }catch(err){
+      setProcessing(p=>({...p,[email.gmailId]:"error:"+err.message}));
     }
-    setStatusMsg("Imported "+created+" email(s). Refreshing list…");
-    setEmails(prev=>prev.map(e=>({...e,skip:true})));
-    try{ if(onRefresh) await onRefresh(); }catch(e){}
-    setStatusMsg("Imported "+created+" email(s) — now in your entries list + Intelligence log.");
-    setScanning(false);
   };
 
-  return<div>
+  const freshEmails=emails.filter(e=>!e.isDup);
+  const newEmails=emails.filter(e=>!e.skip);
+
+  return <div style={{padding:16,maxWidth:560,margin:"0 auto"}}>
     <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
       <span style={{fontSize:26}}>📧</span>
-      <div><h2 style={{margin:0,fontSize:18,color:"#5a3a1a"}}>Email → Entry</h2>
-        <div style={{fontSize:11,color:"#aa8a5a"}}>Scan Gmail for emails tagged #trackerv2 (last 60 days)</div>
+      <div>
+        <h2 style={{margin:0,fontSize:16,color:"#5a3a1a"}}>Email → Entry</h2>
+        <div style={{fontSize:11,color:"#9a8a6a"}}>Scan Gmail for unread #Trackerv23 emails</div>
       </div>
     </div>
 
-    <button onClick={scanGmail} disabled={scanning} className="scan-btn" style={{width:"100%",marginBottom:12}}>
-      {scanning?"⏳ Scanning…":"📬 Scan Gmail for #trackerv2 Emails"}
+    <div style={{background:"#f0f8ff",borderRadius:8,padding:10,marginBottom:12,fontSize:11,color:"#2a4a6a"}}>
+      <b>How to use:</b> Forward any invoice/order email to yourself with <b>#Trackerv23</b> in the subject. Then tap Scan.
+    </div>
+
+    <button onClick={scanGmail} disabled={scanning} className="bg" style={{width:"100%",marginBottom:10}}>
+      {scanning?"⏳ Scanning Gmail…":"📬 Scan Gmail for #Trackerv23 Emails"}
     </button>
 
-    {statusMsg&&<div style={{fontSize:12,color:"#5a3a1a",background:"#fff8f0",padding:"8px 12px",borderRadius:8,marginBottom:12}}>{statusMsg}</div>}
+    {statusMsg&&<div style={{fontSize:12,padding:"8px 12px",borderRadius:8,marginBottom:10,whiteSpace:"pre-line",
+      background:statusMsg.startsWith("Error")?"#fff0f0":"#f0fff0",
+      color:statusMsg.startsWith("Error")?"#8b0000":"#1a5a1a"}}>
+      {statusMsg}
+    </div>}
 
-    {emails.length>0&&<div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-        <span style={{fontSize:12,fontWeight:700,color:"#333"}}>{emails.filter(e=>!e.skip).length} new to import</span>
-        <button onClick={importAll} disabled={scanning||emails.every(e=>e.skip)} className="scan-btn" style={{padding:"8px 16px",fontSize:12}}>✅ Import All New</button>
-      </div>
-      {emails.map((email,i)=>(
-        <div key={email.gmailId} style={{background:email.skip?"#f5f5f5":"#f8fff8",borderRadius:10,border:"1px solid "+(email.skip?"#ddd":"#a8d8a8"),padding:"10px 13px",marginBottom:8,opacity:email.skip?0.6:1}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+    {freshEmails.length>0&&<div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {emails.map(email=>{
+        const state=processing[email.gmailId];
+        const isDone=email.imported||email.skip&&email.isDup;
+        return <div key={email.gmailId} style={{background:isDone?"#f0fff0":email.isDup?"#f5f5f5":"#fffdf7",
+          borderRadius:10,padding:12,border:"1.5px solid "+(isDone?"#c3e6cb":email.isDup?"#ddd":"#e8d8b0")}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:13,fontWeight:600,color:"#333",marginBottom:2}}>{email.subject}</div>
-              <div style={{fontSize:10,color:"#888"}}>{email.from} · {fmtDate(email.date)}</div>
-              <div style={{fontSize:10,color:"#aaa",marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{email.body.slice(0,80)}…</div>
-              {(email.attachments||[]).filter(a=>a.base64).length>0&&<div style={{fontSize:10,color:"#2a7",marginTop:3,fontWeight:600}}>📎 {(email.attachments||[]).filter(a=>a.base64).length} attachment(s) will be read & stored</div>}
+              <div style={{fontSize:12,fontWeight:700,color:"#1a1a1a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                {email.subject}
+              </div>
+              <div style={{fontSize:10,color:"#888",marginTop:2}}>
+                {email.from} · {email.date}
+                {(email.attachments||[]).length>0&&<span style={{marginLeft:6,color:"#2a6a2a"}}>📎 {email.attachments.length} attachment(s)</span>}
+                {(email.driveLinks||[]).length>0&&<span style={{marginLeft:6,color:"#6a2a8a"}}>🔗 Drive link</span>}
+              </div>
             </div>
-            <label style={{display:"flex",alignItems:"center",gap:4,fontSize:11,marginLeft:8,cursor:"pointer",flexShrink:0}}>
-              <input type="checkbox" checked={!email.skip} onChange={()=>setEmails(prev=>prev.map((e,j)=>j===i?{...e,skip:!e.skip}:e))}/>
-              Import
-            </label>
           </div>
-          {email.isDup&&<div style={{fontSize:10,color:"#aa6600",marginTop:4}}>⚠️ Already imported</div>}
-        </div>
-      ))}
+
+          {email.isDup&&!email.imported&&<div style={{fontSize:10,color:"#888",fontStyle:"italic"}}>Already imported</div>}
+          {email.imported&&<div style={{fontSize:11,color:"#1a5a1a",fontWeight:700}}>✅ Imported: {email.importedTitle}</div>}
+          {state&&state.startsWith("error")&&<div style={{fontSize:10,color:"#8b0000",marginTop:4}}>❌ {state.slice(6)}</div>}
+
+          {!email.isDup&&!email.imported&&<button
+            onClick={()=>importOne(email)}
+            disabled={state==="reading"}
+            className="bg"
+            style={{width:"100%",marginTop:8,fontSize:12,padding:"8px"}}>
+            {state==="reading"?"⏳ Reading invoice…":"🤖 Import with AI"}
+          </button>}
+        </div>;
+      })}
     </div>}
   </div>;
 }
