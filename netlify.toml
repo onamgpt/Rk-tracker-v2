@@ -6,3 +6,4 @@
   for = "/*"
   [headers.values]
     Access-Control-Allow-Origin = "*"
+# deploy trigger: v2.6
