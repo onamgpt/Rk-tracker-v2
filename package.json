@@ -1,0 +1,8 @@
+{
+  "name": "rk-tracker-v2",
+  "version": "1.0.0",
+  "description": "RK Life Tracker v2",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.0"
+  }
+}
