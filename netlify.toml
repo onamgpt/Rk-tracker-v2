@@ -6,7 +6,6 @@
   for = "/*"
   [headers.values]
     Access-Control-Allow-Origin = "*"
-# deploy trigger: v2.6
 
 [functions]
-  timeout = 26
+  node_bundler = "esbuild"
