@@ -20,14 +20,16 @@ exports.handler = async (event) => {
 
   function makeGet(targetUrl) {
     return new Promise(function (resolve, reject) {
-      https.get(targetUrl, { headers: { "User-Agent": "Mozilla/5.0" } }, function (res) {
+      var req = https.get(targetUrl, { headers: { "User-Agent": "Mozilla/5.0" }, timeout: 25000 }, function (res) {
         if (res.statusCode === 301 || res.statusCode === 302) {
           return makeGet(res.headers.location).then(resolve).catch(reject);
         }
         var data = "";
         res.on("data", function (c) { data += c; });
         res.on("end", function () { resolve(data); });
-      }).on("error", reject);
+      });
+      req.on("error", reject);
+      req.on("timeout", function() { req.destroy(); reject(new Error("Request timeout")); });
     });
   }
 
