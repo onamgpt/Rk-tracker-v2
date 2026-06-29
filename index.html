@@ -1941,6 +1941,486 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
   );
 }
 
+
+// ── SingleEmailScan — scan one email at a time, fast, no timeout ──────
+function SingleEmailScan({ onClose, onSaveEntry, onRefresh }) {
+  const [step, setStep]         = useState("ready"); // ready | scanning | reviewing | importing | done
+  const [email, setEmail]       = useState(null);
+  const [parsed, setParsed]     = useState(null);
+  const [statusMsg, setStatusMsg] = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [attachBase64, setAttachBase64] = useState([]); // fetched on demand
+
+  const scanNext = async () => {
+    setLoading(true); setStep("scanning");
+    setStatusMsg("📡 Fetching latest #Trackerv23 email…");
+    setEmail(null); setParsed(null); setAttachBase64([]);
+    try {
+      const res = await fetch("/.netlify/functions/intel", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "scanEmails" })
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Scan failed");
+      const emails = (data.emails || []);
+      if (emails.length === 0) {
+        setStatusMsg("✅ No new #Trackerv23 emails. Forward an invoice to Gmail with #Trackerv23 in subject.");
+        setStep("ready"); setLoading(false); return;
+      }
+      // Take the first (newest) email
+      const em = emails[0];
+      setEmail(em);
+      setStatusMsg("🧠 AI reading invoice…");
+      // Fetch attachments
+      const atts = em.attachments || [];
+      const fetchedAtts = [];
+      for (let a = 0; a < Math.min(atts.length, 3); a++) {
+        try {
+          const att = atts[a];
+          if (att.inlineData && att.inlineData.length > 100) {
+            fetchedAtts.push({ name: att.name, type: att.type, base64: att.inlineData });
+          } else {
+            const ar = await fetch("/.netlify/functions/intel", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "getAttachment", gmailId: em.gmailId,
+                attachIndex: att.attachIndex, attachmentId: att.attachmentId || "", partId: att.partId || "" })
+            });
+            const ad = await ar.json();
+            if (ad.ok && ad.base64) fetchedAtts.push({ name: att.name, type: ad.type || att.type, base64: ad.base64 });
+          }
+        } catch(e) {}
+      }
+      setAttachBase64(fetchedAtts);
+      // Now parse with AI
+      await parseEmail(em, fetchedAtts);
+    } catch(e) {
+      setStatusMsg("❌ " + e.message); setStep("ready");
+    }
+    setLoading(false);
+  };
+
+  const parseEmail = async (em, atts) => {
+    setStatusMsg("🧠 AI extracting invoice details…");
+    try {
+      const pdfAtt = atts.find(a => (a.type||"").includes("pdf"));
+      const imgAtt = atts.find(a => (a.type||"").includes("image"));
+      const prompt = `You are an expert Indian accountant parsing a business email for Onam Agarbathi Pvt. Ltd.
+RULES:
+- Email FROM a supplier/vendor = category "Business - Purchase"
+- Email about SALES to dealer = "Sales - Order"
+- Payment confirmation = "Sales - Payment" or "Business - Purchase"
+- Title: VendorName Invoice ₹Amount for purchase, CustomerName Order for sales
+- NEVER use "Onam Agarbathi" as vendor — that is the buyer
+- Extract EXACT total (Grand Total / Amount Chargeable)
+- Payment terms: 60 days → reminderDays=60
+- Read attached image/PDF carefully
+
+Return ONLY valid JSON:
+{"title":"Chemixil Invoice ₹350528","category":"Business - Purchase","amount":"350528","vendor":"Chemixil Corporation","person":"","invoiceNo":"26-27/453","gstinVendor":"29AADFC0308A1Z8","paymentTerms":"60 days","reminderDays":60,"paymentStatus":"Payment Pending","notes":"Sp Comp BL-11 334kg ₹887/kg | CGST 9% ₹26735 | Total ₹350528","summary":"Chemixil raw material ₹3.5L 60 day credit"}
+
+Subject: ${em.subject}
+From: ${em.from}
+Date: ${em.date}
+Body: ${(em.body||"").slice(0,600)}`;
+
+      const res = await fetch("/.netlify/functions/claude", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          systemPrompt: "Return ONLY valid JSON, no markdown.",
+          imageBase64: imgAtt ? imgAtt.base64 : "",
+          imageType: imgAtt ? imgAtt.type : "",
+          pdfBase64: pdfAtt ? pdfAtt.base64 : ""
+        })
+      });
+      const txt = await res.text();
+      const clean = txt.replace(/```json/g,"").replace(/```/g,"").trim();
+      const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
+      const obj = JSON.parse(s>=0 ? clean.substring(s,e+1) : clean);
+      setParsed(obj);
+      setStep("reviewing");
+      setStatusMsg("");
+    } catch(e) {
+      setParsed(null); setStep("reviewing");
+      setStatusMsg("⚠️ AI parsing failed — review manually");
+    }
+  };
+
+  const importEntry = async () => {
+    if (!email) return;
+    setLoading(true); setStep("importing");
+    const p = parsed || {};
+    let reminderDate = "", reminderNote = "";
+    const rdays = p.reminderDays ? parseInt(p.reminderDays) : 0;
+    if (rdays > 0) {
+      const rd = new Date(email.date); rd.setDate(rd.getDate() + rdays);
+      reminderDate = rd.toISOString().slice(0,10);
+      reminderNote = "Pay by " + rd.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}) + " (" + rdays + " day credit)";
+    }
+    const storedAtts = attachBase64.map(a => ({ name: a.name, type: a.type, data: "", base64: a.base64 }));
+    const entry = {
+      id: genId(),
+      title: p.title || email.subject,
+      date: email.date,
+      category: p.category || "Business - Purchase",
+      person: p.person || "",
+      vendor: p.vendor || "",
+      amount: p.amount ? String(p.amount) : "",
+      paymentStatus: p.paymentStatus || "Payment Pending",
+      reminder: reminderDate,
+      reminderNote: reminderNote,
+      notes: (p.notes||"") + (p.invoiceNo?" | Inv: "+p.invoiceNo:"") + (p.gstinVendor?" | GSTIN: "+p.gstinVendor:"") + (p.paymentTerms?" | Terms: "+p.paymentTerms:"") + " [gmailId:"+email.gmailId+"]",
+      attachments: storedAtts,
+      tags: ["Payment Due"],
+      createdAt: new Date().toISOString()
+    };
+    try {
+      await fetch("/.netlify/functions/intel", { method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ action:"saveEntry", entry }) });
+      if (onSaveEntry) {
+        const lightAtts = storedAtts.map(a => ({ name:a.name, type:a.type, data:"" }));
+        await onSaveEntry({ ...entry, attachments: lightAtts });
+      }
+      // Mark as imported
+      try {
+        const s = JSON.parse(localStorage.getItem("importedGmailIds")||"[]");
+        if (!s.includes(email.gmailId)) { s.push(email.gmailId); localStorage.setItem("importedGmailIds", JSON.stringify(s.slice(-500))); }
+      } catch(e) {}
+      setStep("done");
+      setStatusMsg("✅ Entry saved! Tap 'Next Email' to process another.");
+    } catch(e) {
+      setStatusMsg("❌ Save failed: " + e.message); setStep("reviewing");
+    }
+    setLoading(false);
+  };
+
+  const skip = () => {
+    if (email) {
+      try {
+        const s = JSON.parse(localStorage.getItem("importedGmailIds")||"[]");
+        if (!s.includes(email.gmailId)) { s.push(email.gmailId); localStorage.setItem("importedGmailIds", JSON.stringify(s.slice(-500))); }
+      } catch(e) {}
+    }
+    setStep("ready"); setEmail(null); setParsed(null); setAttachBase64([]);
+    setStatusMsg("Email skipped.");
+  };
+
+  const fmt = n => !n ? "—" : "₹" + Number(String(n).replace(/[^\d.]/g,"")).toLocaleString("en-IN");
+
+  return (
+    <div style={{ padding:16, maxWidth:540, margin:"0 auto" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
+        <span style={{ fontSize:28 }}>📧</span>
+        <div>
+          <h2 style={{ margin:0, fontSize:17, color:"#2a1800" }}>Email → Entry</h2>
+          <div style={{ fontSize:11, color:"#8a6a4a" }}>Forward invoice to Gmail with #Trackerv23 → import here</div>
+        </div>
+      </div>
+
+      <div style={{ background:"#f0f8ff", borderRadius:10, padding:10, marginBottom:12, fontSize:11, color:"#2a4a6a" }}>
+        <b>How to use:</b> Forward any invoice/bill to your Gmail.<br/>
+        Add <b>#Trackerv23</b> anywhere in the subject line.<br/>
+        Tap Scan below — AI reads it and creates the entry.
+      </div>
+
+      {statusMsg && <div style={{ fontSize:12, padding:"8px 12px", borderRadius:8, marginBottom:10,
+        background: statusMsg.startsWith("❌") ? "#fff0f0" : statusMsg.startsWith("✅") ? "#f0fff0" : "#fffbe6",
+        color: statusMsg.startsWith("❌") ? "#8b0000" : statusMsg.startsWith("✅") ? "#1a5a1a" : "#5a4a10" }}>
+        {statusMsg}
+      </div>}
+
+      {/* READY / DONE STATE */}
+      {(step === "ready" || step === "done") && (
+        <button onClick={scanNext} disabled={loading} className="bg" style={{ width:"100%", fontSize:14, padding:"12px" }}>
+          {loading ? "⏳ Scanning…" : step==="done" ? "📧 Next Email" : "📡 Scan Latest Email"}
+        </button>
+      )}
+
+      {/* REVIEWING STATE */}
+      {step === "reviewing" && email && (
+        <div>
+          <div style={{ background:"#f8f5f0", borderRadius:10, border:"1.5px solid #e0c87a", padding:12, marginBottom:12 }}>
+            <div style={{ fontSize:11, color:"#8a6a4a", marginBottom:6 }}>From: {email.from} · {email.date}</div>
+            <div style={{ fontSize:13, fontWeight:700, color:"#2a1800", marginBottom:8 }}>{email.subject}</div>
+
+            {parsed ? <>
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {[
+                  ["Title", parsed.title],
+                  ["Category", parsed.category],
+                  ["Vendor", parsed.vendor],
+                  ["Amount", fmt(parsed.amount)],
+                  ["Invoice No", parsed.invoiceNo],
+                  ["Payment Terms", parsed.paymentTerms],
+                  ["Notes", (parsed.notes||"").slice(0,100)],
+                ].filter(([,v])=>v).map(([label,val])=>(
+                  <div key={label} style={{ display:"flex", gap:8, fontSize:12 }}>
+                    <span style={{ color:"#8a6a4a", minWidth:80 }}>{label}:</span>
+                    <span style={{ color:"#2a1800", fontWeight:label==="Amount"?700:400 }}>{val}</span>
+                  </div>
+                ))}
+              </div>
+              {attachBase64.length > 0 && (
+                <div style={{ marginTop:8 }}>
+                  <div style={{ fontSize:11, color:"#5a4a2a", marginBottom:4 }}>📎 {attachBase64.length} attachment(s):</div>
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                    {attachBase64.map((a,i) => (
+                      <div key={i} style={{ fontSize:10, background:"#e8f0ff", color:"#2a4a8a", padding:"3px 8px", borderRadius:6 }}>
+                        {a.name}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </> : <div style={{ fontSize:12, color:"#8a6a4a" }}>AI could not extract details — entry will be created with email subject as title.</div>}
+          </div>
+
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={skip} className="bgh" style={{ flex:1 }}>⏭ Skip</button>
+            <button onClick={importEntry} disabled={loading} className="bg" style={{ flex:2 }}>
+              {loading ? "⏳ Saving…" : "✅ Import Entry"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === "importing" && (
+        <div style={{ textAlign:"center", padding:"20px", color:"#2a6a2a", fontSize:14 }}>⏳ Saving entry…</div>
+      )}
+    </div>
+  );
+}
+
+
+// ── BankReconciliation — upload statement + cheques, AI matches entries ──
+function BankReconciliation({ onClose, entries, onSaveEntry }) {
+  const [step, setStep]       = useState("upload"); // upload | processing | results
+  const [statementText, setStatementText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [statusMsg, setStatusMsg] = useState("");
+  const [results, setResults] = useState(null);
+  const fileRef = React.useRef();
+  const chequeRef = React.useRef();
+
+  const handleStatementFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.name.endsWith(".csv") || file.name.endsWith(".txt")) {
+      const reader = new FileReader();
+      reader.onload = ev => setStatementText(ev.target.result);
+      reader.readAsText(file);
+    } else {
+      // PDF or image — read as base64 and send to AI
+      const reader = new FileReader();
+      reader.onload = ev => setStatementText("__FILE__:" + ev.target.result.split(",")[1] + "::" + file.type);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const reconcile = async () => {
+    if (!statementText.trim()) { setStatusMsg("Please upload or paste your bank statement first."); return; }
+    setLoading(true); setStep("processing"); setStatusMsg("🧠 AI reading bank statement…");
+
+    try {
+      // Get pending payment entries from tracker
+      const pendingEntries = entries.filter(e =>
+        (e.paymentStatus === "Payment Pending" || e.paymentStatus === "Payment Due") &&
+        e.amount && parseFloat(String(e.amount).replace(/[^\d.]/g,"")) > 0
+      ).slice(0, 50);
+
+      let statementData = statementText;
+      let imageBase64 = "", imageType = "", pdfBase64 = "";
+      if (statementText.startsWith("__FILE__:")) {
+        const parts = statementText.split("::");
+        const b64 = parts[0].replace("__FILE__:","");
+        const mtype = parts[1] || "image/jpeg";
+        if (mtype.includes("pdf")) pdfBase64 = b64;
+        else { imageBase64 = b64; imageType = mtype; }
+        statementData = "Bank statement uploaded as file — read it carefully.";
+      }
+
+      const prompt = `You are an expert bookkeeper for Onam Agarbathi Pvt. Ltd.
+
+BANK STATEMENT DATA:
+${statementData.slice(0, 4000)}
+
+PENDING ENTRIES IN TRACKER (payments not yet confirmed):
+${pendingEntries.map((e,i) => `${i+1}. ID:${e.id} | ${e.title} | Vendor:${e.vendor||e.person} | Amount:₹${e.amount} | Date:${e.date}`).join("\n")}
+
+Your job:
+1. Parse all transactions from the bank statement
+2. Match each transaction to a pending entry where amount and party name match
+3. Identify unmatched bank credits/debits
+4. Identify pending entries with no matching bank transaction
+
+Return ONLY valid JSON:
+{
+  "matched": [{"entryId":"id","entryTitle":"title","amount":"amount","bankDate":"date","bankRef":"reference","bankNarration":"narration","confidence":"high|medium"}],
+  "unmatchedBank": [{"date":"","amount":"","narration":"","type":"credit|debit"}],
+  "unmatchedEntries": [{"entryId":"id","entryTitle":"title","amount":"","date":""}],
+  "summary": {"totalMatched":0,"totalUnmatched":0,"bankBalance":"","statementPeriod":""}
+}`;
+
+      const res = await fetch("/.netlify/functions/claude", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ prompt, systemPrompt:"Return ONLY valid JSON, no markdown.", imageBase64, imageType, pdfBase64 })
+      });
+      const txt = await res.text();
+      const clean = txt.replace(/```json/g,"").replace(/```/g,"").trim();
+      const s = clean.indexOf("{"), e2 = clean.lastIndexOf("}");
+      const obj = JSON.parse(s>=0 ? clean.substring(s,e2+1) : clean);
+      setResults(obj);
+      setStep("results");
+      setStatusMsg("");
+    } catch(e) {
+      setStatusMsg("❌ Error: " + e.message); setStep("upload");
+    }
+    setLoading(false);
+  };
+
+  const markPaid = async (entryId) => {
+    const entry = entries.find(e => e.id === entryId);
+    if (!entry) return;
+    const updated = { ...entry, paymentStatus: "Paid", tags: [...(entry.tags||[]).filter(t=>t!=="Payment Due"), "Paid"] };
+    if (onSaveEntry) await onSaveEntry(updated);
+    setResults(prev => ({ ...prev,
+      matched: prev.matched.map(m => m.entryId === entryId ? { ...m, markedPaid: true } : m)
+    }));
+  };
+
+  const fmt = n => !n ? "—" : "₹" + Number(String(n).replace(/[^\d.]/g,"")).toLocaleString("en-IN");
+
+  return (
+    <div style={{ padding:16, maxWidth:600, margin:"0 auto" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
+        <span style={{ fontSize:28 }}>🏦</span>
+        <div>
+          <h2 style={{ margin:0, fontSize:17, color:"#2a1800" }}>Bank Reconciliation</h2>
+          <div style={{ fontSize:11, color:"#8a6a4a" }}>Upload bank statement → AI matches your tracker entries</div>
+        </div>
+      </div>
+
+      {step === "upload" && <>
+        <div style={{ background:"#f0f8ff", borderRadius:10, padding:10, marginBottom:12, fontSize:11, color:"#2a4a6a" }}>
+          <b>Supports:</b> Bank statement PDF, CSV, Excel export, or paste text directly.<br/>
+          AI will match payments to your pending entries automatically.
+        </div>
+
+        <div style={{ background:"#f8f5f0", border:"1.5px dashed #c8a060", borderRadius:10, padding:14, marginBottom:10 }}>
+          <div style={{ fontSize:12, fontWeight:700, color:"#5a3a1a", marginBottom:8 }}>📁 Upload Bank Statement</div>
+          <input ref={fileRef} type="file" accept=".pdf,.csv,.txt,.xls,.xlsx" onChange={handleStatementFile} style={{ display:"none" }}/>
+          <button onClick={()=>fileRef.current.click()} className="scan-btn" style={{ width:"100%", marginBottom:8 }}>
+            📂 Choose File (PDF / CSV / Excel)
+          </button>
+          {statementText && !statementText.startsWith("__FILE__") && (
+            <div style={{ fontSize:11, color:"#2a7a2a" }}>✅ File loaded — {statementText.split("\n").length} rows</div>
+          )}
+          {statementText && statementText.startsWith("__FILE__") && (
+            <div style={{ fontSize:11, color:"#2a7a2a" }}>✅ File loaded as image/PDF</div>
+          )}
+        </div>
+
+        <div style={{ background:"#f8f5f0", border:"1.5px dashed #c8a060", borderRadius:10, padding:14, marginBottom:12 }}>
+          <div style={{ fontSize:12, fontWeight:700, color:"#5a3a1a", marginBottom:6 }}>📋 Or paste statement text</div>
+          <textarea value={statementText.startsWith("__FILE__") ? "" : statementText}
+            onChange={e=>setStatementText(e.target.value)}
+            placeholder="Paste bank statement rows here (from internet banking export)…"
+            style={{ width:"100%", height:100, padding:8, borderRadius:8, border:"1.5px solid #d0c4a8", fontSize:11, fontFamily:"monospace", resize:"vertical" }}/>
+        </div>
+
+        {statusMsg && <div style={{ fontSize:12, color:"#8b0000", padding:"8px 12px", background:"#fff0f0", borderRadius:8, marginBottom:10 }}>{statusMsg}</div>}
+
+        <button onClick={reconcile} disabled={loading||!statementText.trim()} className="bg" style={{ width:"100%" }}>
+          {loading ? "⏳ Processing…" : "🧠 Reconcile with AI →"}
+        </button>
+      </>}
+
+      {step === "processing" && (
+        <div style={{ textAlign:"center", padding:"30px 16px" }}>
+          <div style={{ fontSize:32, marginBottom:12 }}>🧠</div>
+          <div style={{ fontSize:14, color:"#2a6a2a" }}>AI reading your bank statement…</div>
+          <div style={{ fontSize:11, color:"#8a6a4a", marginTop:8 }}>Matching against {entries.filter(e=>e.paymentStatus==="Payment Pending").length} pending entries</div>
+        </div>
+      )}
+
+      {step === "results" && results && <>
+        {/* Summary */}
+        <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
+          {[
+            ["✅ Matched", results.matched?.length||0, "#d4edda", "#155724"],
+            ["⚠️ Unmatched Bank", results.unmatchedBank?.length||0, "#fff3cd", "#856404"],
+            ["🔴 No Payment", results.unmatchedEntries?.length||0, "#f8d7da", "#721c24"],
+          ].map(([label,count,bg,color])=>(
+            <div key={label} style={{ flex:1, background:bg, borderRadius:8, padding:"8px 10px", textAlign:"center" }}>
+              <div style={{ fontSize:18, fontWeight:700, color }}>{count}</div>
+              <div style={{ fontSize:10, color }}>{label}</div>
+            </div>
+          ))}
+        </div>
+
+        {results.summary && (
+          <div style={{ background:"#f0f8ff", borderRadius:8, padding:10, marginBottom:12, fontSize:11, color:"#2a4a6a" }}>
+            Period: {results.summary.statementPeriod} · Balance: {results.summary.bankBalance}
+          </div>
+        )}
+
+        {/* Matched entries */}
+        {(results.matched||[]).length > 0 && <>
+          <div style={{ fontSize:12, fontWeight:700, color:"#155724", marginBottom:6 }}>✅ Matched Payments</div>
+          {results.matched.map((m,i) => (
+            <div key={i} style={{ background:"#f0fff0", border:"1px solid #c3e6cb", borderRadius:8, padding:10, marginBottom:6 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div>
+                  <div style={{ fontSize:12, fontWeight:700, color:"#1a5a1a" }}>{m.entryTitle}</div>
+                  <div style={{ fontSize:10, color:"#5a8a5a" }}>{m.bankDate} · {m.bankNarration} · {fmt(m.amount)}</div>
+                  <div style={{ fontSize:10, color:"#5a8a5a" }}>Ref: {m.bankRef} · Confidence: {m.confidence}</div>
+                </div>
+                {!m.markedPaid && (
+                  <button onClick={()=>markPaid(m.entryId)} style={{ fontSize:10, padding:"5px 10px", borderRadius:6,
+                    border:"none", background:"#1a5a1a", color:"#fff", cursor:"pointer", whiteSpace:"nowrap" }}>
+                    ✅ Mark Paid
+                  </button>
+                )}
+                {m.markedPaid && <span style={{ fontSize:10, color:"#1a5a1a", fontWeight:700 }}>✅ Paid</span>}
+              </div>
+            </div>
+          ))}
+        </>}
+
+        {/* Unmatched bank transactions */}
+        {(results.unmatchedBank||[]).length > 0 && <>
+          <div style={{ fontSize:12, fontWeight:700, color:"#856404", marginBottom:6, marginTop:10 }}>⚠️ Bank Transactions — No Entry in Tracker</div>
+          {results.unmatchedBank.map((t,i) => (
+            <div key={i} style={{ background:"#fff8e7", border:"1px solid #ffc107", borderRadius:8, padding:8, marginBottom:4 }}>
+              <div style={{ fontSize:11, color:"#5a4a00" }}>{t.date} · {t.narration}</div>
+              <div style={{ fontSize:12, fontWeight:700, color: t.type==="credit"?"#1a5a1a":"#8b0000" }}>
+                {t.type==="credit"?"↑":"↓"} {fmt(t.amount)}
+              </div>
+            </div>
+          ))}
+        </>}
+
+        {/* Entries with no payment */}
+        {(results.unmatchedEntries||[]).length > 0 && <>
+          <div style={{ fontSize:12, fontWeight:700, color:"#721c24", marginBottom:6, marginTop:10 }}>🔴 Pending Entries — No Bank Transaction Found</div>
+          {results.unmatchedEntries.map((e,i) => (
+            <div key={i} style={{ background:"#fdecea", border:"1px solid #f5c6cb", borderRadius:8, padding:8, marginBottom:4 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"#721c24" }}>{e.entryTitle}</div>
+              <div style={{ fontSize:10, color:"#9a4a4a" }}>{e.date} · {fmt(e.amount)}</div>
+            </div>
+          ))}
+        </>}
+
+        <div style={{ display:"flex", gap:8, marginTop:14 }}>
+          <button onClick={()=>{setStep("upload");setStatementText("");setResults(null);}} className="bgh" style={{ flex:1 }}>🔄 New Statement</button>
+          <button onClick={onClose} className="bg" style={{ flex:1 }}>✅ Done</button>
+        </div>
+      </>}
+    </div>
+  );
+}
+
+
 // ── TallyUpload — upload Trial Balance, AI reads & asks, shows P&L ──────────
 function TallyUpload({onClose}){
   const [step,setStep]=useState("upload"); // upload | questions | result
@@ -2430,6 +2910,8 @@ function App(){
   const [showEmailScan,setShowEmailScan]=useState(false);
   const [showTally,setShowTally]=useState(false);
   const [showLocation,setShowLocation]=useState(false);
+  const [showSingleEmail,setShowSingleEmail]=useState(false);
+  const [showBankRecon,setShowBankRecon]=useState(false);
   const [showDD,setShowDD]=useState(false);
   const [showShare,setShowShare]=useState(false);
   const [search,setSearch]=useState("");
@@ -2702,12 +3184,13 @@ function App(){
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           <button onClick={()=>setShowAI(true)} className="ai-btn" style={{fontSize:11,padding:"6px 11px"}}>🧠 AI</button>
           <button onClick={()=>setShowTally(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#1a6a3a,#0a4a2a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>📊 Tally</button>
+          <button onClick={()=>setShowBankRecon(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#2a1a6a,#1a0a4a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>🏦 Reconcile</button>
           <button onClick={()=>setShowLocation(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#1a3a8a,#0a2a6a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>📍 Location</button>
           <button onClick={()=>setShowAgeing(true)} title="Ageing Report: Shows all unpaid Sales-Payment invoices grouped by overdue days (0-30, 30-60, 60+ days). Use this to chase payments." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #e89a9a",background:"#fff0f0",color:"#7a1a1a",cursor:"pointer",fontWeight:600}}>📊 Ageing</button>
           <button onClick={()=>setShowMatcher(true)} title="Payment Matcher: Paste an SMS bank credit alert (e.g. 'Cr ₹50,000 by NEFT') and it finds the matching unpaid invoice automatically." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontWeight:600}}>💳 Match</button>
           <button onClick={()=>setShowLogistics(true)} title="Logistics Tracker: Track every Sales-Payment invoice through 4 stages — Despatched → In Transit → Delivered → Payment Received. Upload LR copy, paid LR, POD, and payment proof at each stage." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c8e8",background:"#f0f6ff",color:"#1a3a6a",cursor:"pointer",fontWeight:600}}>🚚 Logistics</button>
           <button onClick={()=>setShowLedger(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #d8c8a8",background:"#fff8f0",color:"#5a3a1a",cursor:"pointer",fontWeight:600}}>📑 Ledger</button>
-          <button onClick={()=>setShowEmailScan(true)} title="Scan Gmail for emails tagged #Trackerv23 and create entries automatically" style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c0e8",background:"#f0f4ff",color:"#1a2a6a",cursor:"pointer",fontWeight:600}}>📧 Email</button>
+          <button onClick={()=>setShowSingleEmail(true)} title="Scan Gmail for emails tagged #Trackerv23 and create entries automatically" style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c0e8",background:"#f0f4ff",color:"#1a2a6a",cursor:"pointer",fontWeight:600}}>📧 Email</button>
           <button onClick={()=>setShowShare(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>🔗 Share</button>
           <button onClick={()=>setShowDD(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>⚙️</button>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
@@ -2862,6 +3345,8 @@ function App(){
     <Modal open={showLedger} onClose={()=>setShowLedger(false)} wide><LedgerUpload entries={entries} onClose={()=>setShowLedger(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
     <Modal open={showLocation} onClose={()=>setShowLocation(false)} wide><LocationTracker onClose={()=>setShowLocation(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showTally} onClose={()=>setShowTally(false)} wide><TallyUpload onClose={()=>setShowTally(false)}/></Modal>
+    <Modal open={showSingleEmail} onClose={()=>setShowSingleEmail(false)} wide><SingleEmailScan onClose={()=>setShowSingleEmail(false)} onSaveEntry={saveEntry} onRefresh={loadFromSheets}/></Modal>
+    <Modal open={showBankRecon} onClose={()=>setShowBankRecon(false)} wide><BankReconciliation onClose={()=>setShowBankRecon(false)} entries={entries} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showEmailScan} onClose={()=>setShowEmailScan(false)} wide><EmailScan entries={entries} onClose={()=>setShowEmailScan(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})} onRefresh={refresh}/></Modal>
     <Modal open={showDD} onClose={()=>setShowDD(false)} wide><DropdownManager dropdowns={dropdowns} onSave={saveDropdowns} onClose={()=>setShowDD(false)}/></Modal>
     <Modal open={showShare} onClose={()=>setShowShare(false)} wide><SharePanel/></Modal>
