@@ -13,8 +13,9 @@ exports.handler = async (event) => {
     const body = JSON.parse(event.body || "{}");
     const action = body.action || "ping";
 
-    const CLIENT_ID     = process.env.GOOGLE_OAUTH_CLIENT_ID;
-    const CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+    // Try both capitalisation variants
+    const CLIENT_ID     = process.env.GOOGLE_OAUTH_CLIENT_ID || process.env.google_oauth_client_id || process.env.Google_oauth_client_id;
+    const CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || process.env.Google_oauth_client_secret || process.env.google_oauth_client_secret;
     const REFRESH_TOKEN = process.env.GOOGLE_APPS_SCRIPT_REFRESH_TOKEN;
     const SCRIPT_ID     = process.env.APPS_SCRIPT_ID;
 
