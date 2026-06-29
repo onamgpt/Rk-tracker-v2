@@ -26,7 +26,7 @@ exports.handler = async (event) => {
     const accessToken = await getAccessToken(CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN);
 
     if (action === "ping") {
-      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, msg: "Apps Script OAuth working", scriptId: SCRIPT_ID.slice(0,8) + "..." }) };
+      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, msg: "Apps Script OAuth working", scriptId: SCRIPT_ID.slice(0,8) + "...", clientIdPrefix: CLIENT_ID ? CLIENT_ID.slice(0,20) + "..." : "MISSING", clientSecretPrefix: CLIENT_SECRET ? CLIENT_SECRET.slice(0,6) + "..." : "MISSING" }) };
     }
 
     if (action === "getCode") {
