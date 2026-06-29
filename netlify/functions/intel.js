@@ -82,6 +82,12 @@ exports.handler = async (event) => {
     } else if (action === "scanLocationEmails") {
       // Separate scan for #location emails — subject contains "location"
       raw = await makeGet(INTEL_URL + "?action=scanLocationEmails");
+    } else if (action === "getAttachment") {
+      const gmailId2 = body.gmailId || "";
+      const attachIdx = body.attachIndex !== undefined ? body.attachIndex : -1;
+      const attachId = body.attachmentId || "";
+      const pId = body.partId || "";
+      raw = await makeGet(INTEL_URL + "?action=getAttachment&gmailId=" + encodeURIComponent(gmailId2) + "&attachIndex=" + attachIdx + "&attachmentId=" + encodeURIComponent(attachId) + "&partId=" + encodeURIComponent(pId));
     } else if (action === "saveEntry" || action === "logIntel") {
       raw = await makePost(INTEL_URL, JSON.stringify(body));
     } else {
