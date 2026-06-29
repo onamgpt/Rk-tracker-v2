@@ -23,6 +23,10 @@ exports.handler = async (event) => {
       return { statusCode: 500, headers: h, body: JSON.stringify({ error: "Missing env vars", vars: { CLIENT_ID: !!CLIENT_ID, CLIENT_SECRET: !!CLIENT_SECRET, REFRESH_TOKEN: !!REFRESH_TOKEN, SCRIPT_ID: !!SCRIPT_ID } }) };
     }
 
+    // Validate format
+    if (!CLIENT_ID.includes(".apps.googleusercontent.com")) {
+      return { statusCode: 500, headers: h, body: JSON.stringify({ error: "CLIENT_ID format wrong — must end in .apps.googleusercontent.com", got: CLIENT_ID.slice(0,30) }) };
+    }
     const accessToken = await getAccessToken(CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN);
 
     if (action === "ping") {
