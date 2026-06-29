@@ -11,7 +11,7 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || "{}");
-    const { action, code, fileName } = body;
+    const action = body.action || "ping";
 
     const CLIENT_ID     = process.env.GOOGLE_OAUTH_CLIENT_ID;
     const CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
@@ -19,105 +19,51 @@ exports.handler = async (event) => {
     const SCRIPT_ID     = process.env.APPS_SCRIPT_ID;
 
     if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN || !SCRIPT_ID) {
-      return { statusCode: 500, headers: h, body: JSON.stringify({ error: "Missing OAuth env vars" }) };
+      return { statusCode: 500, headers: h, body: JSON.stringify({ error: "Missing env vars", vars: { CLIENT_ID: !!CLIENT_ID, CLIENT_SECRET: !!CLIENT_SECRET, REFRESH_TOKEN: !!REFRESH_TOKEN, SCRIPT_ID: !!SCRIPT_ID } }) };
     }
 
-    // ── Step 1: Get fresh access token ──────────────────────────────────
     const accessToken = await getAccessToken(CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN);
 
-    // ── Action: ping — just verify credentials work ──────────────────────
     if (action === "ping") {
-      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, msg: "OAuth working — Apps Script auto-update ready" }) };
+      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, msg: "Apps Script OAuth working", scriptId: SCRIPT_ID.slice(0,8) + "..." }) };
     }
 
-    // ── Action: getCode — read current script content ────────────────────
     if (action === "getCode") {
-      const content = await apiCall("GET",
-        "https://script.googleapis.com/v1/projects/" + SCRIPT_ID + "/content",
-        null, accessToken
-      );
-      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, files: content.files }) };
+      const content = await apiCall("GET", "https://script.googleapis.com/v1/projects/" + SCRIPT_ID + "/content", null, accessToken);
+      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, files: (content.files || []).map(f => ({ name: f.name, lines: (f.source || "").split("\n").length })) }) };
     }
 
-    // ── Action: updateCode — push new code to Apps Script ────────────────
     if (action === "updateCode") {
+      const code = body.code;
+      const fileName = body.fileName || "Code";
       if (!code) return { statusCode: 400, headers: h, body: JSON.stringify({ error: "No code provided" }) };
-
-      // Get current files first
-      const current = await apiCall("GET",
-        "https://script.googleapis.com/v1/projects/" + SCRIPT_ID + "/content",
-        null, accessToken
-      );
-
-      // Replace or add the file
-      const targetFile = fileName || "Code";
-      const files = (current.files || []).map(f => {
-        if (f.name === targetFile) return { ...f, source: code };
-        return f;
-      });
-
-      // If file didn't exist, add it
-      if (!files.find(f => f.name === targetFile)) {
-        files.push({ name: targetFile, type: "SERVER_JS", source: code });
-      }
-
-      // Push updated content
-      await apiCall("PUT",
-        "https://script.googleapis.com/v1/projects/" + SCRIPT_ID + "/content",
-        { files }, accessToken
-      );
-
-      // Create new deployment version
-      const deployment = await apiCall("POST",
-        "https://script.googleapis.com/v1/projects/" + SCRIPT_ID + "/deployments",
-        {
-          versionNumber: null,
-          manifestFileName: "appsscript",
-          description: "Auto-updated by RK Tracker " + new Date().toISOString()
-        },
-        accessToken
-      );
-
-      return { statusCode: 200, headers: h, body: JSON.stringify({
-        ok: true,
-        msg: "Apps Script updated and deployed successfully",
-        deploymentId: deployment.deploymentId
-      })};
+      const current = await apiCall("GET", "https://script.googleapis.com/v1/projects/" + SCRIPT_ID + "/content", null, accessToken);
+      let files = current.files || [];
+      const idx = files.findIndex(f => f.name === fileName);
+      if (idx >= 0) files[idx] = { ...files[idx], source: code };
+      else files.push({ name: fileName, type: "SERVER_JS", source: code });
+      await apiCall("PUT", "https://script.googleapis.com/v1/projects/" + SCRIPT_ID + "/content", { files }, accessToken);
+      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, msg: "Apps Script updated: " + fileName }) };
     }
 
     return { statusCode: 400, headers: h, body: JSON.stringify({ error: "Unknown action: " + action }) };
 
   } catch(e) {
-    return { statusCode: 500, headers: h, body: JSON.stringify({ error: e.message }) };
+    return { statusCode: 500, headers: h, body: JSON.stringify({ error: e.message, stack: e.stack }) };
   }
 };
 
-// ── Get fresh access token from refresh token ────────────────────────────
 function getAccessToken(clientId, clientSecret, refreshToken) {
   return new Promise((resolve, reject) => {
-    const postData = new URLSearchParams({
-      client_id:     clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type:    "refresh_token"
-    }).toString();
-
-    const req = https.request({
-      hostname: "oauth2.googleapis.com",
-      path:     "/token",
-      method:   "POST",
-      headers:  {
-        "Content-Type":   "application/x-www-form-urlencoded",
-        "Content-Length": Buffer.byteLength(postData)
-      }
-    }, (res) => {
+    const postData = "client_id=" + encodeURIComponent(clientId) + "&client_secret=" + encodeURIComponent(clientSecret) + "&refresh_token=" + encodeURIComponent(refreshToken) + "&grant_type=refresh_token";
+    const req = https.request({ hostname: "oauth2.googleapis.com", path: "/token", method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(postData) } }, (res) => {
       let data = "";
       res.on("data", c => data += c);
       res.on("end", () => {
         try {
-          const parsed = JSON.parse(data);
-          if (parsed.access_token) resolve(parsed.access_token);
-          else reject(new Error("No access token: " + data));
+          const p = JSON.parse(data);
+          if (p.access_token) resolve(p.access_token);
+          else reject(new Error("Token error: " + data));
         } catch(e) { reject(e); }
       });
     });
@@ -127,27 +73,14 @@ function getAccessToken(clientId, clientSecret, refreshToken) {
   });
 }
 
-// ── Generic Google API call ──────────────────────────────────────────────
-function apiCall(method, url, body, accessToken) {
+function apiCall(method, url, body, token) {
   return new Promise((resolve, reject) => {
-    const urlObj  = new URL(url);
+    const u = new URL(url);
     const postData = body ? JSON.stringify(body) : null;
-    const req = https.request({
-      hostname: urlObj.hostname,
-      path:     urlObj.pathname + urlObj.search,
-      method:   method,
-      headers:  {
-        "Authorization": "Bearer " + accessToken,
-        "Content-Type":  "application/json",
-        ...(postData ? { "Content-Length": Buffer.byteLength(postData) } : {})
-      }
-    }, (res) => {
+    const req = https.request({ hostname: u.hostname, path: u.pathname + u.search, method, headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json", ...(postData ? { "Content-Length": Buffer.byteLength(postData) } : {}) } }, (res) => {
       let data = "";
       res.on("data", c => data += c);
-      res.on("end", () => {
-        try { resolve(JSON.parse(data)); }
-        catch(e) { resolve({ raw: data }); }
-      });
+      res.on("end", () => { try { resolve(JSON.parse(data)); } catch(e) { resolve({ raw: data }); } });
     });
     req.on("error", reject);
     if (postData) req.write(postData);
