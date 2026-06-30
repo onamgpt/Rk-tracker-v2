@@ -59,7 +59,14 @@ exports.handler = async (event) => {
     var action = body.action || "getAll";
     var raw;
 
-    if (action === "save" && body.entry) {
+    if (action === "savePortfolio" && body.key && body.data) {
+      // Generic portfolio state backup — used by trading/usa apps for permanent storage
+      var ppBody = JSON.stringify({action: "savePortfolio", key: body.key, data: body.data});
+      raw = await makePost(SCRIPT_URL, ppBody);
+    } else if (action === "getPortfolio" && body.key) {
+      var ppUrl = SCRIPT_URL + "?action=getPortfolio&key=" + encodeURIComponent(body.key);
+      raw = await makeGet(ppUrl);
+    } else if (action === "save" && body.entry) {
       // Use POST for save to handle large entries with attachments
       // Strip attachments from Sheets save - save only text data
       var entry = Object.assign({}, body.entry);
