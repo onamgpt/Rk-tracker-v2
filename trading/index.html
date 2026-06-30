@@ -175,7 +175,30 @@ h4{font-size:13px;margin:12px 0 6px;color:var(--blue)}
 // ───────────────────────── STORAGE ─────────────────────────
 var K = "rk_trading_v1";
 function load(){ try{ return JSON.parse(localStorage.getItem(K)) || defaults(); }catch(e){ return defaults(); } }
-function save(s){ try{ localStorage.setItem(K, JSON.stringify(s)); }catch(e){} }
+function save(s){
+  try{ localStorage.setItem(K, JSON.stringify(s)); }catch(e){}
+  try{
+    fetch("/.netlify/functions/sheets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "savePortfolio", key: K, data: s })
+    }).catch(function(){});
+  }catch(e){}
+}
+function loadFromCloud(){
+  fetch("/.netlify/functions/sheets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "getPortfolio", key: K })
+  }).then(function(r){ return r.json(); }).then(function(r){
+    if (r && r.data) {
+      S = r.data;
+      localStorage.setItem(K, JSON.stringify(S));
+      if (typeof renderHoldings === "function") renderHoldings();
+      if (typeof renderAll === "function") renderAll();
+    }
+  }).catch(function(){});
+}
 function defaults(){
   return {
     holdings: [
@@ -186,6 +209,7 @@ function defaults(){
   };
 }
 var S = load();
+setTimeout(function(){ if (typeof loadFromCloud === "function") loadFromCloud(); }, 500);
 
 // ───────────────────────── NAV ─────────────────────────
 function showPage(p){
