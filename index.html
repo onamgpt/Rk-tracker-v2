@@ -1641,17 +1641,18 @@ function exportPDF(entries,label){
 // ── LocationTracker — scan location emails, calculate distance, log allowance ──
 // SALES TEAM CONFIG — update Monday with real emails + allowances
 const SALES_CONFIG = {
-  // email (lowercase) → { name, hq, hqLat, hqLng }
+  // email (lowercase) → { name, hq, hqLat, hqLng, allowance:{HQ,ExHQ,Outstation} }
+  // Allowance rates from FY2019-20 daily allowance sheet, per-person.
   emailMap: {
-    // UPDATE MONDAY — replace these with real email addresses
-    "biju@gmail.com":       { name:"Biju",      hq:"Kottayam",    hqLat:9.5916,  hqLng:76.5222 },
-    "satish@gmail.com":     { name:"Satish",    hq:"Calicut",     hqLat:11.2588, hqLng:75.7804 },
-    "sugeesh@gmail.com":    { name:"Sugeesh",   hq:"Calicut",     hqLat:11.2588, hqLng:75.7804 },
-    "sunil@gmail.com":      { name:"Sunil",     hq:"Calicut",     hqLat:11.2588, hqLng:75.7804 },
-    "sadasivan@gmail.com":  { name:"Sadasivan", hq:"Coimbatore",  hqLat:11.0168, hqLng:76.9558 },
-    "murugan@gmail.com":    { name:"Murugan",   hq:"Nagercoil",   hqLat:8.1833,  hqLng:77.4119 },
-    "sooraj@gmail.com":     { name:"Sooraj",    hq:"Trivandrum",  hqLat:8.5241,  hqLng:76.9366 },
-    "sebi@gmail.com":       { name:"Sebi",      hq:"TBD",         hqLat:0,       hqLng:0       },
+    "sunilkumar839839@gmail.com": { name:"Sunil",     hq:"Calicut",    hqLat:11.2588, hqLng:75.7804, allowance:{HQ:245,"Ex-HQ":335,Outstation:515} },
+    "onamsada@gmail.com":         { name:"Sadasivan", hq:"Coimbatore", hqLat:11.0168, hqLng:76.9558, allowance:{HQ:230,"Ex-HQ":305,Outstation:470} },
+    "sebijosephc3@gmail.com":     { name:"Sebi",      hq:"Trissur",    hqLat:10.5276, hqLng:76.2144, allowance:{HQ:190,"Ex-HQ":285,Outstation:445} },
+    // ADD WHEN AVAILABLE — Biju, Satish, Sugeesh, Sooraj, Murugan emails
+    "biju@gmail.com":       { name:"Biju",      hq:"Kottayam",   hqLat:9.5916,  hqLng:76.5222, allowance:{HQ:240,"Ex-HQ":385,Outstation:590} },
+    "satish@gmail.com":     { name:"Satish",    hq:"Calicut",    hqLat:11.2588, hqLng:75.7804, allowance:{HQ:370,"Ex-HQ":790,Outstation:1625} },
+    "sugeesh@gmail.com":    { name:"Sugeesh",   hq:"Calicut",    hqLat:11.2588, hqLng:75.7804, allowance:{HQ:195,"Ex-HQ":260,Outstation:360} },
+    "sooraj@gmail.com":     { name:"Sooraj",    hq:"Trivandrum", hqLat:8.5241,  hqLng:76.9366, allowance:{HQ:195,"Ex-HQ":295,Outstation:420} },
+    "murugan@gmail.com":    { name:"Murugan",   hq:"Nagercoil",  hqLat:8.1833,  hqLng:77.4119, allowance:{HQ:200,"Ex-HQ":245,Outstation:395} },
   },
   // Distance bands (road distance = straight line x 1.20)
   bands: [
@@ -1659,8 +1660,6 @@ const SALES_CONFIG = {
     { label:"Ex-HQ",      maxKm:300,  color:"#2a6a8a", emoji:"🚗" },
     { label:"Outstation", maxKm:9999, color:"#8a2a2a", emoji:"✈️" },
   ],
-  // UPDATE MONDAY — daily allowance amounts in ₹
-  allowance: { "HQ": 0, "Ex-HQ": 0, "Outstation": 0 },
 };
 
 // Haversine straight-line distance in km
@@ -1735,7 +1734,7 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
         if (coords && salesperson && salesperson.hqLat) {
           distKm = roadDistanceKm(salesperson.hqLat, salesperson.hqLng, coords.lat, coords.lng);
           band = classifyDistance(distKm);
-          allowance = SALES_CONFIG.allowance[band.label] || 0;
+          allowance = (salesperson.allowance && salesperson.allowance[band.label]) || 0;
         }
         return { ...email, fromEmail, salesperson, coords, distKm, band, allowance };
       });
