@@ -82,6 +82,8 @@ exports.handler = async (event) => {
     } else if (action === "scanLocationEmails") {
       // Separate scan for #location emails — subject contains "location"
       raw = await makeGet(INTEL_URL + "?action=scanLocationEmails");
+    } else if (action === "scanDayBookEmails") {
+      raw = await makeGet(INTEL_URL + "?action=scanDayBookEmails");
     } else if (action === "getAttachment") {
       const gmailId2 = body.gmailId || "";
       const attachIdx = body.attachIndex !== undefined ? body.attachIndex : -1;
