@@ -1222,7 +1222,7 @@ function AIPanel({entries,onClose,onShowAgeing,onShowMatcher,onShowLogistics,onS
   const [q,setQ]=useState("");
   const [loading,setLoading]=useState(false);
   const [result,setResult]=useState("");
-  const QUICK=["What needs urgent attention?","Overdue payments summary","Who owes me money?","Summarise recent email orders & invoices","Pending compliance (GST/ESI/EPF)","CSD dispatch status","Cash flow this month","Vendor payment summary"];
+  const QUICK=["What needs urgent attention?","Overdue payments summary","Who owes me money?","Summarise recent Day Book activity","Pending compliance (GST/ESI/EPF)","CSD dispatch status","Cash flow this month","Vendor payment summary","Any health patterns this week?","Family moments this month"];
 
   const ask=async(question)=>{
     setLoading(true);setResult("");
@@ -1234,8 +1234,8 @@ function AIPanel({entries,onClose,onShowAgeing,onShowMatcher,onShowLogistics,onS
   return<div>
     <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
       <span style={{fontSize:26}}>🧠</span>
-      <div><h2 style={{margin:0,fontSize:18,color:"#3a1a6a"}}>AI Business Insights</h2>
-        <div style={{fontSize:11,color:"#7a5aaa"}}>Claude · knows your incense business</div></div>
+      <div><h2 style={{margin:0,fontSize:18,color:"#3a1a6a"}}>AI Insights</h2>
+        <div style={{fontSize:11,color:"#7a5aaa"}}>Claude · business, health, family — ask anything</div></div>
     </div>
     <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:12}}>
       {QUICK.map(q=><button key={q} onClick={()=>ask(q)} style={{padding:"5px 11px",borderRadius:20,border:"1.5px solid #c8a8e8",background:"#f5eeff",color:"#5a1a8a",cursor:"pointer",fontSize:11,fontWeight:600}}>{q}</button>)}
