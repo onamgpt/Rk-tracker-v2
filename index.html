@@ -1942,6 +1942,340 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
 }
 
 
+
+// ── DayBook — scan #DayBook emails, AI extracts vouchers, daily summary ──
+function DayBook({ onClose, onSaveEntry, entries }) {
+  const [step, setStep] = useState("ready"); // ready | scanning | reviewing | done
+  const [email, setEmail] = useState(null);
+  const [vouchers, setVouchers] = useState([]);
+  const [statusMsg, setStatusMsg] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [view, setView] = useState("scan"); // scan | summary
+
+  const scanDayBook = async () => {
+    setLoading(true); setStep("scanning");
+    setStatusMsg("📡 Fetching latest #DayBook email…");
+    setEmail(null); setVouchers([]);
+    try {
+      const res = await fetch("/.netlify/functions/intel", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "scanDayBookEmails" })
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Scan failed");
+      const emails = data.emails || [];
+      if (emails.length === 0) {
+        setStatusMsg("✅ No new Day Book emails. Ask your accountant to export & email with #DayBook tag.");
+        setStep("ready"); setLoading(false); return;
+      }
+      const em = emails[0];
+      setEmail(em);
+      setStatusMsg("🧠 AI reading Day Book vouchers…");
+      await parseDayBook(em);
+    } catch(e) {
+      setStatusMsg("❌ " + e.message); setStep("ready");
+    }
+    setLoading(false);
+  };
+
+  const parseDayBook = async (em) => {
+    try {
+      const prompt = `You are an accountant for Onam Agarbathi Pvt. Ltd. parsing a TallyPrime Day Book export.
+Extract EVERY voucher line as a separate transaction.
+
+DAY BOOK DATA:
+${(em.body || "").slice(0, 6000)}
+
+For each voucher determine:
+- voucherType: Sales, Purchase, Payment, Receipt, Journal, Contra
+- party: customer/vendor name
+- amount: numeric value
+- narration: brief description
+
+Return ONLY valid JSON array, no markdown:
+[{"voucherType":"Sales","party":"Ramesh Traders","amount":"12500","narration":"Sale of agarbathi boxes","date":"2026-06-30"}]`;
+
+      const res = await fetch("/.netlify/functions/claude", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, systemPrompt: "Return ONLY a valid JSON array, no markdown." })
+      });
+      const txt = await res.text();
+      const clean = txt.replace(/```json/g,"").replace(/```/g,"").trim();
+      const s = clean.indexOf("["), e = clean.lastIndexOf("]");
+      const arr = JSON.parse(s>=0 ? clean.substring(s,e+1) : clean);
+      setVouchers(Array.isArray(arr) ? arr : []);
+      setStep("reviewing");
+      setStatusMsg("");
+    } catch(e) {
+      setVouchers([]); setStep("reviewing");
+      setStatusMsg("⚠️ AI parsing had issues — review manually or skip.");
+    }
+  };
+
+  const importAll = async () => {
+    setLoading(true);
+    let count = 0;
+    for (const v of vouchers) {
+      const catMap = { "Sales":"Sales - Order", "Purchase":"Business - Purchase", "Payment":"Finance", "Receipt":"Sales - Payment", "Journal":"Finance", "Contra":"Finance" };
+      const entry = {
+        id: genId(),
+        title: (v.voucherType||"Transaction") + ": " + (v.party||"Unknown") + " ₹" + (v.amount||"0"),
+        date: v.date || (email ? email.date : new Date().toISOString().slice(0,10)),
+        category: catMap[v.voucherType] || "Finance",
+        person: v.party || "",
+        vendor: v.voucherType === "Purchase" ? (v.party||"") : "",
+        amount: v.amount ? String(v.amount) : "",
+        notes: (v.narration||"") + " [DayBook import" + (email?(" | gmailId:"+email.gmailId):"") + "]",
+        tags: ["Recurring"],
+        createdAt: new Date().toISOString()
+      };
+      try {
+        await fetch("/.netlify/functions/intel", { method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ action:"saveEntry", entry }) });
+        if (onSaveEntry) await onSaveEntry(entry);
+        count++;
+      } catch(e) {}
+    }
+    if (email) {
+      try {
+        const s = JSON.parse(localStorage.getItem("importedGmailIds")||"[]");
+        if (!s.includes(email.gmailId)) { s.push(email.gmailId); localStorage.setItem("importedGmailIds", JSON.stringify(s.slice(-500))); }
+      } catch(e) {}
+    }
+    setStatusMsg("✅ Imported " + count + " voucher(s) from Day Book.");
+    setStep("done");
+    setLoading(false);
+  };
+
+  const fmt = n => !n ? "—" : "₹" + Number(String(n).replace(/[^\d.]/g,"")).toLocaleString("en-IN");
+
+  // Daily summary from existing entries tagged as DayBook imports
+  const today = new Date().toISOString().slice(0,10);
+  const recentDayBookEntries = (entries||[]).filter(e => (e.notes||"").includes("[DayBook")).slice(0, 100);
+  const totalsByType = { Sales:0, Purchase:0, Payment:0, Receipt:0 };
+  recentDayBookEntries.forEach(e => {
+    const amt = parseFloat(String(e.amount||0).replace(/[^\d.]/g,"")) || 0;
+    if (e.category === "Sales - Order") totalsByType.Sales += amt;
+    else if (e.category === "Business - Purchase") totalsByType.Purchase += amt;
+    else if (e.category === "Sales - Payment") totalsByType.Receipt += amt;
+    else totalsByType.Payment += amt;
+  });
+
+  return (
+    <div style={{ padding:16, maxWidth:560, margin:"0 auto" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
+        <span style={{ fontSize:28 }}>📒</span>
+        <div>
+          <h2 style={{ margin:0, fontSize:17, color:"#2a1800" }}>Day Book</h2>
+          <div style={{ fontSize:11, color:"#8a6a4a" }}>Accountant emails daily Day Book → AI logs every voucher</div>
+        </div>
+      </div>
+
+      <div style={{ display:"flex", gap:6, marginBottom:14 }}>
+        {[["scan","📡 Scan"],["summary","📊 Summary"]].map(([v,l]) =>
+          <button key={v} onClick={()=>setView(v)} style={{ flex:1, padding:"8px 4px", borderRadius:8, border:"none", fontSize:12, fontWeight:700,
+            background: view===v ? "#5a3a1a" : "#f0e8d8", color: view===v ? "#fff" : "#5a3a1a", cursor:"pointer" }}>{l}</button>
+        )}
+      </div>
+
+      {view === "scan" && <>
+        <div style={{ background:"#f0f8ff", borderRadius:10, padding:10, marginBottom:12, fontSize:11, color:"#2a4a6a" }}>
+          Ask your accountant to export Tally's Day Book daily and email with <b>#DayBook</b> in subject.
+        </div>
+
+        {statusMsg && <div style={{ fontSize:12, padding:"8px 12px", borderRadius:8, marginBottom:10,
+          background: statusMsg.startsWith("❌") ? "#fff0f0" : statusMsg.startsWith("✅") ? "#f0fff0" : "#fffbe6",
+          color: statusMsg.startsWith("❌") ? "#8b0000" : statusMsg.startsWith("✅") ? "#1a5a1a" : "#5a4a10" }}>{statusMsg}</div>}
+
+        {(step === "ready" || step === "done") && (
+          <button onClick={scanDayBook} disabled={loading} className="bg" style={{ width:"100%", fontSize:14, padding:"12px" }}>
+            {loading ? "⏳ Scanning…" : "📡 Scan Latest Day Book Email"}
+          </button>
+        )}
+
+        {step === "reviewing" && email && (
+          <div>
+            <div style={{ background:"#f8f5f0", borderRadius:10, border:"1.5px solid #e0c87a", padding:12, marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"#8a6a4a", marginBottom:8 }}>{email.subject} · {email.date}</div>
+              <div style={{ fontSize:12, fontWeight:700, marginBottom:8 }}>{vouchers.length} voucher(s) extracted:</div>
+              <div style={{ maxHeight:240, overflowY:"auto", display:"flex", flexDirection:"column", gap:6 }}>
+                {vouchers.map((v,i) => (
+                  <div key={i} style={{ fontSize:11, background:"#fff", borderRadius:6, padding:8, border:"1px solid #e8d8b0" }}>
+                    <b>{v.voucherType}</b> · {v.party} · {fmt(v.amount)}
+                    <div style={{ color:"#8a7a5a" }}>{v.narration}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={()=>{setStep("ready");setEmail(null);setVouchers([]);}} className="bgh" style={{ flex:1 }}>✕ Cancel</button>
+              <button onClick={importAll} disabled={loading} className="bg" style={{ flex:2 }}>
+                {loading ? "⏳ Saving…" : "✅ Import All " + vouchers.length + " Vouchers"}
+              </button>
+            </div>
+          </div>
+        )}
+      </>}
+
+      {view === "summary" && <>
+        <div style={{ fontSize:13, fontWeight:700, color:"#2a1800", marginBottom:10 }}>Recent Day Book Activity</div>
+        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          {[["Sales","#1a4a2a",totalsByType.Sales],["Purchase","#6a1a1a",totalsByType.Purchase],
+            ["Receipts","#1a3a6a",totalsByType.Receipt],["Payments","#6a4a1a",totalsByType.Payment]].map(([label,color,amt])=>(
+            <div key={label} style={{ display:"flex", justifyContent:"space-between", background:"#f8f8f8", borderRadius:8, padding:"8px 12px" }}>
+              <span style={{ fontSize:12, color:"#555" }}>{label}</span>
+              <span style={{ fontSize:13, fontWeight:700, color }}>{fmt(amt)}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize:10, color:"#999", marginTop:10 }}>Based on last {recentDayBookEntries.length} imported Day Book entries</div>
+      </>}
+    </div>
+  );
+}
+
+
+// ── HealthFamilyQuick — natural language health/family logging ──────────
+function HealthFamilyQuick({ onClose, onSaveEntry, mode }) {
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [statusMsg, setStatusMsg] = useState("");
+  const [parsed, setParsed] = useState(null);
+  const isHealth = mode === "health";
+
+  const analyze = async () => {
+    if (!text.trim()) { setStatusMsg("Type something first."); return; }
+    if (!isHealth) {
+      // Family — no AI needed, just save directly
+      await saveDirect();
+      return;
+    }
+    setLoading(true); setStatusMsg("🧠 Understanding entry…");
+    try {
+      const prompt = `Parse this casual health log entry for a person tracking their wellbeing. Do NOT diagnose or give medical advice — just structure the information.
+
+Entry: "${text}"
+
+Return ONLY valid JSON:
+{"type":"Meal"|"Symptom"|"Medication"|"Vitals"|"Other","summary":"short title","details":"key details extracted","severity":"mild"|"moderate"|"severe"|null,"time":"morning"|"afternoon"|"evening"|"night"|null}`;
+      const res = await fetch("/.netlify/functions/claude", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ prompt, systemPrompt:"Return ONLY valid JSON, no markdown." })
+      });
+      const txt = await res.text();
+      const clean = txt.replace(/```json/g,"").replace(/```/g,"").trim();
+      const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
+      const obj = JSON.parse(s>=0 ? clean.substring(s,e+1) : clean);
+      setParsed(obj);
+      setStatusMsg("");
+    } catch(e) {
+      setParsed({ type:"Other", summary: text.slice(0,60), details: text });
+      setStatusMsg("");
+    }
+    setLoading(false);
+  };
+
+  const saveDirect = async () => {
+    setLoading(true);
+    const entry = {
+      id: genId(),
+      title: text.slice(0, 80),
+      date: new Date().toISOString().slice(0,10),
+      category: "Family",
+      notes: text,
+      tags: [],
+      createdAt: new Date().toISOString()
+    };
+    try {
+      if (onSaveEntry) await onSaveEntry(entry);
+      setStatusMsg("✅ Saved!");
+      setText("");
+    } catch(e) {
+      setStatusMsg("❌ " + e.message);
+    }
+    setLoading(false);
+  };
+
+  const saveHealth = async () => {
+    if (!parsed) return;
+    setLoading(true);
+    const entry = {
+      id: genId(),
+      title: parsed.summary || text.slice(0,80),
+      date: new Date().toISOString().slice(0,10),
+      category: "Health",
+      notes: (parsed.details||text) + (parsed.severity?(" | Severity: "+parsed.severity):"") + (parsed.time?(" | Time: "+parsed.time):""),
+      tags: parsed.type ? [parsed.type] : [],
+      createdAt: new Date().toISOString()
+    };
+    try {
+      if (onSaveEntry) await onSaveEntry(entry);
+      setStatusMsg("✅ Saved!");
+      setText(""); setParsed(null);
+    } catch(e) {
+      setStatusMsg("❌ " + e.message);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ padding:16, maxWidth:520, margin:"0 auto" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
+        <span style={{ fontSize:28 }}>{isHealth ? "🏥" : "👨‍👩‍👧"}</span>
+        <div>
+          <h2 style={{ margin:0, fontSize:17, color:"#2a1800" }}>{isHealth ? "Health Log" : "Family"}</h2>
+          <div style={{ fontSize:11, color:"#8a6a4a" }}>
+            {isHealth ? "Meals, symptoms, vitals — just type naturally" : "Thoughts, moments, events — casual journal"}
+          </div>
+        </div>
+      </div>
+
+      <textarea
+        value={text}
+        onChange={e=>setText(e.target.value)}
+        placeholder={isHealth ? "e.g. Had idli for breakfast, felt bloated after lunch…" : "e.g. Took the kids to the temple today, lovely evening…"}
+        style={{ width:"100%", height:100, padding:10, borderRadius:10, border:"1.5px solid #d0c4a8", fontSize:13, resize:"vertical", marginBottom:10 }}
+      />
+
+      {statusMsg && <div style={{ fontSize:12, padding:"8px 12px", borderRadius:8, marginBottom:10,
+        background: statusMsg.startsWith("❌") ? "#fff0f0" : "#f0fff0",
+        color: statusMsg.startsWith("❌") ? "#8b0000" : "#1a5a1a" }}>{statusMsg}</div>}
+
+      {isHealth && parsed && (
+        <div style={{ background:"#f8f5f0", borderRadius:10, border:"1.5px solid #e0c87a", padding:12, marginBottom:12 }}>
+          <div style={{ fontSize:12, fontWeight:700, marginBottom:6 }}>{parsed.type}: {parsed.summary}</div>
+          <div style={{ fontSize:11, color:"#5a4a2a" }}>{parsed.details}</div>
+          {parsed.severity && <div style={{ fontSize:10, color:"#8a6a2a", marginTop:4 }}>Severity: {parsed.severity}</div>}
+        </div>
+      )}
+
+      {isHealth ? (
+        !parsed ? (
+          <button onClick={analyze} disabled={loading||!text.trim()} className="bg" style={{ width:"100%" }}>
+            {loading ? "⏳ Analyzing…" : "🧠 Analyze & Review"}
+          </button>
+        ) : (
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={()=>setParsed(null)} className="bgh" style={{ flex:1 }}>✕ Redo</button>
+            <button onClick={saveHealth} disabled={loading} className="bg" style={{ flex:2 }}>
+              {loading ? "⏳ Saving…" : "✅ Save Entry"}
+            </button>
+          </div>
+        )
+      ) : (
+        <button onClick={saveDirect} disabled={loading||!text.trim()} className="bg" style={{ width:"100%" }}>
+          {loading ? "⏳ Saving…" : "✅ Save to Family Log"}
+        </button>
+      )}
+
+      <div style={{ fontSize:10, color:"#aaa", marginTop:14, textAlign:"center" }}>
+        {isHealth && "This logs patterns for your own awareness — not medical advice. Consult a doctor for any health concerns."}
+      </div>
+    </div>
+  );
+}
+
+
 // ── TallyUpload — upload Trial Balance, AI reads & asks, shows P&L ──────────
 function TallyUpload({onClose}){
   const [step,setStep]=useState("upload"); // upload | questions | result
