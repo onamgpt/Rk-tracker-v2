@@ -12,7 +12,7 @@ exports.handler = async (event) => {
   try {
     const body = JSON.parse(event.body || "{}");
     const action = body.action || "ping";
-    const NETLIFY_TOKEN = process.env.NETLIFY_TOKEN;
+    const NETLIFY_TOKEN = process.env.NETLIFY_TOKEN || process.env.netlify_token;
 
     if (!NETLIFY_TOKEN) return { statusCode: 500, headers: h, body: JSON.stringify({ error: "NETLIFY_TOKEN not set" }) };
 
