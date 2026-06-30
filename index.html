@@ -2607,8 +2607,19 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
   const importOne=async(email)=>{
     setProcessing(p=>({...p,[email.gmailId]:"reading"}));
     try{
-      // Build content blocks for AI — all attachments + body
-      const atts=(email.attachments||[]).filter(a=>a.base64&&(a.type||"").match(/pdf|image/));
+      // Attachments arrive as METADATA ONLY (no base64) from the fast scan — fetch each one now.
+      const metaAtts=(email.attachments||[]).filter(a=>(a.type||"").match(/pdf|image/));
+      const atts=[];
+      for(const m of metaAtts.slice(0,3)){
+        try{
+          if(m.inlineData&&m.inlineData.length>100){
+            atts.push({name:m.name,type:m.type,base64:m.inlineData});
+            continue;
+          }
+          const ar=await intelAPI("getAttachment",{gmailId:m.gmailId,attachIndex:m.attachIndex,attachmentId:m.attachmentId||"",partId:m.partId||""});
+          if(ar&&ar.base64) atts.push({name:m.name,type:ar.type||m.type,base64:ar.base64});
+        }catch(e){}
+      }
       const prompt="You are an expert Indian accountant parsing a business email for Onam Agarbathi Pvt. Ltd. (incense manufacturer, Bangalore).\n"+
 "RULES:\n"+
 "- Email FROM a supplier/vendor (Chemixil, raw material, chemical, packaging) = category Business - Purchase\n"+
