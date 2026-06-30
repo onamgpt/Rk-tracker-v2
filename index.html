@@ -185,7 +185,28 @@ function saveCache(e){
     try{localStorage.setItem(LS_CACHE,JSON.stringify(e));}catch(e2){}
   }
 }
-function loadDD(){try{return JSON.parse(localStorage.getItem(LS_DD))||DEFAULT_DD;}catch{return DEFAULT_DD;}}
+function loadDD(){
+  try{
+    var saved=JSON.parse(localStorage.getItem(LS_DD));
+    if(!saved)return DEFAULT_DD;
+    // One-time migration: refresh categories list to the new simplified set,
+    // but preserve any custom categories the user added beyond the defaults.
+    var MIGRATION_KEY="rk_categories_migrated_v16";
+    if(!localStorage.getItem(MIGRATION_KEY)){
+      var oldCats=Array.isArray(saved.categories)?saved.categories:[];
+      var extraCustom=oldCats.filter(function(c){return !DEFAULT_DD.categories.includes(c)&&
+        !["Business - Orders","Business - Dispatch","Business - Production","Finance - Bank","Finance - Loans",
+          "Finance - Investments","Finance - Expenses","People","Compliance - Tax","Compliance - ESI/EPF/PT",
+          "Digital / Marketing","CSD Tasks","Misc","Intelligence - Competitor","Intelligence - New Brand",
+          "Problem - Customer","Problem - Delivery","Personal - Wedding","Personal - Expense",
+          "Personal - Thoughts","Personal - Shopping"].includes(c);});
+      saved.categories=DEFAULT_DD.categories.concat(extraCustom);
+      localStorage.setItem(LS_DD,JSON.stringify(saved));
+      localStorage.setItem(MIGRATION_KEY,"1");
+    }
+    return Object.assign({},DEFAULT_DD,saved);
+  }catch(e){return DEFAULT_DD;}
+}
 function saveDD(d){localStorage.setItem(LS_DD,JSON.stringify(d));}
 
 // ── GOOGLE SHEETS API ─────────────────────────────────────────────────────────
@@ -2804,7 +2825,13 @@ function App(){
         }
       }).catch(()=>setSyncStatus("📴 Offline · "+cached.length+" entries safe"));
     }
-    sheetsAPI("getDropdowns").then(r=>{if(r.dropdowns)setDropdowns(p=>({...p,...r.dropdowns}));}).catch(()=>{});
+    sheetsAPI("getDropdowns").then(r=>{if(r.dropdowns)setDropdowns(p=>{
+  // Categories are intentionally controlled by app code (simplified set), not overwritten by
+  // whatever accumulated in the Sheet historically — but still merge in any vendors/persons/etc.
+  var merged={...p,...r.dropdowns};
+  merged.categories=p.categories;
+  return merged;
+});}).catch(()=>{});
   },[]);
 
   const saveEntry=async(entry,opts)=>{
