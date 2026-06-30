@@ -2291,6 +2291,208 @@ Return ONLY valid JSON:
 }
 
 
+
+// ── PaymentReminders — dealer contact book + WhatsApp payment reminders ──
+function PaymentReminders({ onClose, entries, onSaveEntry }) {
+  const [view, setView] = useState("pending"); // pending | contacts
+  const [contacts, setContacts] = useState({}); // name(lower) -> phone
+  const [loading, setLoading] = useState(false);
+  const [statusMsg, setStatusMsg] = useState("");
+  const [sentIds, setSentIds] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("waReminderSent") || "{}"); } catch(e) { return {}; }
+  });
+  const [editingContact, setEditingContact] = useState(null);
+  const [newPhone, setNewPhone] = useState("");
+
+  // Load saved contacts from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("dealerContacts") || "{}");
+      setContacts(saved);
+    } catch(e) {}
+  }, []);
+
+  const saveContact = (name, phone) => {
+    const key = name.trim().toLowerCase();
+    const updated = { ...contacts, [key]: phone.replace(/[^\d]/g, "") };
+    setContacts(updated);
+    localStorage.setItem("dealerContacts", JSON.stringify(updated));
+    setEditingContact(null);
+    setNewPhone("");
+  };
+
+  // Pending payment entries — overdue or payment due
+  const pendingEntries = (entries || []).filter(e =>
+    (e.paymentStatus === "Payment Pending" || e.paymentStatus === "Asked Payment" ||
+     e.paymentStatus === "Overdue" || (e.tags || []).includes("Payment Due")) &&
+    e.amount && parseFloat(String(e.amount).replace(/[^\d.]/g, "")) > 0
+  ).slice(0, 100);
+
+  // Group by person/vendor for cleaner display
+  const grouped = {};
+  pendingEntries.forEach(e => {
+    const name = e.person || e.vendor || "Unknown";
+    if (!grouped[name]) grouped[name] = [];
+    grouped[name].push(e);
+  });
+
+  const fmt = n => !n ? "—" : "₹" + Number(String(n).replace(/[^\d.]/g, "")).toLocaleString("en-IN");
+
+  const sendReminder = async (name, entryList) => {
+    const phone = contacts[name.trim().toLowerCase()];
+    if (!phone) {
+      setStatusMsg("⚠️ No phone number saved for " + name + " — add it in Contacts tab first.");
+      return;
+    }
+    setLoading(true);
+    const total = entryList.reduce((s, e) => s + (parseFloat(String(e.amount).replace(/[^\d.]/g, "")) || 0), 0);
+    try {
+      const res = await fetch("/.netlify/functions/whatsapp", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "sendTemplate",
+          to: phone,
+          templateName: "onam_test_message",
+          languageCode: "en_US"
+        })
+      });
+      const data = await res.json();
+      if (data.ok && !data.result?.error) {
+        const updated = { ...sentIds, [name]: new Date().toISOString() };
+        setSentIds(updated);
+        localStorage.setItem("waReminderSent", JSON.stringify(updated));
+        setStatusMsg("✅ Reminder sent to " + name + " (" + fmt(total) + ")");
+      } else {
+        setStatusMsg("❌ Failed: " + (data.result?.error?.message || data.error || "Unknown error"));
+      }
+    } catch(e) {
+      setStatusMsg("❌ " + e.message);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ padding: 16, maxWidth: 600, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <span style={{ fontSize: 28 }}>💬</span>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 17, color: "#1a1a2a" }}>Payment Reminders</h2>
+          <div style={{ fontSize: 11, color: "#6a6a8a" }}>Send WhatsApp reminders to dealers with pending payments</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        {[["pending", "💰 Pending (" + Object.keys(grouped).length + ")"], ["contacts", "📇 Contacts"]].map(([v, l]) =>
+          <button key={v} onClick={() => setView(v)} style={{
+            flex: 1, padding: "8px 4px", borderRadius: 8, border: "none", fontSize: 12, fontWeight: 700,
+            background: view === v ? "#1a1a4a" : "#e8e8f0", color: view === v ? "#fff" : "#1a1a4a", cursor: "pointer"
+          }}>{l}</button>
+        )}
+      </div>
+
+      {statusMsg && <div style={{
+        fontSize: 12, padding: "8px 12px", borderRadius: 8, marginBottom: 10,
+        background: statusMsg.startsWith("❌") ? "#fff0f0" : statusMsg.startsWith("⚠️") ? "#fff8e7" : "#f0fff0",
+        color: statusMsg.startsWith("❌") ? "#8b0000" : statusMsg.startsWith("⚠️") ? "#8a6a00" : "#1a5a1a"
+      }}>{statusMsg}</div>}
+
+      {view === "pending" && <>
+        <div style={{ background: "#fff8e7", borderRadius: 10, padding: 10, marginBottom: 12, fontSize: 11, color: "#8a6a00" }}>
+          ⚠️ Template <b>onam_test_message</b> must be Meta-approved before sending works. Check status in WhatsApp Manager.
+        </div>
+
+        {Object.keys(grouped).length === 0 && (
+          <div style={{ textAlign: "center", padding: "24px 16px", color: "#999", fontSize: 12, background: "#fafafa", borderRadius: 10 }}>
+            No pending payments found. 🎉
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {Object.entries(grouped).map(([name, list]) => {
+            const total = list.reduce((s, e) => s + (parseFloat(String(e.amount).replace(/[^\d.]/g, "")) || 0), 0);
+            const hasPhone = !!contacts[name.trim().toLowerCase()];
+            const lastSent = sentIds[name];
+            return (
+              <div key={name} style={{ background: "#f8f8fc", borderRadius: 10, border: "1px solid #e0e0f0", padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2a" }}>{name}</div>
+                    <div style={{ fontSize: 11, color: "#888" }}>{list.length} invoice(s) · {fmt(total)} pending</div>
+                    {lastSent && <div style={{ fontSize: 10, color: "#2a8a2a", marginTop: 2 }}>✅ Reminded {new Date(lastSent).toLocaleDateString("en-IN")}</div>}
+                    {!hasPhone && <div style={{ fontSize: 10, color: "#c08a00", marginTop: 2 }}>⚠️ No phone number saved</div>}
+                  </div>
+                  <button
+                    onClick={() => sendReminder(name, list)}
+                    disabled={loading || !hasPhone}
+                    style={{
+                      fontSize: 11, padding: "8px 14px", borderRadius: 8, border: "none",
+                      background: hasPhone ? "#1a8a4a" : "#ccc", color: "#fff", fontWeight: 700,
+                      cursor: hasPhone ? "pointer" : "not-allowed", whiteSpace: "nowrap"
+                    }}
+                  >💬 Send Reminder</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </>}
+
+      {view === "contacts" && <>
+        <div style={{ background: "#f0f8ff", borderRadius: 10, padding: 10, marginBottom: 12, fontSize: 11, color: "#2a4a6a" }}>
+          Save dealer/vendor WhatsApp numbers here once — they're reused for all future reminders.
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {Object.keys(grouped).length === 0 && Object.keys(contacts).length === 0 && (
+            <div style={{ textAlign: "center", padding: "20px", color: "#999", fontSize: 12 }}>No contacts yet.</div>
+          )}
+          {Array.from(new Set([...Object.keys(grouped), ...Object.keys(contacts).map(k => k)])).map(name => {
+            const displayName = grouped[name] ? name : name; // best effort
+            const key = displayName.trim().toLowerCase();
+            const phone = contacts[key] || "";
+            const isEditing = editingContact === displayName;
+            return (
+              <div key={displayName} style={{ display: "flex", alignItems: "center", gap: 8, background: "#f8f8fc", borderRadius: 8, padding: "8px 10px" }}>
+                <div style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "#1a1a2a" }}>{displayName}</div>
+                {isEditing ? (
+                  <>
+                    <input
+                      type="tel"
+                      value={newPhone}
+                      onChange={e => setNewPhone(e.target.value)}
+                      placeholder="10-digit number"
+                      style={{ width: 140, padding: "5px 8px", borderRadius: 6, border: "1px solid #ccc", fontSize: 12 }}
+                    />
+                    <button onClick={() => saveContact(displayName, newPhone)} style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "none", background: "#1a8a4a", color: "#fff", cursor: "pointer" }}>Save</button>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 12, color: phone ? "#1a5a1a" : "#999" }}>{phone ? "+91 " + phone : "no number"}</span>
+                    <button onClick={() => { setEditingContact(displayName); setNewPhone(phone); }} style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "1px solid #ccc", background: "#fff", cursor: "pointer" }}>Edit</button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ marginTop: 14, padding: 10, background: "#f8f5f0", borderRadius: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>+ Add new contact manually</div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input id="newContactName" placeholder="Name" style={{ flex: 1, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc", fontSize: 12 }} />
+            <input id="newContactPhone" placeholder="Phone" style={{ width: 120, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc", fontSize: 12 }} />
+            <button onClick={() => {
+              const n = document.getElementById("newContactName").value;
+              const p = document.getElementById("newContactPhone").value;
+              if (n && p) { saveContact(n, p); document.getElementById("newContactName").value = ""; document.getElementById("newContactPhone").value = ""; }
+            }} style={{ fontSize: 11, padding: "6px 12px", borderRadius: 6, border: "none", background: "#1a3a8a", color: "#fff", cursor: "pointer" }}>Add</button>
+          </div>
+        </div>
+      </>}
+    </div>
+  );
+}
+
 // ── TallyUpload — upload Trial Balance, AI reads & asks, shows P&L ──────────
 function TallyUpload({onClose}){
   const [step,setStep]=useState("upload"); // upload | questions | result
@@ -2794,6 +2996,7 @@ function App(){
   const [showDayBook,setShowDayBook]=useState(false);
   const [showHealth,setShowHealth]=useState(false);
   const [showFamily,setShowFamily]=useState(false);
+  const [showPaymentReminders,setShowPaymentReminders]=useState(false);
   const [showDD,setShowDD]=useState(false);
   const [showShare,setShowShare]=useState(false);
   const [search,setSearch]=useState("");
@@ -3076,6 +3279,7 @@ function App(){
           <button onClick={()=>setShowDayBook(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#5a3a1a,#3a2a0a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>📒 Day Book</button>
           <button onClick={()=>setShowHealth(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#1a6a6a,#0a4a4a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>🏥 Health</button>
           <button onClick={()=>setShowFamily(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#8a1a5a,#6a0a3a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>👨‍👩‍👧 Family</button>
+          <button onClick={()=>setShowPaymentReminders(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#1a8a4a,#0a6a2a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>💬 Remind</button>
           <button onClick={()=>setShowAgeing(true)} title="Ageing Report: Shows all unpaid Sales-Payment invoices grouped by overdue days (0-30, 30-60, 60+ days). Use this to chase payments." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #e89a9a",background:"#fff0f0",color:"#7a1a1a",cursor:"pointer",fontWeight:600}}>📊 Ageing</button>
           <button onClick={()=>setShowMatcher(true)} title="Payment Matcher: Paste an SMS bank credit alert (e.g. 'Cr ₹50,000 by NEFT') and it finds the matching unpaid invoice automatically." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontWeight:600}}>💳 Match</button>
           <button onClick={()=>setShowLogistics(true)} title="Logistics Tracker: Track every Sales-Payment invoice through 4 stages — Despatched → In Transit → Delivered → Payment Received. Upload LR copy, paid LR, POD, and payment proof at each stage." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c8e8",background:"#f0f6ff",color:"#1a3a6a",cursor:"pointer",fontWeight:600}}>🚚 Logistics</button>
@@ -3237,6 +3441,7 @@ function App(){
     <Modal open={showDayBook} onClose={()=>setShowDayBook(false)} wide><DayBook onClose={()=>setShowDayBook(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showHealth} onClose={()=>setShowHealth(false)}><HealthFamilyQuick onClose={()=>setShowHealth(false)} onSaveEntry={saveEntry} mode="health"/></Modal>
     <Modal open={showFamily} onClose={()=>setShowFamily(false)}><HealthFamilyQuick onClose={()=>setShowFamily(false)} onSaveEntry={saveEntry} mode="family"/></Modal>
+    <Modal open={showPaymentReminders} onClose={()=>setShowPaymentReminders(false)} wide><PaymentReminders onClose={()=>setShowPaymentReminders(false)} entries={entries} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showTally} onClose={()=>setShowTally(false)} wide><TallyUpload onClose={()=>setShowTally(false)}/></Modal>
     <Modal open={showEmailScan} onClose={()=>setShowEmailScan(false)} wide><EmailScan entries={entries} onClose={()=>setShowEmailScan(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})} onRefresh={refresh}/></Modal>
     <Modal open={showDD} onClose={()=>setShowDD(false)} wide><DropdownManager dropdowns={dropdowns} onSave={saveDropdowns} onClose={()=>setShowDD(false)}/></Modal>
