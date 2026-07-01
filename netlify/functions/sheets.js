@@ -1,6 +1,13 @@
-// v2.6 redeploy
+// v2.7 per-user sheet routing
 const https = require("https");
 const url_module = require("url");
+
+const MAIN_SHEET_ID = "11BWMyX8SoEtaDULFS5GylRe6clPjgKBUrlczhkHy7Wg";
+const USER_SHEETS = {
+  "prakash": "1tBdAr_8Z7NmxbdvBkak8reqb7s1-nk31H3ouE-2u84c",
+  // Add more: "satish": "SHEET_ID", "sebi": "SHEET_ID"
+};
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyXP_nY13AqlYyif6Kf3rFRayQ_hzOsbisAxe_hT1bd8qkF5wcoJ5qI9dLtMbOTTd4uDg/exec";
 
 exports.handler = async (event) => {
   const h = {
@@ -10,17 +17,6 @@ exports.handler = async (event) => {
     "Access-Control-Allow-Methods": "POST, GET, OPTIONS"
   };
   if (event.httpMethod === "OPTIONS") return {statusCode:200,headers:h,body:""};
-
-  // Per-user sheet routing — one script, different Sheet IDs per user
-  const MAIN_SHEET_ID = "11BWMyX8SoEtaDULFS5GylRe6clPjgKBUrlczhkHy7Wg";
-  const USER_SHEETS = {
-    "prakash": "1tBdAr_8Z7NmxbdvBkak8reqb7s1-nk31H3ouE-2u84c",
-    // Add more users here when needed:
-    // "satish": "SHEET_ID_FOR_SATISH",
-  };
-  const urlUser = (body.user || "main").toLowerCase();
-  const sheetId = USER_SHEETS[urlUser] || MAIN_SHEET_ID;
-  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyXP_nY13AqlYyif6Kf3rFRayQ_hzOsbisAxe_hT1bd8qkF5wcoJ5qI9dLtMbOTTd4uDg/exec";
 
   function makeGet(targetUrl) {
     return new Promise(function(resolve, reject) {
@@ -66,29 +62,31 @@ exports.handler = async (event) => {
   try {
     var body = JSON.parse(event.body || "{}");
     var action = body.action || "getAll";
+
+    // Determine which sheet to use based on user
+    var urlUser = (body.user || "main").toLowerCase();
+    var sheetId = USER_SHEETS[urlUser] || MAIN_SHEET_ID;
+
     var raw;
 
     if (action === "savePortfolio" && body.key && body.data) {
-      // Generic portfolio state backup — used by trading/usa apps for permanent storage
-      var ppBody = JSON.stringify({action: "savePortfolio", key: body.key, data: body.data});
+      var ppBody = JSON.stringify({action: "savePortfolio", key: body.key, data: body.data, sheetId: sheetId});
       raw = await makePost(SCRIPT_URL, ppBody);
     } else if (action === "getPortfolio" && body.key) {
-      var ppUrl = SCRIPT_URL + "?action=getPortfolio&key=" + encodeURIComponent(body.key);
+      var ppUrl = SCRIPT_URL + "?action=getPortfolio&key=" + encodeURIComponent(body.key) + "&sheetId=" + encodeURIComponent(sheetId);
       raw = await makeGet(ppUrl);
     } else if (action === "save" && body.entry) {
-      // Use POST for save to handle large entries with attachments
-      // Strip attachments from Sheets save - save only text data
       var entry = Object.assign({}, body.entry);
       var hasAttachments = entry.attachments && entry.attachments.length > 0;
       entry.attachments = hasAttachments ? "["+entry.attachments.length+" files]" : "";
-      var postBody = JSON.stringify({action: "save", entry: entry});
+      var postBody = JSON.stringify({action: "save", entry: entry, sheetId: sheetId});
       raw = await makePost(SCRIPT_URL, postBody);
     } else if (action === "delete" && body.id) {
-      var delUrl = SCRIPT_URL + "?action=delete&id=" + encodeURIComponent(body.id);
+      var delUrl = SCRIPT_URL + "?action=delete&id=" + encodeURIComponent(body.id) + "&sheetId=" + encodeURIComponent(sheetId);
       raw = await makeGet(delUrl);
     } else {
-      // getAll, getDropdowns etc
-      var getUrl = SCRIPT_URL + "?action=" + action;
+      // getAll, getDropdowns, saveDropdowns etc
+      var getUrl = SCRIPT_URL + "?action=" + action + "&sheetId=" + encodeURIComponent(sheetId);
       raw = await makeGet(getUrl);
     }
 
