@@ -11,14 +11,16 @@ exports.handler = async (event) => {
   };
   if (event.httpMethod === "OPTIONS") return {statusCode:200,headers:h,body:""};
 
-  // Per-user sheet routing — each user has their own Apps Script/Sheet
-  const USER_SCRIPTS = {
-    "prakash": "https://script.google.com/macros/s/AKfycbyXP_nY13AqlYyif6Kf3rFRayQ_hzOsbisAxe_hT1bd8qkF5wcoJ5qI9dLtMbOTTd4uDg/exec",
-    // Add more users here as needed:
-    // "satish": "https://script.google.com/.../exec",
+  // Per-user sheet routing — one script, different Sheet IDs per user
+  const MAIN_SHEET_ID = "11BWMyX8SoEtaDULFS5GylRe6clPjgKBUrlczhkHy7Wg";
+  const USER_SHEETS = {
+    "prakash": "1tBdAr_8Z7NmxbdvBkak8reqb7s1-nk31H3ouE-2u84c",
+    // Add more users here when needed:
+    // "satish": "SHEET_ID_FOR_SATISH",
   };
   const urlUser = (body.user || "main").toLowerCase();
-  const SCRIPT_URL = USER_SCRIPTS[urlUser] || "https://script.google.com/macros/s/AKfycbyXP_nY13AqlYyif6Kf3rFRayQ_hzOsbisAxe_hT1bd8qkF5wcoJ5qI9dLtMbOTTd4uDg/exec";
+  const sheetId = USER_SHEETS[urlUser] || MAIN_SHEET_ID;
+  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyXP_nY13AqlYyif6Kf3rFRayQ_hzOsbisAxe_hT1bd8qkF5wcoJ5qI9dLtMbOTTd4uDg/exec";
 
   function makeGet(targetUrl) {
     return new Promise(function(resolve, reject) {
