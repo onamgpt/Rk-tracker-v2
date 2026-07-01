@@ -11,7 +11,14 @@ exports.handler = async (event) => {
   };
   if (event.httpMethod === "OPTIONS") return {statusCode:200,headers:h,body:""};
 
-  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyXP_nY13AqlYyif6Kf3rFRayQ_hzOsbisAxe_hT1bd8qkF5wcoJ5qI9dLtMbOTTd4uDg/exec";
+  // Per-user sheet routing — each user has their own Apps Script/Sheet
+  const USER_SCRIPTS = {
+    "prakash": "https://script.google.com/macros/s/AKfycbyXP_nY13AqlYyif6Kf3rFRayQ_hzOsbisAxe_hT1bd8qkF5wcoJ5qI9dLtMbOTTd4uDg/exec",
+    // Add more users here as needed:
+    // "satish": "https://script.google.com/.../exec",
+  };
+  const urlUser = (body.user || "main").toLowerCase();
+  const SCRIPT_URL = USER_SCRIPTS[urlUser] || "https://script.google.com/macros/s/AKfycbyXP_nY13AqlYyif6Kf3rFRayQ_hzOsbisAxe_hT1bd8qkF5wcoJ5qI9dLtMbOTTd4uDg/exec";
 
   function makeGet(targetUrl) {
     return new Promise(function(resolve, reject) {
