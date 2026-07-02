@@ -460,6 +460,7 @@ function Thumb({att,small}){
   const b={width:s,height:s,borderRadius:6,border:"1.5px solid #e2d9c8",cursor:"pointer",flexShrink:0,objectFit:"cover",display:"block"};
   const openAtt=()=>{
     if(!att.data)return;
+    if(att.type==="drive"||String(att.data).indexOf("http")===0){window.open(att.data,"_blank");return;}
     // Create blob URL and open
     try{
       const byteStr=atob(att.data.split(",")[1]||att.data);
@@ -475,6 +476,10 @@ function Thumb({att,small}){
       if(w){w.document.write(`<img src="${att.data}" style="max-width:100%" />`);w.document.close();}
     }
   };
+  if(att.type==="drive"||(att.data&&String(att.data).indexOf("http")===0&&!att.type?.startsWith("image/")))return<div onClick={openAtt} style={{...b,background:"#eef7ee",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:small?9:11,color:"#2a7a2a",fontWeight:700,flexDirection:"column",gap:1}}>
+    <span style={{fontSize:small?14:18}}>🔗</span>
+    <span>DRIVE</span>
+  </div>;
   if(att.type?.startsWith("image/"))return<div onClick={openAtt} style={{...b,overflow:"hidden",cursor:"zoom-in"}}><img src={att.data} alt={att.name||"image"} style={{width:"100%",height:"100%",objectFit:"cover"}}/></div>;
   const p=att.type==="application/pdf";
   return<div onClick={openAtt} style={{...b,background:p?"#fff0f0":"#f0f4ff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:small?9:11,color:p?"#b00":"#339",fontWeight:700,flexDirection:"column",gap:1}}>
@@ -2868,9 +2873,22 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
         reminderNote="Pay by "+rd.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})+" ("+obj.reminderDays+" day credit)";
       }
 
-      // Build attachments for entry — keep all
+      // Build attachments for entry — upload real files to Google Drive so a clickable link is always stored
       const driveAtts=(email.driveLinks||[]).map(l=>({name:"Invoice (Drive)",type:"drive",data:l}));
-      const allAtts=[...atts.map(a=>({name:a.name,type:a.type,data:a.data||""})),...driveAtts];
+      const uploadedAtts=[];
+      function _tmo(p,ms){return Promise.race([p,new Promise(function(res){setTimeout(function(){res(null);},ms);})]);}
+      for(const a of atts){
+        if(a.base64&&a.base64.length>100){
+          const dataUrl="data:"+(a.type||"application/octet-stream")+";base64,"+a.base64;
+          try{
+            const up=await _tmo(uploadToDrive({name:a.name||"attachment",type:a.type,data:dataUrl}),25000);
+            if(up&&up.type==="drive"&&up.data&&up.data.indexOf("http")===0){uploadedAtts.push(up);}
+            else{uploadedAtts.push({name:a.name,type:a.type,data:dataUrl});}
+          }catch(e){uploadedAtts.push({name:a.name,type:a.type,data:dataUrl});}
+        }
+      }
+      const allAtts=[...uploadedAtts,...driveAtts];
+      const firstDriveUrl=allAtts.find(a=>a&&a.data&&String(a.data).indexOf("http")===0);
 
       const cleanTitle=obj&&obj.title?obj.title:(obj&&obj.vendor?(obj.vendor+(obj.amount?" Rs."+Number(obj.amount).toLocaleString("en-IN"):"")):(email.subject));
 
@@ -2885,11 +2903,12 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
         paymentStatus:(obj&&obj.paymentStatus)||"Payment Pending",
         reminder:reminderDate,
         reminderNote:reminderNote,
-        link:(email.driveLinks||[])[0]||(allAtts[0]&&allAtts[0].data&&allAtts[0].data.startsWith("http")?allAtts[0].data:""),
-        linkLabel:(email.driveLinks||[]).length?"Invoice":atts.length?"📎 Attachment":"",
+        link:(firstDriveUrl&&firstDriveUrl.data)||(email.driveLinks||[])[0]||"",
+        linkLabel:(firstDriveUrl||(email.driveLinks||[]).length)?"📎 Invoice":atts.length?"📎 Attachment":"",
         notes:((obj&&obj.notes)||"")+
           ((obj&&obj.invoiceNo)?(" | Inv: "+obj.invoiceNo):"")+
           ((obj&&obj.paymentTerms)?(" | Terms: "+obj.paymentTerms):"")+
+          (firstDriveUrl?(" | 📎 "+firstDriveUrl.data):"")+
           " [gmailId:"+email.gmailId+"]",
         attachments:allAtts,
         tags:["Payment Due"],
