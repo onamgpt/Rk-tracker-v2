@@ -7,7 +7,7 @@ const USER_SHEETS = {
   "prakash": "1tBdAr_8Z7NmxbdvBkak8reqb7s1-nk31H3ouE-2u84c",
   // Add more: "satish": "SHEET_ID", "sebi": "SHEET_ID"
 };
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyXP_nY13AqlYyif6Kf3rFRayQ_hzOsbisAxe_hT1bd8qkF5wcoJ5qI9dLtMbOTTd4uDg/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyeR53nHyQCmk7UGGVcdbapL62AcppjYn_HxhW2AserEoX5uZmHWYNv8q_EAw2k5CqEVw/exec";
 
 exports.handler = async (event) => {
   const h = {
