@@ -3337,27 +3337,40 @@ function App(){
     {/* SYNC BAR */}
     <div style={{background:syncStatus.includes("✅")?"#1a5a1a":syncStatus.includes("⚠️")?"#7a5800":"#1a3a5a",padding:"4px 14px",fontSize:11,color:"#c8f0c8",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
       <span style={{flex:1}}>{syncStatus||"📊 Google Sheets connected"}</span>
-      <button onClick={()=>{
-        // Emergency recovery — restore from backup
+      <button onClick={async()=>{
+        // CLOUD recovery — pull everything back from Google Sheets (works on mobile, no console)
+        setLoading(true);
+        setSyncStatus("🆘 Recovering from Google Sheets…");
         try{
-          const backup=JSON.parse(localStorage.getItem(LS_CACHE+"_backup")||"null");
-          if(backup&&backup.entries&&backup.entries.length>0){
-            setEntries(backup.entries);
-            saveCache(backup.entries);
-            setSyncStatus("✅ Recovered "+backup.entries.length+" entries from backup ("+backup.savedAt?.slice(0,10)+")");
+          const cached=loadCache();
+          let r=await sheetsAPI("getAll");
+          if(r.error||!r.entries){
+            // A bloated row can jam getAll — re-push light copies of whatever we have, then retry
+            setSyncStatus("🧹 Repairing, then recovering…");
+            try{await Promise.all(cached.map(e=>sheetsAPI("save",{entry:lightForSheet(e)}).catch(()=>{})));}catch(e){}
+            r=await sheetsAPI("getAll");
+          }
+          if(r&&r.entries&&r.entries.length>0){
+            // Bring back EVERYTHING from the Sheet — ignore tombstones, merge with anything local
+            const byId={};
+            cached.forEach(e=>{if(e&&e.id)byId[e.id]=e;});
+            r.entries.map(sanitizeEntry).filter(Boolean).forEach(e=>{if(!byId[e.id])byId[e.id]=e;});
+            const merged=Object.values(byId);
+            merged.sort((a,b)=>String(b.createdAt||b.date||"").localeCompare(String(a.createdAt||a.date||"")));
+            setEntries(merged);saveCache(merged);
+            setSyncStatus("🆘 Recovered "+merged.length+" entries from Google Sheets");
           } else {
-            // Try today's backup
-            const todayKey=LS_CACHE+"_"+new Date().toISOString().slice(0,10);
-            const todayBackup=JSON.parse(localStorage.getItem(todayKey)||"null");
-            if(todayBackup&&todayBackup.entries){
-              setEntries(todayBackup.entries);
-              saveCache(todayBackup.entries);
-              setSyncStatus("✅ Recovered "+todayBackup.entries.length+" entries");
+            // Cloud unreachable — fall back to any local backup
+            const backup=JSON.parse(localStorage.getItem(LS_CACHE+"_backup")||"null");
+            if(backup&&backup.entries&&backup.entries.length>0){
+              setEntries(backup.entries);saveCache(backup.entries);
+              setSyncStatus("✅ Restored "+backup.entries.length+" from local backup ("+(backup.savedAt?backup.savedAt.slice(0,10):"")+")");
             } else {
-              setSyncStatus("⚠️ No backup found");
+              setSyncStatus("⚠️ Couldn't reach Sheets"+(r&&r.error?(" — "+r.error):"")+". Try again in a moment.");
             }
           }
         }catch(e){setSyncStatus("⚠️ Recovery failed: "+e.message);}
+        setLoading(false);
       }} style={{background:"rgba(255,150,50,.3)",border:"1px solid rgba(255,150,50,.5)",color:"#ffcc88",borderRadius:6,padding:"2px 10px",cursor:"pointer",fontSize:10,whiteSpace:"nowrap"}}>🔄 Recover</button>
       <button onClick={refresh} disabled={loading} style={{background:"transparent",border:"1px solid rgba(255,255,255,.3)",color:"inherit",borderRadius:6,padding:"2px 10px",cursor:"pointer",fontSize:10}}>{loading?"…":"↻ Sync"}</button>
     </div>
