@@ -87,6 +87,10 @@ exports.handler = async (event) => {
     } else if (action === "delete" && body.id) {
       var delUrl = SCRIPT_URL + "?action=delete&id=" + encodeURIComponent(body.id) + "&sheetId=" + encodeURIComponent(sheetId);
       raw = await makeGet(delUrl);
+    } else if (action === "uploadFile" && body.file) {
+      // Forward the full file to the Apps Script so it saves to Drive and returns a link
+      var upBody = JSON.stringify({action: "uploadFile", file: body.file, sheetId: sheetId});
+      raw = await makePost(SCRIPT_URL, upBody);
     } else {
       // getAll, getDropdowns, saveDropdowns etc
       var getUrl = SCRIPT_URL + "?action=" + action + "&sheetId=" + encodeURIComponent(sheetId);
