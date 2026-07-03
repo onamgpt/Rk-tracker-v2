@@ -1732,10 +1732,21 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "Scan failed");
 
-      const processed = (data.emails || []).map(email => {
+      const processed = await Promise.all((data.emails || []).map(async email => {
         const fromEmail = (email.from || "").toLowerCase().replace(/.*<|>.*/g, "").trim();
         const salesperson = SALES_CONFIG.emailMap[fromEmail] || null;
-        const coords = extractCoords(email.body) || extractCoords(email.subject);
+        let coords = extractCoords(email.body) || extractCoords(email.subject);
+        if (!coords) {
+          // Short Google Maps links (maps.app.goo.gl / goo.gl/maps) carry no coords — expand them server-side
+          const sm = (email.body||"").match(/https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps)\/[A-Za-z0-9_?=&.-]+/);
+          if (sm) {
+            try {
+              const er = await fetch("/.netlify/functions/expand?url="+encodeURIComponent(sm[0]));
+              const ed = await er.json();
+              if (ed && ed.finalUrl) coords = extractCoords(ed.finalUrl) || (ed.html ? extractCoords(ed.html) : null);
+            } catch(e) {}
+          }
+        }
         let distKm = null, band = null, allowance = 0;
         if (coords && salesperson && salesperson.hqLat) {
           distKm = roadDistanceKm(salesperson.hqLat, salesperson.hqLng, coords.lat, coords.lng);
@@ -1743,7 +1754,7 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
           allowance = (salesperson.allowance && salesperson.allowance[band.label]) || 0;
         }
         return { ...email, fromEmail, salesperson, coords, distKm, band, allowance };
-      });
+      }));
 
       // Filter out already imported
       const imported = JSON.parse(localStorage.getItem("importedLocationIds") || "[]");
@@ -2877,14 +2888,34 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
       const driveAtts=(email.driveLinks||[]).map(l=>({name:"Invoice (Drive)",type:"drive",data:l}));
       const uploadedAtts=[];
       function _tmo(p,ms){return Promise.race([p,new Promise(function(res){setTimeout(function(){res(null);},ms);})]);}
+      function _shrinkImg(dataUrl){return new Promise(function(res){
+        try{
+          var img=new Image();
+          img.onload=function(){
+            try{
+              var MAX=1200,w=img.width,h=img.height;
+              if(w>MAX||h>MAX){if(w>h){h=Math.round(h*MAX/w);w=MAX;}else{w=Math.round(w*MAX/h);h=MAX;}}
+              var c=document.createElement("canvas");c.width=w;c.height=h;
+              c.getContext("2d").drawImage(img,0,0,w,h);
+              res(c.toDataURL("image/jpeg",0.8));
+            }catch(e){res(dataUrl);}
+          };
+          img.onerror=function(){res(dataUrl);};
+          img.src=dataUrl;
+        }catch(e){res(dataUrl);}
+      });}
       for(const a of atts){
         if(a.base64&&a.base64.length>100){
-          const dataUrl="data:"+(a.type||"application/octet-stream")+";base64,"+a.base64;
+          let dataUrl="data:"+(a.type||"application/octet-stream")+";base64,"+a.base64;
+          let attType=a.type||"application/octet-stream";
+          if(attType.indexOf("image")===0){dataUrl=await _shrinkImg(dataUrl);attType="image/jpeg";}
+          let saved=null;
           try{
-            const up=await _tmo(uploadToDrive({name:a.name||"attachment",type:a.type,data:dataUrl}),25000);
-            if(up&&up.type==="drive"&&up.data&&up.data.indexOf("http")===0){uploadedAtts.push(up);}
-            else{uploadedAtts.push({name:a.name,type:a.type,data:dataUrl});}
-          }catch(e){uploadedAtts.push({name:a.name,type:a.type,data:dataUrl});}
+            const up=await _tmo(uploadToDrive({name:a.name||"attachment",type:attType,data:dataUrl}),25000);
+            if(up&&up.type==="drive"&&up.data&&String(up.data).indexOf("http")===0)saved=up;
+          }catch(e){}
+          // Fallback: keep the (compressed) file itself so the card always shows the invoice
+          uploadedAtts.push(saved||{name:a.name||"attachment",type:attType,data:dataUrl});
         }
       }
       const allAtts=[...uploadedAtts,...driveAtts];
@@ -2915,9 +2946,10 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
         createdAt:new Date().toISOString()
       };
 
-      // Save entry
-      await intelAPI("saveEntry",{entry});
-      try{if(onSaveEntry)await onSaveEntry(Object.assign({},entry,{attachments:allAtts.map(a=>({name:a.name,type:a.type,data:(a.data&&a.data.startsWith&&a.data.startsWith("http"))?a.data:""}))}))}catch(e){}
+      // Save entry (sheet copy gets links only — no heavy base64)
+      const sheetEntry=Object.assign({},entry,{attachments:allAtts.map(a=>({name:a.name,type:a.type,data:(a.data&&String(a.data).indexOf("http")===0)?a.data:""}))});
+      await intelAPI("saveEntry",{entry:sheetEntry});
+      try{if(onSaveEntry)await onSaveEntry(Object.assign({},entry))}catch(e){}
       try{await intelAPI("logIntel",{intel:{date:email.date,source:"email",title:entry.title,vendor:(obj&&obj.vendor)||"",customer:(obj&&obj.person)||"",amount:(obj&&obj.amount)||"",invoiceNo:(obj&&obj.invoiceNo)||"",category:entry.category,summary:(obj&&obj.summary)||email.subject,gmailId:email.gmailId}});}catch(e){}
 
       // Mark imported
