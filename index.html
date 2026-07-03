@@ -210,7 +210,21 @@ function loadDD(){
 function saveDD(d){localStorage.setItem(LS_DD,JSON.stringify(d));}
 
 // ── GOOGLE SHEETS API ─────────────────────────────────────────────────────────
-async function sheetsAPI(action,data={}){
+async function lightForSheet(entry){
+  // Never send heavy base64 image data to Google Sheets (cell limit 50k chars).
+  // Keep only http/drive links; the full image stays in localStorage.
+  if(!entry) return entry;
+  var e=Object.assign({},entry);
+  if(Array.isArray(e.attachments)){
+    e.attachments=e.attachments.map(function(a){
+      if(!a) return a;
+      var keep=(a.data&&String(a.data).indexOf("http")===0);
+      return {name:a.name,type:a.type,data:keep?a.data:""};
+    });
+  }
+  return e;
+}
+function sheetsAPI(action,data={}){
   try{
     const r=await fetch("/.netlify/functions/sheets",{
       method:"POST",
@@ -3085,7 +3099,7 @@ function App(){
         const sheetIds=new Set(r.entries.map(e=>e.id));
         // a) push local entries missing in Sheets
         const toPush=cached.filter(e=>!sheetIds.has(e.id));
-        toPush.forEach(e=>sheetsAPI("save",{entry:e}).catch(()=>{}));
+        toPush.forEach(e=>sheetsAPI("save",{entry:lightForSheet(e)}).catch(()=>{}));
         // b) ADD (never replace) Sheets entries missing locally, sanitized
         const toAdd=r.entries.filter(e=>e&&e.id&&!localIds.has(e.id)&&loadTombstones().indexOf(e.id)===-1).map(sanitizeEntry).filter(Boolean);
         if(toAdd.length>0){
@@ -3131,7 +3145,7 @@ function App(){
     }
     // STEP 3: Save to Sheets in background
     uploadPromise.then(function(entryWithDrive){
-      sheetsAPI("save",{entry:entryWithDrive}).then(r=>{
+      sheetsAPI("save",{entry:lightForSheet(entryWithDrive)}).then(r=>{
         setSyncStatus(r.error?"📱 Saved locally · sync pending":"✅ Saved · backed up to Sheets");
       }).catch(()=>setSyncStatus("📱 Saved locally"));
     });
@@ -3170,19 +3184,19 @@ function App(){
     const updated=entries.map(e=>e.id===id?{...e,tags:[...new Set([...e.tags||[],"Done"])]}:e);
     setEntries(updated);saveCache(updated);setViewE(null);
     const entry=updated.find(e=>e.id===id);
-    if(entry)await sheetsAPI("save",{entry});
+    if(entry)await sheetsAPI("save",{entry:lightForSheet(entry)});
   };
   const hideEntry=async(id)=>{
     const updated=entries.map(e=>e.id===id?{...e,hidden:true}:e);
     setEntries(updated);saveCache(updated);setViewE(null);
     const entry=updated.find(e=>e.id===id);
-    if(entry)sheetsAPI("save",{entry});
+    if(entry)sheetsAPI("save",{entry:lightForSheet(entry)});
   };
   const unhideEntry=async(id)=>{
     const updated=entries.map(e=>e.id===id?{...e,hidden:false}:e);
     setEntries(updated);saveCache(updated);
     const entry=updated.find(e=>e.id===id);
-    if(entry)sheetsAPI("save",{entry});
+    if(entry)sheetsAPI("save",{entry:lightForSheet(entry)});
   };
 
   const addToDropdown=(list,val)=>{
@@ -3200,12 +3214,19 @@ function App(){
     const cached=loadCache();
     try{
       const r=await sheetsAPI("getAll");
-      if(r.error||!r.entries){setSyncStatus("📴 Offline — "+cached.length+" entries safe locally");setLoading(false);return;}
+      if(r.error||!r.entries){
+        // Repair: a bloated row (base64 in a cell) can break getAll. Re-push light versions to overwrite them.
+        setSyncStatus("🧹 Repairing sync…");
+        try{await Promise.all(cached.map(e=>sheetsAPI("save",{entry:lightForSheet(e)}).catch(()=>{})));}catch(e){}
+        const r2=await sheetsAPI("getAll");
+        if(r2.error||!r2.entries){setSyncStatus("📴 Offline — "+cached.length+" entries safe locally");setLoading(false);return;}
+        r.entries=r2.entries;r.error=null;
+      }
       const localIds=new Set(cached.map(e=>e.id));
       const sheetIds=new Set(r.entries.map(e=>e.id));
       // push local-only entries to Sheets
       const toPush=cached.filter(e=>!sheetIds.has(e.id));
-      if(toPush.length>0)await Promise.all(toPush.map(e=>sheetsAPI("save",{entry:e}).catch(()=>{})));
+      if(toPush.length>0)await Promise.all(toPush.map(e=>sheetsAPI("save",{entry:lightForSheet(e)}).catch(()=>{})));
       // add Sheets-only entries locally (sanitized), never replacing existing
       const toAdd=r.entries.filter(e=>e&&e.id&&!localIds.has(e.id)&&loadTombstones().indexOf(e.id)===-1).map(sanitizeEntry).filter(Boolean);
       if(toAdd.length>0){
