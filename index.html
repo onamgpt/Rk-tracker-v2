@@ -3099,7 +3099,16 @@ function App(){
     // Push local to sheets silently — ALSO restore from Sheets when cache is empty (e.g. after clearing site data)
     {
       if(cached.length===0){setSyncStatus("🔄 Restoring from Sheets…");}
-      sheetsAPI("getAll").then(r=>{
+      const _tryGetAll=async()=>{
+        let r=await sheetsAPI("getAll");
+        if(r.error||!r.entries){
+          setSyncStatus("🧹 Repairing sync…");
+          try{await Promise.all(cached.map(e=>sheetsAPI("save",{entry:lightForSheet(e)}).catch(()=>{})));}catch(e){}
+          r=await sheetsAPI("getAll");
+        }
+        return r;
+      };
+      _tryGetAll().then(r=>{
         if(r.error||!r.entries){setSyncStatus(cached.length>0?("📴 Offline · "+cached.length+" entries safe"):"📴 Offline · couldn't reach Sheets, try refresh");return;}
         // LOCAL IS MASTER. Never replace local entries. Two add-only directions:
         const localIds=new Set(cached.map(e=>e.id));
@@ -3108,7 +3117,9 @@ function App(){
         const toPush=cached.filter(e=>!sheetIds.has(e.id));
         toPush.forEach(e=>sheetsAPI("save",{entry:lightForSheet(e)}).catch(()=>{}));
         // b) ADD (never replace) Sheets entries missing locally, sanitized
-        const toAdd=r.entries.filter(e=>e&&e.id&&!localIds.has(e.id)&&loadTombstones().indexOf(e.id)===-1).map(sanitizeEntry).filter(Boolean);
+        const _recovery=cached.length<10&&r.entries.length>cached.length+5;
+        const _tombs=_recovery?[]:loadTombstones();
+        const toAdd=r.entries.filter(e=>e&&e.id&&!localIds.has(e.id)&&_tombs.indexOf(e.id)===-1).map(sanitizeEntry).filter(Boolean);
         if(toAdd.length>0){
           const merged=cached.concat(toAdd);
           merged.sort((a,b)=>String(b.createdAt||b.date||"").localeCompare(String(a.createdAt||a.date||"")));
@@ -3240,12 +3251,15 @@ function App(){
       const toPush=cached.filter(e=>!sheetIds.has(e.id));
       if(toPush.length>0)await Promise.all(toPush.map(e=>sheetsAPI("save",{entry:lightForSheet(e)}).catch(()=>{})));
       // add Sheets-only entries locally (sanitized), never replacing existing
-      const toAdd=r.entries.filter(e=>e&&e.id&&!localIds.has(e.id)&&loadTombstones().indexOf(e.id)===-1).map(sanitizeEntry).filter(Boolean);
+      // Recovery mode: if local is nearly empty but the Sheet has many, bring EVERYTHING back (ignore tombstones).
+      const recovery = cached.length < 10 && r.entries.length > cached.length + 5;
+      const tombs = recovery ? [] : loadTombstones();
+      const toAdd=r.entries.filter(e=>e&&e.id&&!localIds.has(e.id)&&tombs.indexOf(e.id)===-1).map(sanitizeEntry).filter(Boolean);
       if(toAdd.length>0){
         const merged=cached.concat(toAdd);
         merged.sort((a,b)=>String(b.createdAt||b.date||"").localeCompare(String(a.createdAt||a.date||"")));
         setEntries(merged);saveCache(merged);
-        setSyncStatus("✅ "+merged.length+" entries · ↓"+toAdd.length+" added · ↑"+toPush.length+" backed up · "+new Date().toLocaleTimeString("en-IN"));
+        setSyncStatus((recovery?"🆘 Recovered ":"✅ ")+merged.length+" entries · ↓"+toAdd.length+" from Sheet · ↑"+toPush.length+" backed up · "+new Date().toLocaleTimeString("en-IN"));
       } else {
         setSyncStatus("✅ "+cached.length+" entries · ↑"+toPush.length+" backed up · "+new Date().toLocaleTimeString("en-IN"));
       }
