@@ -20,14 +20,17 @@ exports.handler = async (event) => {
 
   function makeGet(targetUrl) {
     return new Promise(function(resolve, reject) {
-      https.get(targetUrl, {headers:{"User-Agent":"Mozilla/5.0"}}, function(res) {
-        if (res.statusCode === 301 || res.statusCode === 302) {
+      var rq = https.get(targetUrl, {headers:{"User-Agent":"Mozilla/5.0"}}, function(res) {
+        if ([301,302,303,307,308].indexOf(res.statusCode) !== -1 && res.headers.location) {
+          res.resume();
           return makeGet(res.headers.location).then(resolve).catch(reject);
         }
         var data = "";
         res.on("data", function(chunk){data += chunk;});
         res.on("end", function(){resolve(data);});
-      }).on("error", reject);
+      });
+      rq.on("error", reject);
+      rq.setTimeout(25000, function(){ rq.destroy(); reject(new Error("Apps Script timeout")); });
     });
   }
 
@@ -94,7 +97,7 @@ exports.handler = async (event) => {
       var parsed2 = JSON.parse(raw);
       return {statusCode:200,headers:h,body:JSON.stringify(parsed2)};
     } catch(e) {
-      return {statusCode:200,headers:h,body:JSON.stringify({success:true,raw:raw.slice(0,100)})};
+      return {statusCode:200,headers:h,body:JSON.stringify({error:"parse_failed", rawHead: String(raw||"").slice(0,1500), rawLen:(raw||"").length})};
     }
   } catch(e) {
     return {statusCode:500,headers:h,body:JSON.stringify({error:e.message})};
