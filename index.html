@@ -2932,8 +2932,15 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
             const up=await _tmo(uploadToDrive({name:a.name||"attachment",type:attType,data:dataUrl}),25000);
             if(up&&up.type==="drive"&&up.data&&String(up.data).indexOf("http")===0)saved=up;
           }catch(e){}
-          // Fallback: keep the (compressed) file itself so the card always shows the invoice
-          uploadedAtts.push(saved||{name:a.name||"attachment",type:attType,data:dataUrl});
+          // Store ONLY the Drive link — never base64. Retry once if the first upload failed.
+          if(!saved){
+            try{
+              const up2=await _tmo(uploadToDrive({name:a.name||"attachment",type:attType,data:dataUrl}),25000);
+              if(up2&&up2.type==="drive"&&up2.data&&String(up2.data).indexOf("http")===0)saved=up2;
+            }catch(e){}
+          }
+          if(saved) uploadedAtts.push(saved);
+          // if still not saved, skip — a link-less heavy blob must never enter the tracker
         }
       }
       const allAtts=[...uploadedAtts,...driveAtts];
@@ -3136,6 +3143,11 @@ function App(){
         if(a&&a.data&&a.data.length>100&&a.type!=="drive"){return uploadToDrive(a);}
         return Promise.resolve(a);
       })).then(function(uploaded){
+        // Keep only real Drive/http links — never retain base64 in the entry.
+        uploaded=uploaded.map(function(a){
+          if(a&&a.data&&String(a.data).indexOf("http")===0)return {name:a.name,type:a.type||"drive",data:a.data};
+          return null;
+        }).filter(Boolean);
         var withDrive=Object.assign({},entry,{attachments:uploaded});
         var firstDrive=uploaded.find(function(a){return a&&a.type==="drive";});
         if(firstDrive&&!withDrive.link){withDrive.link=firstDrive.data;withDrive.linkLabel="📎 Photo";}
