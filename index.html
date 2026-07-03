@@ -3071,10 +3071,11 @@ function App(){
     setEntries(cached);
     setLoading(false);
     setSyncStatus(cached.length>0?"📱 "+cached.length+" entries loaded":"📱 Ready — tap + New to start");
-    // Push local to sheets silently
-    if(cached.length>0){
+    // Push local to sheets silently — ALSO restore from Sheets when cache is empty (e.g. after clearing site data)
+    {
+      if(cached.length===0){setSyncStatus("🔄 Restoring from Sheets…");}
       sheetsAPI("getAll").then(r=>{
-        if(r.error||!r.entries){setSyncStatus("📴 Offline · "+cached.length+" entries safe");return;}
+        if(r.error||!r.entries){setSyncStatus(cached.length>0?("📴 Offline · "+cached.length+" entries safe"):"📴 Offline · couldn't reach Sheets, try refresh");return;}
         // LOCAL IS MASTER. Never replace local entries. Two add-only directions:
         const localIds=new Set(cached.map(e=>e.id));
         const sheetIds=new Set(r.entries.map(e=>e.id));
