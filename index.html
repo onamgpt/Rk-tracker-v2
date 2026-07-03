@@ -312,7 +312,8 @@ async function tgSend(text){
 function uploadToDrive(att){
   // Upload a single attachment to Drive via Apps Script, return Drive URL
   return sheetsAPI("uploadFile",{file:{name:att.name,type:att.type,data:att.data}}).then(function(r){
-    if(r&&r.url)return {name:att.name,type:"drive",data:r.url,driveId:r.id};
+    var u=r&&(r.url||r.link||(r.data&&String(r.data).indexOf("http")===0?r.data:null));
+    if(u)return {name:att.name,type:"drive",data:u,driveId:(r.id||r.driveId||"")};
     return att; // fallback: keep original if upload fails
   }).catch(function(){return att;});
 }
@@ -3519,6 +3520,7 @@ function App(){
           <span style={{fontSize:13,fontWeight:700,color:isOverdue(viewE.reminder)?"#c00":"#006aaa"}}>📲 {isOverdue(viewE.reminder)?"OVERDUE · ":""}{fmtDT(viewE.reminder)}{viewE.isRecurring&&<span style={{marginLeft:8,fontSize:11,color:"#5a8a30"}}>🔁 Monthly</span>}</span>
           {viewE.reminderNote&&<div style={{fontSize:12,color:"#005a8a",marginTop:3}}>{viewE.reminderNote}</div>}
         </div>}
+        {(viewE.link&&String(viewE.link).indexOf("http")===0)&&<div style={{marginBottom:10}}><a href={viewE.link} target="_blank" rel="noopener" style={{display:"inline-flex",alignItems:"center",gap:6,background:"#eef7ee",color:"#2a7a2a",fontWeight:700,padding:"8px 14px",borderRadius:10,textDecoration:"none",border:"1px solid #cfe6cf"}}>🔗 Open Invoice in Drive</a></div>}
         {viewE.attachments?.length>0&&<div><div className="lbl" style={{marginBottom:6}}>Attachments</div><div style={{display:"flex",flexWrap:"wrap",gap:8}}>{viewE.attachments.map((a,i)=><Thumb key={i} att={a}/>)}</div></div>}
         <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}><button className="bgh" onClick={()=>setViewE(null)}>Close</button></div>
       </div>}
