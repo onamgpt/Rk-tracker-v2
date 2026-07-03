@@ -1737,13 +1737,17 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
         const salesperson = SALES_CONFIG.emailMap[fromEmail] || null;
         let coords = extractCoords(email.body) || extractCoords(email.subject);
         if (!coords) {
-          // Short Google Maps links (maps.app.goo.gl / goo.gl/maps) carry no coords — expand them server-side
-          const sm = (email.body||"").match(/https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps)\/[A-Za-z0-9_?=&.-]+/);
+          // Short Google Maps links carry no coords in the URL — expand them server-side
+          const sm = (email.body||"").match(/https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl)\/[A-Za-z0-9_/?=&.%-]+/);
           if (sm) {
             try {
               const er = await fetch("/.netlify/functions/expand?url="+encodeURIComponent(sm[0]));
               const ed = await er.json();
-              if (ed && ed.finalUrl) coords = extractCoords(ed.finalUrl) || (ed.html ? extractCoords(ed.html) : null);
+              if (ed && ed.coords && typeof ed.coords.lat === "number") {
+                coords = ed.coords;
+              } else if (ed && ed.finalUrl) {
+                coords = extractCoords(ed.finalUrl);
+              }
             } catch(e) {}
           }
         }
