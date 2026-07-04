@@ -210,7 +210,7 @@ function loadDD(){
 function saveDD(d){localStorage.setItem(LS_DD,JSON.stringify(d));}
 
 // ── GOOGLE SHEETS API ─────────────────────────────────────────────────────────
-async function lightForSheet(entry){
+function lightForSheet(entry){
   // Never send heavy base64 image data to Google Sheets (cell limit 50k chars).
   // Keep only http/drive links; the full image stays in localStorage.
   if(!entry) return entry;
@@ -224,7 +224,7 @@ async function lightForSheet(entry){
   }
   return e;
 }
-function sheetsAPI(action,data={}){
+async function sheetsAPI(action,data={}){
   try{
     const r=await fetch("/.netlify/functions/sheets",{
       method:"POST",
