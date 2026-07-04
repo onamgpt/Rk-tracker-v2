@@ -48,8 +48,8 @@ const SALES_USERS=["satish","sebi","sugeesh","sunil","biju","sadasivan","sooraj"
 const IS_FAMILY=FAMILY_USERS.includes(URL_USER);
 const IS_SALES=SALES_USERS.includes(URL_USER);
 // Owner-only team view: staff members who have their own sheet. Add {u:"maadhu",sheet:true} once their sheet is mapped in sheets.js.
-const TEAM_MEMBERS=[{u:"prakash",label:"Prakash"}];
-const IS_SHARED=["main","prakash","maadhu","virupaksha","gopal",...SALES_USERS].includes(URL_USER);
+const TEAM_MEMBERS=[{u:"prakash",label:"Prakash"},{u:"staff1",label:"Staff 1"},{u:"staff2",label:"Staff 2"},{u:"staff3",label:"Staff 3"},{u:"staff4",label:"Staff 4"}];
+const IS_SHARED=["main","prakash","staff1","staff2","staff3","staff4","maadhu","virupaksha","gopal",...SALES_USERS].includes(URL_USER);
 const LS_CACHE="rk_cache_v2_"+URL_USER;
 const LS_DD="rk_dropdowns_v2_"+URL_USER;
 const USER_CONFIG={
