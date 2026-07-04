@@ -175,6 +175,7 @@ function sanitizeEntry(e){
   else out.sharedWith=[];
   out.hidden=!!e.hidden;
   out.recurring=!!e.recurring;
+  if(e._shared)out._shared=true;
   if(!out.title)return null;
   return out;
 }
@@ -3141,7 +3142,21 @@ function App(){
         }
         return r;
       };
-      _tryGetAll().then(r=>{
+      const _mergeShared=async(baseEntries)=>{
+        // Staff users also see entries the owner flagged for them (live, from the main sheet)
+        if(URL_USER==="main") return baseEntries;
+        try{
+          const sr=await sheetsAPI("getShared",{shareUser:URL_USER});
+          if(sr&&sr.entries&&sr.entries.length){
+            const have=new Set(baseEntries.map(e=>e.id));
+            const shared=sr.entries.map(sanitizeEntry).filter(Boolean).map(e=>({...e,_shared:true}));
+            const add=shared.filter(e=>!have.has(e.id));
+            if(add.length){const m=baseEntries.concat(add);m.sort((a,b)=>String(b.createdAt||b.date||"").localeCompare(String(a.createdAt||a.date||"")));return m;}
+          }
+        }catch(e){}
+        return baseEntries;
+      };
+      _tryGetAll().then(async r=>{
         if(r.error||!r.entries){setSyncStatus(cached.length>0?("📴 Offline · "+cached.length+" entries safe"):"📴 Offline · couldn't reach Sheets, try refresh");return;}
         // LOCAL IS MASTER. Never replace local entries. Two add-only directions:
         const localIds=new Set(cached.map(e=>e.id));
@@ -3153,14 +3168,12 @@ function App(){
         const _recovery=cached.length<10&&r.entries.length>cached.length+5;
         const _tombs=_recovery?[]:loadTombstones();
         const toAdd=r.entries.filter(e=>e&&e.id&&!localIds.has(e.id)&&_tombs.indexOf(e.id)===-1).map(sanitizeEntry).filter(Boolean);
-        if(toAdd.length>0){
-          const merged=cached.concat(toAdd);
-          merged.sort((a,b)=>String(b.createdAt||b.date||"").localeCompare(String(a.createdAt||a.date||"")));
-          setEntries(merged);saveCache(merged);
-          setSyncStatus("✅ "+merged.length+" entries · "+toAdd.length+" from Sheets"+(toPush.length>0?" · "+toPush.length+" backed up":""));
-        } else {
-          setSyncStatus("✅ "+cached.length+" entries"+(toPush.length>0?" · "+toPush.length+" backed up":" · all in Sheets"));
-        }
+        let base = toAdd.length>0 ? cached.concat(toAdd) : cached.slice();
+        base = await _mergeShared(base);
+        base.sort((a,b)=>String(b.createdAt||b.date||"").localeCompare(String(a.createdAt||a.date||"")));
+        setEntries(base);saveCache(base);
+        const sharedCount = base.filter(e=>e._shared).length;
+        setSyncStatus("✅ "+base.length+" entries"+(sharedCount>0?(" · "+sharedCount+" shared to you"):"")+(toPush.length>0?" · "+toPush.length+" backed up":""));
       }).catch(()=>setSyncStatus("📴 Offline · "+cached.length+" entries safe"));
     }
     sheetsAPI("getDropdowns").then(r=>{if(r.dropdowns)setDropdowns(p=>{
@@ -3201,7 +3214,10 @@ function App(){
     }
     // STEP 3: Save to Sheets in background
     uploadPromise.then(function(entryWithDrive){
-      sheetsAPI("save",{entry:lightForSheet(entryWithDrive)}).then(r=>{
+      // Shared entries (owner's, flagged to this staff) always write back to the MAIN sheet
+      var saveArgs={entry:lightForSheet(entryWithDrive)};
+      if(URL_USER!=="main" && (entry._shared || entryWithDrive._shared)){ saveArgs.user="main"; }
+      sheetsAPI("save",saveArgs).then(r=>{
         setSyncStatus(r.error?"📱 Saved locally · sync pending":"✅ Saved · backed up to Sheets");
       }).catch(()=>setSyncStatus("📱 Saved locally"));
     });
@@ -3301,14 +3317,22 @@ function App(){
       const recovery = cached.length < 10 && r.entries.length > cached.length + 5;
       const tombs = recovery ? [] : loadTombstones();
       const toAdd=r.entries.filter(e=>e&&e.id&&!localIds.has(e.id)&&tombs.indexOf(e.id)===-1).map(sanitizeEntry).filter(Boolean);
-      if(toAdd.length>0){
-        const merged=cached.concat(toAdd);
-        merged.sort((a,b)=>String(b.createdAt||b.date||"").localeCompare(String(a.createdAt||a.date||"")));
-        setEntries(merged);saveCache(merged);
-        setSyncStatus((recovery?"🆘 Recovered ":"✅ ")+merged.length+" entries · ↓"+toAdd.length+" from Sheet · ↑"+toPush.length+" backed up · "+new Date().toLocaleTimeString("en-IN"));
-      } else {
-        setSyncStatus("✅ "+cached.length+" entries · ↑"+toPush.length+" backed up · "+new Date().toLocaleTimeString("en-IN"));
+      let base = toAdd.length>0 ? cached.concat(toAdd) : cached.slice();
+      // Staff: also pull entries the owner shared with them (live, from main sheet)
+      if(URL_USER!=="main"){
+        try{
+          const sr=await sheetsAPI("getShared",{shareUser:URL_USER});
+          if(sr&&sr.entries&&sr.entries.length){
+            const have=new Set(base.map(e=>e.id));
+            const shared=sr.entries.map(sanitizeEntry).filter(Boolean).map(e=>({...e,_shared:true}));
+            base=base.concat(shared.filter(e=>!have.has(e.id)));
+          }
+        }catch(e){}
       }
+      base.sort((a,b)=>String(b.createdAt||b.date||"").localeCompare(String(a.createdAt||a.date||"")));
+      setEntries(base);saveCache(base);
+      const sc=base.filter(e=>e._shared).length;
+      setSyncStatus((recovery?"🆘 Recovered ":"✅ ")+base.length+" entries"+(sc>0?(" · "+sc+" shared to you"):"")+(toAdd.length>0?" · ↓"+toAdd.length:"")+" · ↑"+toPush.length+" · "+new Date().toLocaleTimeString("en-IN"));
     }catch(e){
       setSyncStatus("📴 Offline — "+cached.length+" entries safe locally");
     }
