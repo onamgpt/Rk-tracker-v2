@@ -133,7 +133,32 @@ function fmtDate(d){if(!d)return"—";const p=parseDate(d);if(!p)return String(d
 function fmtDT(d){if(!d)return"—";return new Date(d).toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});}
 function isOverdue(r){return r&&new Date(r)<new Date();}
 
+function _normKeys(e){
+  if(!e||typeof e!=="object")return e;
+  // Map Sheet header labels (any casing / spaces) to the app's field names.
+  var map={
+    "id":"id","title":"title","date":"date","month":"month","category":"category",
+    "tasktype":"taskType","task type":"taskType","person":"person","vendor":"vendor",
+    "account":"account","financialtype":"financialType","financial type":"financialType",
+    "paymentstatus":"paymentStatus","payment status":"paymentStatus","property":"property",
+    "chemical":"chemical","amount":"amount","notes":"notes","reminder":"reminder",
+    "remindernote":"reminderNote","reminder note":"reminderNote","link":"link",
+    "linklabel":"linkLabel","link label":"linkLabel",
+    "createdat":"createdAt","created at":"createdAt","updatedat":"updatedAt","updated at":"updatedAt",
+    "loggedby":"loggedBy","logged by":"loggedBy","loggedbyname":"loggedByName","logged by name":"loggedByName",
+    "tags":"tags","attachments":"attachments","hidden":"hidden","recurring":"recurring",
+    "sharedwith":"sharedWith","shared with":"sharedWith"
+  };
+  var out={};
+  Object.keys(e).forEach(function(k){
+    var norm=map[String(k).toLowerCase().trim()];
+    if(norm){ if(out[norm]===undefined||out[norm]==="") out[norm]=e[k]; }
+    else out[k]=e[k]; // keep unknown keys as-is
+  });
+  return out;
+}
 function sanitizeEntry(e){
+  e=_normKeys(e);
   if(!e||typeof e!=="object"||!e.id)return null;
   var out={};
   ["id","title","date","month","category","taskType","person","vendor","account",
