@@ -516,10 +516,10 @@ var SCR_RESULTS = [];
 
 function downloadScreenerCSV(){
   if(SCR_RESULTS.length===0){ alert("Run a scan first"); return; }
-  var csv = "Rank,Symbol,LTP,Pos_vs_52wk_pct,Daily_Vol_pct,AIM_Score\n";
+  var csv = "Rank,Symbol,LTP,Pos_vs_52wk_pct,Yr_Return_pct,Daily_Vol_pct,AIM_Score\n";
   for(var i=0;i<SCR_RESULTS.length;i++){
     var r = SCR_RESULTS[i];
-    csv += (i+1) + "," + r.sym + "," + r.ltp.toFixed(2) + "," + r.posPct.toFixed(1) + "," + r.vol.toFixed(2) + "," + Math.round(r.score) + "\n";
+    csv += (i+1) + "," + r.sym + "," + r.ltp.toFixed(2) + "," + r.posPct.toFixed(1) + "," + (r.yrRet!=null? r.yrRet.toFixed(1):"") + "," + r.vol.toFixed(2) + "," + Math.round(r.score) + "\n";
   }
   var blob = new Blob([csv], {type:"text/csv"});
   var a = document.createElement("a");
@@ -606,8 +606,14 @@ function runScreener(){
             var vol = 0;
             for(var i=1;i<closes.length;i++){ vol += Math.abs(closes[i]-closes[i-1])/closes[i-1]; }
             vol = vol/closes.length*100;
-            var score = (100-posPct)*0.6 + vol*40*0.4;
-            results.push({sym:sym, ltp:ltp, posPct:posPct, vol:vol, score:score});
+            var yrRet = (ltp - closes[0]) / closes[0] * 100;
+            // v2 scoring: sweet spot 10-40% of 52wk range; near-floor = crash risk
+            var posScore;
+            if(posPct <= 10) posScore = posPct * 10;
+            else if(posPct <= 40) posScore = 100;
+            else posScore = Math.max(0, 100 - (posPct - 40) * 1.67);
+            var score = posScore*0.6 + vol*40*0.4;
+            results.push({sym:sym, ltp:ltp, posPct:posPct, vol:vol, yrRet:yrRet, score:score});
           } else { failed++; }
           bd++; done++;
           if(done % 24 === 0 || done===total){
@@ -622,7 +628,7 @@ function runScreener(){
       // SANITY FILTERS: remove ETFs/data glitches and operator penny stocks
       // Real stocks: daily vol 0.5-8%, price >= Rs5
       var clean = results.filter(function(r){
-        return r.ltp>=5 && r.vol>=0.5 && r.vol<=8 && r.posPct>=0 && r.posPct<=100;
+        return r.ltp>=5 && r.vol>=0.5 && r.vol<=8 && r.posPct>=5 && r.posPct<=100 && r.yrRet>-40;
       });
       clean.sort(function(a,b){ return b.score-a.score; });
       SCR_RESULTS = clean;
@@ -631,16 +637,17 @@ function runScreener(){
       var html2 = '<div class="card"><h3>' + (cancelled? "⏹ Partial · ":"") + 'AIM Candidates — Best to Least (' + clean.length + ' valid, ' + removed + ' anomalies removed)</h3>'
         + '<div style="display:flex;gap:8px;margin-bottom:10px"><button class="small" onclick="downloadScreenerCSV()">⬇ CSV (all ' + clean.length + ')</button>'
         + '<button class="small sec" onclick="downloadScreenerPDF()">⬇ PDF (top 200)</button></div>'
-        + '<table><tr><th>#</th><th>Stock</th><th>LTP</th><th>vs 52wk</th><th>Vol</th><th>Score</th></tr>';
+        + '<table><tr><th>#</th><th>Stock</th><th>LTP</th><th>vs 52wk</th><th>1Y</th><th>Vol</th><th>Score</th></tr>';
       for(var i=0;i<show.length;i++){
         var r = show[i];
         var posCls = r.posPct<40 ? "green" : (r.posPct>70 ? "red":"");
         html2 += '<tr><td>' + (i+1) + '</td><td><strong>' + r.sym + '</strong></td><td>' + inr(r.ltp) + '</td>'
           + '<td class="' + posCls + '">' + Math.round(r.posPct) + '%</td>'
+          + '<td class="' + (r.yrRet>=0?'green':'red') + '">' + Math.round(r.yrRet) + '%</td>'
           + '<td>' + r.vol.toFixed(1) + '</td>'
           + '<td><strong>' + Math.round(r.score) + '</strong></td></tr>';
       }
-      html2 += '</table><div class="muted">Sorted best to least by AIM score (low in 52wk range + healthy volatility). Showing top 200 — CSV has all. Filters removed ETFs, data glitches and sub-₹5 stocks. Backtest before investing.</div></div>';
+      html2 += '</table><div class="muted">Sorted best to least by AIM score (low in 52wk range + healthy volatility). Showing top 200 — CSV has all. v2 filters: crashed stocks (1yr worse than −40% or below 5% of range) are excluded; sweet spot is 10–40% of range. Backtest before investing.</div></div>';
       el.innerHTML = html2;
     }
 
