@@ -5,7 +5,10 @@ const url_module = require("url");
 const MAIN_SHEET_ID = "11BWMyX8SoEtaDULFS5GylRe6clPjgKBUrlczhkHy7Wg";
 const USER_SHEETS = {
   "prakash": "1tBdAr_8Z7NmxbdvBkak8reqb7s1-nk31H3ouE-2u84c",
-  // Add more: "satish": "SHEET_ID", "sebi": "SHEET_ID"
+  "staff1": "1g036pQ6odGE3Cwa73TwaRmf25rc2ABnafPgnVKyGrmk",
+  "staff2": "1XuP5uAsn610IOTAoffiGvqr_Ba8O3yGTd0EMhZ2A2yo",
+  "staff3": "1mNzaZb6iWL46qoYwMOivyxP5w29WhCrBRujlZVM2hPk",
+  "staff4": "1wYiKY6ajcEEF-HmXq8fDiai8veS_6za2H39hyNtGEJM"
 };
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyeR53nHyQCmk7UGGVcdbapL62AcppjYn_HxhW2AserEoX5uZmHWYNv8q_EAw2k5CqEVw/exec";
 
@@ -30,7 +33,7 @@ exports.handler = async (event) => {
         res.on("end", function(){resolve(data);});
       });
       rq.on("error", reject);
-      rq.setTimeout(25000, function(){ rq.destroy(); reject(new Error("Apps Script timeout")); });
+      rq.setTimeout(9000, function(){ rq.destroy(); reject(new Error("Apps Script timeout")); });
     });
   }
 
@@ -104,6 +107,6 @@ exports.handler = async (event) => {
       return {statusCode:200,headers:h,body:JSON.stringify({error:"parse_failed", rawHead: String(raw||"").slice(0,1500), rawLen:(raw||"").length})};
     }
   } catch(e) {
-    return {statusCode:500,headers:h,body:JSON.stringify({error:e.message})};
+    return {statusCode:200,headers:h,body:JSON.stringify({error:String(e && e.message || e)})};
   }
 };
