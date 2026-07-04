@@ -47,6 +47,8 @@ const FAMILY_USERS=["wife","daughter"];
 const SALES_USERS=["satish","sebi","sugeesh","sunil","biju","sadasivan","sooraj","murugan"];
 const IS_FAMILY=FAMILY_USERS.includes(URL_USER);
 const IS_SALES=SALES_USERS.includes(URL_USER);
+// Owner-only team view: staff members who have their own sheet. Add {u:"maadhu",sheet:true} once their sheet is mapped in sheets.js.
+const TEAM_MEMBERS=[{u:"prakash",label:"Prakash"}];
 const IS_SHARED=["main","prakash","maadhu","virupaksha","gopal",...SALES_USERS].includes(URL_USER);
 const LS_CACHE="rk_cache_v2_"+URL_USER;
 const LS_DD="rk_dropdowns_v2_"+URL_USER;
@@ -143,6 +145,9 @@ function sanitizeEntry(e){
   else if(typeof e.tags==="string"&&e.tags)out.tags=e.tags.split(",").map(function(t){return t.trim();}).filter(Boolean);
   else out.tags=[];
   out.attachments=Array.isArray(e.attachments)?e.attachments:[];
+  if(Array.isArray(e.sharedWith))out.sharedWith=e.sharedWith;
+  else if(typeof e.sharedWith==="string"&&e.sharedWith)out.sharedWith=e.sharedWith.split(",").map(function(t){return t.trim();}).filter(Boolean);
+  else out.sharedWith=[];
   out.hidden=!!e.hidden;
   out.recurring=!!e.recurring;
   if(!out.title)return null;
@@ -215,6 +220,7 @@ function lightForSheet(entry){
   // Keep only http/drive links; the full image stays in localStorage.
   if(!entry) return entry;
   var e=Object.assign({},entry);
+  if(Array.isArray(e.sharedWith))e.sharedWith=e.sharedWith.join(",");
   if(Array.isArray(e.attachments)){
     e.attachments=e.attachments.map(function(a){
       if(!a) return a;
@@ -3062,6 +3068,7 @@ function App(){
   const [showForm,setShowForm]=useState(false);
   const [editE,setEditE]=useState(null);
   const [viewE,setViewE]=useState(null);
+  const [teamView,setTeamView]=useState(null); // {user,label,entries,loading}
   const [showDupes,setShowDupes]=useState(false);
   const [showAI,setShowAI]=useState(false);
   const [showAgeing,setShowAgeing]=useState(false);
@@ -3232,6 +3239,19 @@ function App(){
     await sheetsAPI("saveDropdowns",{dropdowns:dd});
   };
 
+  const openTeam=async(member)=>{
+    setTeamView({user:member.u,label:member.label,loading:true,entries:[]});
+    try{
+      const r=await sheetsAPI("getAll",{user:member.u});
+      if(r&&r.entries){
+        const rows=r.entries.map(sanitizeEntry).filter(Boolean);
+        rows.sort((a,b)=>String(b.createdAt||b.date||"").localeCompare(String(a.createdAt||a.date||"")));
+        setTeamView({user:member.u,label:member.label,loading:false,entries:rows});
+      } else {
+        setTeamView({user:member.u,label:member.label,loading:false,entries:[],error:(r&&r.error)||"Couldn't load"});
+      }
+    }catch(e){setTeamView({user:member.u,label:member.label,loading:false,entries:[],error:e.message});}
+  };
   const refresh=async()=>{
     // Two-way ADD-ONLY sync. Local is master: nothing local is ever replaced or removed.
     setLoading(true);setSyncStatus("📤 Syncing...");
@@ -3413,6 +3433,7 @@ function App(){
             {l:"💰 Prakash",c:"Finance",t:"Payment Collected",p:"Prakash"},
             {l:"💍 Wedding",c:"Personal",t:"Wedding Planning"},
           ].map(q=><button key={q.l} onClick={()=>{setEditE({category:q.c,taskType:q.t,person:q.p||""});setShowForm(true);}} style={{padding:"6px 12px",borderRadius:8,border:"none",background:q.l.includes("Prakash")?"#1a5a8a":"#c8006a",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}}>{q.l}</button>)}
+          {URL_USER==="main"&&TEAM_MEMBERS.map(m=><button key={"tv_"+m.u} onClick={()=>openTeam(m)} title={"View "+m.label+"'s tracker (read-only)"} style={{padding:"6px 12px",borderRadius:8,border:"1px solid #6a8aa0",background:"rgba(40,90,130,.25)",color:"#bfe0ff",cursor:"pointer",fontSize:12,fontWeight:700}}>👁 {m.label}</button>)}
           {IS_FAMILY&&[
             {l:"💍",c:"Personal",t:"Wedding Planning"},
             {l:"💰",c:"Personal",t:"Expense"},
@@ -3508,6 +3529,37 @@ function App(){
       <span style={{fontSize:9,color:"#9a7040",marginLeft:"auto"}}>📊 Google Sheets</span>
     </div>
 
+    {/* TEAM VIEW MODAL (owner-only, read-only) */}
+    <Modal open={!!teamView} onClose={()=>setTeamView(null)} wide={true}>
+      {teamView&&<div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+          <div style={{fontWeight:800,fontSize:18,color:"#1a5a8a"}}>👁 {teamView.label}'s Tracker <span style={{fontSize:12,fontWeight:600,color:"#888"}}>(read-only)</span></div>
+          <button onClick={()=>setTeamView(null)} style={{border:"none",background:"transparent",fontSize:20,cursor:"pointer",color:"#888"}}>✕</button>
+        </div>
+        {teamView.loading&&<div style={{padding:20,textAlign:"center",color:"#888"}}>Loading {teamView.label}'s entries…</div>}
+        {(!teamView.loading&&teamView.error)&&<div style={{padding:16,background:"#fff3f3",border:"1px solid #f0c0c0",borderRadius:8,color:"#a33"}}>Couldn't load: {teamView.error}</div>}
+        {(!teamView.loading&&!teamView.error&&teamView.entries.length===0)&&<div style={{padding:20,textAlign:"center",color:"#888"}}>No entries yet in {teamView.label}'s tracker.</div>}
+        {(!teamView.loading&&teamView.entries.length>0)&&<div>
+          <div style={{fontSize:12,color:"#666",marginBottom:8}}>{teamView.entries.length} entries · you can view but not edit these</div>
+          <div style={{maxHeight:"60vh",overflowY:"auto",display:"flex",flexDirection:"column",gap:6}}>
+            {teamView.entries.map((e,idx)=><div key={e.id||idx} style={{border:"1px solid #e0d8c8",borderRadius:8,padding:"8px 10px",background:"#fffdf8"}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                <div style={{fontWeight:700,fontSize:13,color:"#3a2a10"}}>{e.title||"(untitled)"}</div>
+                <div style={{fontSize:12,color:"#888",whiteSpace:"nowrap"}}>{e.date||""}</div>
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:4,fontSize:12,color:"#666"}}>
+                {e.vendor&&<span>🏭 {e.vendor}</span>}
+                {e.person&&<span>👤 {e.person}</span>}
+                {e.amount&&<span>💰 {e.amount}</span>}
+                {e.paymentStatus&&<span>· {e.paymentStatus}</span>}
+              </div>
+              {(e.link&&String(e.link).indexOf("http")===0)&&<a href={e.link} target="_blank" rel="noopener" style={{fontSize:12,color:"#2a7a2a",fontWeight:600,textDecoration:"none"}}>🔗 Open attachment</a>}
+            </div>)}
+          </div>
+        </div>}
+      </div>}
+    </Modal>
+
     {/* VIEW MODAL */}
     <Modal open={!!viewE} onClose={()=>setViewE(null)}>
       {viewE&&<div>
@@ -3532,6 +3584,22 @@ function App(){
         {viewE.reminder&&<div style={{background:isOverdue(viewE.reminder)?"#fff0f0":"#e8f4fb",border:`1.5px solid ${isOverdue(viewE.reminder)?"#f5a8ab":"#b0d8f0"}`,borderRadius:9,padding:"9px 13px",marginBottom:12}}>
           <span style={{fontSize:13,fontWeight:700,color:isOverdue(viewE.reminder)?"#c00":"#006aaa"}}>📲 {isOverdue(viewE.reminder)?"OVERDUE · ":""}{fmtDT(viewE.reminder)}{viewE.isRecurring&&<span style={{marginLeft:8,fontSize:11,color:"#5a8a30"}}>🔁 Monthly</span>}</span>
           {viewE.reminderNote&&<div style={{fontSize:12,color:"#005a8a",marginTop:3}}>{viewE.reminderNote}</div>}
+        </div>}
+        {URL_USER==="main"&&<div style={{marginBottom:10,padding:"8px 10px",background:"#f2f8ff",border:"1px solid #cfe0f0",borderRadius:8}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#1a5a8a",marginBottom:6}}>🔗 Share this entry (live) with:</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {TEAM_MEMBERS.map(m=>{
+              const cur=Array.isArray(viewE.sharedWith)?viewE.sharedWith:(viewE.sharedWith?String(viewE.sharedWith).split(",").map(x=>x.trim()).filter(Boolean):[]);
+              const on=cur.indexOf(m.u)>-1;
+              return <button key={"sh_"+m.u} onClick={()=>{
+                const next=on?cur.filter(x=>x!==m.u):cur.concat([m.u]);
+                const upd={...viewE,sharedWith:next};
+                setViewE(upd);
+                setEntries(p=>{const arr=p.map(x=>x.id===upd.id?upd:x);saveCache(arr);return arr;});
+                sheetsAPI("save",{entry:lightForSheet(upd)}).catch(()=>{});
+              }} style={{padding:"5px 12px",borderRadius:20,border:on?"none":"1px solid #9bbdd8",background:on?"#1a5a8a":"#fff",color:on?"#fff":"#1a5a8a",cursor:"pointer",fontSize:12,fontWeight:700}}>{on?"✓ ":""}{m.label}</button>;
+            })}
+          </div>
         </div>}
         {(viewE.link&&String(viewE.link).indexOf("http")===0)&&<div style={{marginBottom:10}}><a href={viewE.link} target="_blank" rel="noopener" style={{display:"inline-flex",alignItems:"center",gap:6,background:"#eef7ee",color:"#2a7a2a",fontWeight:700,padding:"8px 14px",borderRadius:10,textDecoration:"none",border:"1px solid #cfe6cf"}}>🔗 Open Invoice in Drive</a></div>}
         {viewE.attachments?.length>0&&<div><div className="lbl" style={{marginBottom:6}}>Attachments</div><div style={{display:"flex",flexWrap:"wrap",gap:8}}>{viewE.attachments.map((a,i)=><Thumb key={i} att={a}/>)}</div></div>}
