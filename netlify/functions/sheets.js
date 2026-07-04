@@ -94,6 +94,10 @@ exports.handler = async (event) => {
       // Forward the full file to the Apps Script so it saves to Drive and returns a link
       var upBody = JSON.stringify({action: "uploadFile", file: body.file, sheetId: sheetId});
       raw = await makePost(SCRIPT_URL, upBody);
+    } else if (action === "getShared" && body.shareUser) {
+      // Entries the OWNER flagged for this staff user — always read from the MAIN sheet
+      var shUrl = SCRIPT_URL + "?action=getShared&user=" + encodeURIComponent(body.shareUser) + "&sheetId=" + encodeURIComponent(MAIN_SHEET_ID);
+      raw = await makeGet(shUrl);
     } else {
       // getAll, getDropdowns, saveDropdowns etc
       var getUrl = SCRIPT_URL + "?action=" + action + "&sheetId=" + encodeURIComponent(sheetId);
