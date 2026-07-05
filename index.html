@@ -150,11 +150,34 @@ function _normKeys(e){
     "sharedwith":"sharedWith","shared with":"sharedWith"
   };
   var out={};
+  var blankVal="";
   Object.keys(e).forEach(function(k){
-    var norm=map[String(k).toLowerCase().trim()];
+    var kk=String(k).trim();
+    if(kk===""){ if(e[k]) blankVal=e[k]; return; } // capture stray empty-header column value
+    var norm=map[kk.toLowerCase()];
     if(norm){ if(out[norm]===undefined||out[norm]==="") out[norm]=e[k]; }
-    else out[k]=e[k]; // keep unknown keys as-is
+    else out[k]=e[k];
   });
+  // --- Recover the known column-shift pattern (dates that slid into the wrong field) ---
+  function isISO(v){return typeof v==="string"&&/^\d{4}-\d{2}-\d{2}T/.test(v);}
+  function looksDate(v){return typeof v==="string"&&/^\d{4}-\d{2}-\d{2}/.test(v);}
+  // If `date` isn't a date but `month` is, use month as the date; move stray text into title.
+  if(!looksDate(out.date)){
+    if(looksDate(out.month)){
+      if(out.date && !out.title){ out.title=out.date; } // the text sitting in date is really the title
+      out.date=out.month;
+    }
+  }
+  // createdAt often ended up as "[]"; recover from blank column or recurring timestamp
+  if(!isISO(out.createdAt)){
+    if(isISO(blankVal)) out.createdAt=blankVal;
+    else if(isISO(out.recurring)) out.createdAt=out.recurring;
+    else if(looksDate(out.date)) out.createdAt=out.date;
+  }
+  // recurring got a timestamp instead of a boolean — normalise back to false
+  if(isISO(out.recurring)) out.recurring=false;
+  // attachments/createdAt showing "[]" -> clear
+  if(out.createdAt==="[]"||out.createdAt==="[ ]") out.createdAt="";
   return out;
 }
 function sanitizeEntry(e){
@@ -176,7 +199,12 @@ function sanitizeEntry(e){
   out.hidden=!!e.hidden;
   out.recurring=!!e.recurring;
   if(e._shared)out._shared=true;
-  if(!out.title)return null;
+  if(!out.title){
+    // Never discard a real entry just because Title cell is empty/shifted — synthesize a label.
+    var noteFirst = out.notes ? String(out.notes).split(/[\n|]/)[0].trim().slice(0,60) : "";
+    out.title = noteFirst || out.vendor || out.person || out.category || out.taskType ||
+      (out.date && String(out.date).length>2 ? String(out.date) : "") || "(entry)";
+  }
   return out;
 }
 
