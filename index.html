@@ -3169,6 +3169,7 @@ function App(){
   const [viewE,setViewE]=useState(null);
   const [teamView,setTeamView]=useState(null); // {user,label,entries,loading}
   const [teamMenuOpen,setTeamMenuOpen]=useState(false);
+  const [navMenuOpen,setNavMenuOpen]=useState(false);
   const [showDupes,setShowDupes]=useState(false);
   const [showAI,setShowAI]=useState(false);
   const [showAgeing,setShowAgeing]=useState(false);
@@ -3537,19 +3538,23 @@ function App(){
         </div>
         <div className="rk-navbar" style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           <button onClick={()=>setShowAI(true)} className="ai-btn" style={{fontSize:11,padding:"6px 11px"}}>🧠 AI</button>
-          <button onClick={()=>setShowTally(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#1a6a3a,#0a4a2a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>📊 Tally</button>
-          <button onClick={()=>setShowLocation(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#1a3a8a,#0a2a6a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>📍 Location</button>
-          <button onClick={()=>setShowDayBook(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#5a3a1a,#3a2a0a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>📒 Day Book</button>
-          <button onClick={()=>setShowHealth(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#1a6a6a,#0a4a4a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>🏥 Health</button>
-          <button onClick={()=>setShowFamily(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#8a1a5a,#6a0a3a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>👨‍👩‍👧 Family</button>
-          <button onClick={()=>setShowPaymentReminders(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#1a8a4a,#0a6a2a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>💬 Remind</button>
-          
-          <button onClick={()=>setShowMatcher(true)} title="Payment Matcher: Paste an SMS bank credit alert (e.g. 'Cr ₹50,000 by NEFT') and it finds the matching unpaid invoice automatically." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8d8b8",background:"#f0fff4",color:"#1a5a3a",cursor:"pointer",fontWeight:600}}>💳 Match</button>
-          <button onClick={()=>setShowLogistics(true)} title="Logistics Tracker: Track every Sales-Payment invoice through 4 stages — Despatched → In Transit → Delivered → Payment Received. Upload LR copy, paid LR, POD, and payment proof at each stage." style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c8e8",background:"#f0f6ff",color:"#1a3a6a",cursor:"pointer",fontWeight:600}}>🚚 Logistics</button>
-          
-          <button onClick={()=>setShowEmailScan(true)} title="Scan Gmail for emails tagged #Trackerv23 and create entries automatically" style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"1.5px solid #a8c0e8",background:"#f0f4ff",color:"#1a2a6a",cursor:"pointer",fontWeight:600}}>📧 Email</button>
-          <button onClick={()=>setShowShare(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>🔗 Share</button>
-          <button onClick={()=>setShowDD(true)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>⚙️</button>
+          <div style={{position:"relative",display:"inline-block"}}>
+            <button onClick={()=>setNavMenuOpen(o=>!o)} style={{fontSize:12,padding:"7px 14px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#5a3a1a,#3a2a0a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>☰ Menu ▾</button>
+            {navMenuOpen&&<div style={{position:"absolute",top:"112%",left:0,zIndex:950,background:"#2a2318",border:"1px solid #c8a060",borderRadius:10,padding:5,minWidth:180,boxShadow:"0 8px 22px rgba(0,0,0,.5)"}}>
+              {[
+                {l:"📊 Tally",fn:()=>setShowTally(true)},
+                {l:"📍 Location",fn:()=>setShowLocation(true)},
+                {l:"📒 Day Book",fn:()=>setShowDayBook(true)},
+                {l:"🏥 Health",fn:()=>setShowHealth(true)},
+                {l:"👨‍👩‍👧 Family",fn:()=>setShowFamily(true)},
+                {l:"💬 Remind",fn:()=>setShowPaymentReminders(true)},
+                {l:"🚚 Logistics",fn:()=>setShowLogistics(true)},
+                {l:"📧 Email Scan",fn:()=>setShowEmailScan(true)},
+                {l:"🔗 Share",fn:()=>setShowShare(true)},
+                {l:"⚙️ Settings",fn:()=>setShowDD(true)}
+              ].map(it=><button key={it.l} onClick={()=>{setNavMenuOpen(false);it.fn();}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:6,border:"none",background:"transparent",color:"#f0dcae",cursor:"pointer",fontSize:13,fontWeight:600}}>{it.l}</button>)}
+            </div>}
+          </div>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
           <button onClick={()=>setShowHidden(h=>!h)} style={{...fSel,background:showHidden?"rgba(255,200,100,.15)":"rgba(255,255,255,.08)",color:showHidden?"#ffcc88":"#f0cc80",fontSize:11}}>👁</button>
           <button onClick={()=>{const l=filterPerson||filterTag||filterAccount||filterVendor||filterStatus||(filterCat!=="All"?filterCat:"")||"All Tasks";exportPDF(filtered,l);}} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>↓PDF({filtered.length})</button>
