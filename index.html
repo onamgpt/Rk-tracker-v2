@@ -43,6 +43,9 @@ input,select,textarea,button{font-family:inherit;}
   .rk-sel-btn{ font-size:15px !important; padding:6px 9px !important; }
   /* Shrink the big category button grid so entries appear sooner */
   .rk-navbar button{ font-size:11px !important; padding:6px 9px !important; }
+  /* Remove the 6 filter dropdowns on phone (AI search covers them); keep the search box */
+  .rk-filterbar select{ display:none !important; }
+  .rk-filterbar input{ width:100% !important; }
 }
 </style>
 </head>
@@ -3547,7 +3550,7 @@ function App(){
           <button onClick={()=>{setEditE(null);setShowForm(true);}} style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#e8a020,#c07010)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700,boxShadow:"0 4px 14px rgba(200,120,0,.35)"}}>+ New</button>
         </div>
       </div>
-      <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+      <div className="rk-filterbar" style={{display:"flex",flexWrap:"wrap",gap:5}}>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search all fields…" style={{...fSel,background:"rgba(255,255,255,.1)",width:150}}/>
         <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={fSel}>{ALL_CATS.map(c=><option key={c} value={c} style={{background:"#3a2000"}}>{c}</option>)}</select>
         <select value={filterTag} onChange={e=>setFilterTag(e.target.value)} style={fSel}><option value="" style={{background:"#3a2000"}}>All Tags</option>{STATUS_TAGS.map(t=><option key={t} value={t} style={{background:"#3a2000"}}>{t}</option>)}</select>
