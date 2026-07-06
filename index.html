@@ -284,6 +284,33 @@ function loadDD(){
 }
 function saveDD(d){localStorage.setItem(LS_DD,JSON.stringify(d));}
 
+// ── AUTO 60-DAY REMINDER (Purchase, Sales invoice, CSD, KPKB) ─────────────────
+function qualifiesFor60(cat, title, vendor, taskType){
+  var s=((cat||"")+" "+(title||"")+" "+(vendor||"")+" "+(taskType||"")).toLowerCase();
+  // Purchases and sales invoices
+  if(s.indexOf("purchase")>-1) return true;
+  if(s.indexOf("sales")>-1 && (s.indexOf("invoice")>-1||s.indexOf("bill")>-1)) return true;
+  // Canteen Stores Dept & Central Police Canteen (KPKB)
+  if(s.indexOf("csd")>-1||s.indexOf("canteen stores")>-1) return true;
+  if(s.indexOf("kpkb")>-1||s.indexOf("kpk b")>-1||s.indexOf("police canteen")>-1) return true;
+  return false;
+}
+function auto60Reminder(entry){
+  // If it qualifies and has no reminder yet, set reminder = date + 60 days.
+  try{
+    if(entry.reminder) return entry;
+    if(!qualifiesFor60(entry.category, entry.title, entry.vendor, entry.taskType)) return entry;
+    var base=entry.date && /^\d{4}-\d{2}-\d{2}/.test(String(entry.date)) ? new Date(entry.date) : new Date();
+    if(isNaN(base.getTime())) base=new Date();
+    var rd=new Date(base); rd.setDate(rd.getDate()+60);
+    entry.reminder=rd.toISOString().slice(0,10);
+    if(!entry.reminderNote){
+      entry.reminderNote="Payment due (60-day terms) — "+rd.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+    }
+  }catch(e){}
+  return entry;
+}
+
 // ── GOOGLE SHEETS API ─────────────────────────────────────────────────────────
 function lightForSheet(entry){
   // Never send heavy base64 image data to Google Sheets (cell limit 50k chars).
@@ -3036,6 +3063,7 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
         paymentStatus:(obj&&obj.paymentStatus)||"Payment Pending",
         reminder:reminderDate,
         reminderNote:reminderNote,
+        taskType:(obj&&obj.taskType)||"",
         link:(firstDriveUrl&&firstDriveUrl.data)||(email.driveLinks||[])[0]||"",
         linkLabel:(firstDriveUrl||(email.driveLinks||[]).length)?"📎 Invoice":atts.length?"📎 Attachment":"",
         notes:((obj&&obj.notes)||"")+
@@ -3051,7 +3079,8 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
       // Save entry (sheet copy gets links only — no heavy base64)
       const sheetEntry=Object.assign({},entry,{attachments:allAtts.map(a=>({name:a.name,type:a.type,data:(a.data&&String(a.data).indexOf("http")===0)?a.data:""}))});
       await intelAPI("saveEntry",{entry:sheetEntry});
-      try{if(onSaveEntry)await onSaveEntry(Object.assign({},entry))}catch(e){}
+      auto60Reminder(entry);
+    try{if(onSaveEntry)await onSaveEntry(Object.assign({},entry))}catch(e){}
       try{await intelAPI("logIntel",{intel:{date:email.date,source:"email",title:entry.title,vendor:(obj&&obj.vendor)||"",customer:(obj&&obj.person)||"",amount:(obj&&obj.amount)||"",invoiceNo:(obj&&obj.invoiceNo)||"",category:entry.category,summary:(obj&&obj.summary)||email.subject,gmailId:email.gmailId}});}catch(e){}
 
       // Mark imported
@@ -3232,6 +3261,8 @@ function App(){
 
   const saveEntry=async(entry,opts)=>{
     setSaving(true);
+    // Auto 60-day payment reminder for Purchase / Sales invoice / CSD / KPKB (only if none set)
+    entry=auto60Reminder(Object.assign({},entry));
     // STEP 1: Save locally immediately — never wait for Drive
     var finalEntry=Object.assign({},entry);
     setEntries(p=>{const ex=p.find(x=>x.id===finalEntry.id);const updated=ex?p.map(x=>x.id===finalEntry.id?finalEntry:x):[finalEntry,...p];saveCache(updated);return updated;});
