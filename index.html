@@ -35,9 +35,14 @@ input,select,textarea,button{font-family:inherit;}
 <style id="rk-mobile-css">
 @media (max-width: 760px){
   .row-extra-actions{ display:none !important; }
-  .rk-row-title-notes{ font-size:12px; }
-  .rk-row-notes{ display:none !important; }        /* hide long notes on phone; full text still in View */
-  table td{ padding:5px 6px !important; }
+  .rk-row-notes{ display:none !important; }        /* long notes hidden on phone; full text still in View */
+  table td{ padding:8px 6px !important; vertical-align:middle; }
+  /* Bigger, easy-to-tap View button on phone */
+  .rk-view-btn{ font-size:14px !important; padding:9px 16px !important; border-radius:8px !important; font-weight:700 !important; }
+  /* Selection checkbox a touch bigger too */
+  .rk-sel-btn{ font-size:15px !important; padding:6px 9px !important; }
+  /* Shrink the big category button grid so entries appear sooner */
+  .rk-navbar button{ font-size:11px !important; padding:6px 9px !important; }
 }
 </style>
 </head>
@@ -3496,7 +3501,7 @@ function App(){
             {dupeN>0&&<span onClick={()=>setShowDupes(true)} style={{background:"#7a5800",color:"#fff",borderRadius:20,padding:"1px 7px",fontSize:9,fontWeight:700,cursor:"pointer"}}>🔍 {dupeN} dupes</span>}
           </div>
         </div>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+        <div className="rk-navbar" style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           <button onClick={()=>setShowAI(true)} className="ai-btn" style={{fontSize:11,padding:"6px 11px"}}>🧠 AI</button>
           <button onClick={()=>setShowTally(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#1a6a3a,#0a4a2a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>📊 Tally</button>
           <button onClick={()=>setShowLocation(true)} style={{fontSize:11,padding:"6px 11px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#1a3a8a,#0a2a6a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>📍 Location</button>
@@ -3601,7 +3606,7 @@ function App(){
                 </td>
                 <td style={{padding:"7px 8px"}}>{(e.attachments||[]).length>0?<div style={{display:"flex",gap:2}}>{e.attachments.slice(0,2).map((a,i)=><Thumb key={i} att={a} small/>)}{e.attachments.length>2&&<span style={{fontSize:9,color:"#9a8060",alignSelf:"center"}}>+{e.attachments.length-2}</span>}</div>:<span style={{color:"#d0c0a0",fontSize:10}}>—</span>}</td>
                 <td style={{padding:"7px 6px",whiteSpace:"nowrap"}}>
-                  <button onClick={()=>toggleSel(e.id)} style={{padding:"3px 7px",borderRadius:6,border:selIds.indexOf(e.id)>-1?"2px solid #c01818":"1px solid #ccc",background:selIds.indexOf(e.id)>-1?"#ffe5e5":"#fff",cursor:"pointer",fontSize:11,marginRight:3}}>{selIds.indexOf(e.id)>-1?"☑️":"⬜"}</button><button onClick={()=>setViewE(e)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #d0b880",background:"#fff8ee",color:"#8a5800",cursor:"pointer",fontSize:10,marginRight:3}}>View</button>
+                  <button className="rk-sel-btn" onClick={()=>toggleSel(e.id)} style={{padding:"3px 7px",borderRadius:6,border:selIds.indexOf(e.id)>-1?"2px solid #c01818":"1px solid #ccc",background:selIds.indexOf(e.id)>-1?"#ffe5e5":"#fff",cursor:"pointer",fontSize:11,marginRight:3}}>{selIds.indexOf(e.id)>-1?"☑️":"⬜"}</button><button className="rk-view-btn" onClick={()=>setViewE(e)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #d0b880",background:"#fff8ee",color:"#8a5800",cursor:"pointer",fontSize:10,marginRight:3}}>View</button>
                   <span className="row-extra-actions"><button onClick={()=>shareEntry(e)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #0088cc",background:"#e8f4fb",color:"#006aaa",cursor:"pointer",fontSize:10,marginRight:3}}>📤</button>
                   {!isDone&&<button onClick={()=>markDone(e.id)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #88cc88",background:"#edfaed",color:"#1a5a1a",cursor:"pointer",fontSize:10,marginRight:3}}>✅</button>}
                   {!e.hidden&&<button onClick={()=>hideEntry(e.id)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #ccc",background:"#f5f5f5",color:"#666",cursor:"pointer",fontSize:10}}>Hide</button>}
