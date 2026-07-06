@@ -2294,12 +2294,47 @@ Return ONLY valid JSON array, no markdown:
 
 
 // ── HealthFamilyQuick — natural language health/family logging ──────────
-function HealthFamilyQuick({ onClose, onSaveEntry, mode }) {
+function HealthFamilyQuick({ onClose, onSaveEntry, mode, entries }) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
   const [parsed, setParsed] = useState(null);
+  const [mealPhoto, setMealPhoto] = useState(null); // {dataUrl,type}
+  const photoInputRef = useRef(null);
   const isHealth = mode === "health";
+
+  const onPickPhoto = (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => setMealPhoto({ dataUrl: reader.result, type: f.type || "image/jpeg" });
+    reader.readAsDataURL(f);
+  };
+
+  const analyzePhoto = async () => {
+    if (!mealPhoto) return;
+    setLoading(true); setStatusMsg("📷 Reading your meal…");
+    try {
+      const b64 = String(mealPhoto.dataUrl).split(",")[1];
+      const prompt = `You are looking at a photo of a meal (likely Indian food). Identify the foods you can see and give a ROUGH protein estimate. You cannot see exact quantities, so estimate conservatively and label it approximate. Do NOT give medical or diet advice.
+
+Return ONLY valid JSON:
+{"type":"Meal","summary":"short meal name","foods":["item1","item2"],"proteinGrams":<number, your best rough estimate>,"note":"one-line caveat that this is approximate"}`;
+      const txt = await claudeAPI(prompt, "Return ONLY valid JSON, no markdown. Be conservative with protein estimates.", b64, mealPhoto.type, "");
+      const clean = String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
+      const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
+      const obj = JSON.parse(s>=0 ? clean.substring(s,e+1) : clean);
+      obj.type = "Meal";
+      obj._photo = true;
+      obj.summary = obj.summary || "Meal";
+      obj.details = (Array.isArray(obj.foods)?obj.foods.join(", "):"") + " | ≈ " + (obj.proteinGrams||"?") + "g protein (approx) | " + (obj.note||"estimate only");
+      setParsed(obj);
+      setStatusMsg("");
+    } catch(e) {
+      setStatusMsg("❌ Couldn't read the photo. Try a clearer picture or type it instead.");
+    }
+    setLoading(false);
+  };
 
   const analyze = async () => {
     if (!text.trim()) { setStatusMsg("Type something first."); return; }
@@ -2358,7 +2393,8 @@ Return ONLY valid JSON:
       title: parsed.summary || text.slice(0,80),
       date: new Date().toISOString().slice(0,10),
       category: "Health",
-      notes: (parsed.details||text) + (parsed.severity?(" | Severity: "+parsed.severity):"") + (parsed.time?(" | Time: "+parsed.time):""),
+      notes: (parsed.details||text) + (parsed.severity?(" | Severity: "+parsed.severity):"") + (parsed.time?(" | Time: "+parsed.time):"") + (parsed.proteinGrams?(" | protein≈"+parsed.proteinGrams+"g"):""),
+      amount: parsed.proteinGrams ? String(parsed.proteinGrams) : "",
       tags: parsed.type ? [parsed.type] : [],
       createdAt: new Date().toISOString()
     };
@@ -2383,6 +2419,37 @@ Return ONLY valid JSON:
           </div>
         </div>
       </div>
+
+      {isHealth && (()=>{
+        const today = new Date().toISOString().slice(0,10);
+        const meals = (entries||[]).filter(e => e && e.category==="Health" && e.date===today && (e.tags||[]).indexOf("Meal")>-1);
+        let total = 0; meals.forEach(m => { const p = parseFloat(m.amount); if(!isNaN(p)) total += p; });
+        return (
+          <div style={{ background:"#eefafa", border:"1.5px solid #4a9a9a", borderRadius:10, padding:"10px 12px", marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#0a5a5a" }}>🍽 Today ≈ {Math.round(total)}g protein <span style={{fontWeight:400,fontSize:11,color:"#5a8a8a"}}>(rough, from {meals.length} meal{meals.length===1?"":"s"})</span></div>
+          </div>
+        );
+      })()}
+
+      {isHealth && (
+        <div style={{ marginBottom:10 }}>
+          <input ref={photoInputRef} type="file" accept="image/*" capture="environment" onChange={onPickPhoto} style={{ display:"none" }} />
+          <button onClick={()=>photoInputRef.current&&photoInputRef.current.click()} style={{ width:"100%", padding:"11px", borderRadius:10, border:"1.5px dashed #4a9a9a", background:"#eefafa", color:"#0a5a5a", fontWeight:700, fontSize:14, cursor:"pointer" }}>
+            📷 Snap / upload a meal photo → estimate protein
+          </button>
+          {mealPhoto && (
+            <div style={{ marginTop:8, textAlign:"center" }}>
+              <img src={mealPhoto.dataUrl} alt="meal" style={{ maxWidth:"100%", maxHeight:180, borderRadius:10, border:"1px solid #d0c4a8" }} />
+              <button onClick={analyzePhoto} disabled={loading} className="bg" style={{ width:"100%", marginTop:8 }}>
+                {loading ? "⏳ Reading meal…" : "🍽 Analyze meal & estimate protein"}
+              </button>
+              <button onClick={()=>setMealPhoto(null)} className="bgh" style={{ width:"100%", marginTop:6 }}>✕ Remove photo</button>
+              <div style={{ fontSize:10, color:"#8a6a4a", marginTop:6, fontStyle:"italic" }}>Protein figures are rough estimates from the photo — not exact measurements.</div>
+            </div>
+          )}
+          <div style={{ textAlign:"center", fontSize:11, color:"#8a6a4a", margin:"8px 0" }}>— or type it below —</div>
+        </div>
+      )}
 
       <textarea
         value={text}
@@ -3761,7 +3828,7 @@ function App(){
     <Modal open={showLedger} onClose={()=>setShowLedger(false)} wide><LedgerUpload entries={entries} onClose={()=>setShowLedger(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
     <Modal open={showLocation} onClose={()=>setShowLocation(false)} wide><LocationTracker onClose={()=>setShowLocation(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showDayBook} onClose={()=>setShowDayBook(false)} wide><DayBook onClose={()=>setShowDayBook(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
-    <Modal open={showHealth} onClose={()=>setShowHealth(false)}><HealthFamilyQuick onClose={()=>setShowHealth(false)} onSaveEntry={saveEntry} mode="health"/></Modal>
+    <Modal open={showHealth} onClose={()=>setShowHealth(false)}><HealthFamilyQuick onClose={()=>setShowHealth(false)} onSaveEntry={saveEntry} mode="health" entries={entries}/></Modal>
     <Modal open={showFamily} onClose={()=>setShowFamily(false)}><HealthFamilyQuick onClose={()=>setShowFamily(false)} onSaveEntry={saveEntry} mode="family"/></Modal>
     <Modal open={showPaymentReminders} onClose={()=>setShowPaymentReminders(false)} wide><PaymentReminders onClose={()=>setShowPaymentReminders(false)} entries={entries} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showTally} onClose={()=>setShowTally(false)} wide><TallyUpload onClose={()=>setShowTally(false)}/></Modal>
