@@ -32,6 +32,14 @@ input,select,textarea,button{font-family:inherit;}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.5;}}
 .listening{animation:pulse 1s infinite;}
 </style>
+<style id="rk-mobile-css">
+@media (max-width: 760px){
+  .row-extra-actions{ display:none !important; }
+  .rk-row-title-notes{ font-size:12px; }
+  .rk-row-notes{ display:none !important; }        /* hide long notes on phone; full text still in View */
+  table td{ padding:5px 6px !important; }
+}
+</style>
 </head>
 <body>
 <div id="root"></div>
@@ -3123,6 +3131,7 @@ function App(){
   const [editE,setEditE]=useState(null);
   const [viewE,setViewE]=useState(null);
   const [teamView,setTeamView]=useState(null); // {user,label,entries,loading}
+  const [teamMenuOpen,setTeamMenuOpen]=useState(false);
   const [showDupes,setShowDupes]=useState(false);
   const [showAI,setShowAI]=useState(false);
   const [showAgeing,setShowAgeing]=useState(false);
@@ -3510,7 +3519,12 @@ function App(){
             {l:"💰 Prakash",c:"Finance",t:"Payment Collected",p:"Prakash"},
             {l:"💍 Wedding",c:"Personal",t:"Wedding Planning"},
           ].map(q=><button key={q.l} onClick={()=>{setEditE({category:q.c,taskType:q.t,person:q.p||""});setShowForm(true);}} style={{padding:"6px 12px",borderRadius:8,border:"none",background:q.l.includes("Prakash")?"#1a5a8a":"#c8006a",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}}>{q.l}</button>)}
-          {URL_USER==="main"&&TEAM_MEMBERS.map(m=><button key={"tv_"+m.u} onClick={()=>openTeam(m)} title={"View "+m.label+"'s tracker (read-only)"} style={{padding:"6px 12px",borderRadius:8,border:"1px solid #6a8aa0",background:"rgba(40,90,130,.25)",color:"#bfe0ff",cursor:"pointer",fontSize:12,fontWeight:700}}>👁 {m.label}</button>)}
+          {URL_USER==="main"&&<div style={{position:"relative",display:"inline-block"}}>
+            <button onClick={()=>setTeamMenuOpen(o=>!o)} title="View a staff member's tracker (read-only)" style={{padding:"6px 12px",borderRadius:8,border:"1px solid #6a8aa0",background:"rgba(40,90,130,.25)",color:"#bfe0ff",cursor:"pointer",fontSize:12,fontWeight:700}}>👁 Team ▾</button>
+            {teamMenuOpen&&<div style={{position:"absolute",top:"110%",left:0,zIndex:900,background:"#2a2318",border:"1px solid #6a8aa0",borderRadius:8,padding:4,minWidth:130,boxShadow:"0 6px 18px rgba(0,0,0,.4)"}}>
+              {TEAM_MEMBERS.map(m=><button key={"tv_"+m.u} onClick={()=>{setTeamMenuOpen(false);openTeam(m);}} style={{display:"block",width:"100%",textAlign:"left",padding:"7px 10px",borderRadius:6,border:"none",background:"transparent",color:"#bfe0ff",cursor:"pointer",fontSize:13,fontWeight:600}}>👁 {m.label}</button>)}
+            </div>}
+          </div>}
           {IS_FAMILY&&[
             {l:"💍",c:"Personal",t:"Wedding Planning"},
             {l:"💰",c:"Personal",t:"Expense"},
@@ -3566,7 +3580,7 @@ function App(){
                 <td style={{padding:"7px 8px",minWidth:140,maxWidth:200}}>
                   <div style={{fontWeight:700,fontSize:13,color:"#2a1600",cursor:"pointer",textDecoration:isDone?"line-through":"none"}} onClick={()=>setViewE(e)}>{e.title}</div>
                   {e.chemical&&<div style={{fontSize:10,color:"#5a3a7a",marginTop:1}}>🧪 {e.chemical}</div>}
-                  {e.notes&&<div style={{fontSize:10,color:"#7a6040",lineHeight:1.4,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",marginTop:1}}>{e.notes}</div>}
+                  {e.notes&&<div className="rk-row-notes" style={{fontSize:10,color:"#7a6040",lineHeight:1.4,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",marginTop:1}}>{e.notes}</div>}
                   {e.link&&<a href={e.link} target="_blank" rel="noreferrer" style={{fontSize:10,color:"#0057b0",display:"block",marginTop:1}} onClick={ev=>ev.stopPropagation()}>🔗 {e.linkLabel||"Link"}</a>}
                 </td>
                 <td style={{padding:"7px 8px",fontSize:11,minWidth:90}}>
@@ -3588,10 +3602,10 @@ function App(){
                 <td style={{padding:"7px 8px"}}>{(e.attachments||[]).length>0?<div style={{display:"flex",gap:2}}>{e.attachments.slice(0,2).map((a,i)=><Thumb key={i} att={a} small/>)}{e.attachments.length>2&&<span style={{fontSize:9,color:"#9a8060",alignSelf:"center"}}>+{e.attachments.length-2}</span>}</div>:<span style={{color:"#d0c0a0",fontSize:10}}>—</span>}</td>
                 <td style={{padding:"7px 6px",whiteSpace:"nowrap"}}>
                   <button onClick={()=>toggleSel(e.id)} style={{padding:"3px 7px",borderRadius:6,border:selIds.indexOf(e.id)>-1?"2px solid #c01818":"1px solid #ccc",background:selIds.indexOf(e.id)>-1?"#ffe5e5":"#fff",cursor:"pointer",fontSize:11,marginRight:3}}>{selIds.indexOf(e.id)>-1?"☑️":"⬜"}</button><button onClick={()=>setViewE(e)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #d0b880",background:"#fff8ee",color:"#8a5800",cursor:"pointer",fontSize:10,marginRight:3}}>View</button>
-                  <button onClick={()=>shareEntry(e)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #0088cc",background:"#e8f4fb",color:"#006aaa",cursor:"pointer",fontSize:10,marginRight:3}}>📤</button>
+                  <span className="row-extra-actions"><button onClick={()=>shareEntry(e)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #0088cc",background:"#e8f4fb",color:"#006aaa",cursor:"pointer",fontSize:10,marginRight:3}}>📤</button>
                   {!isDone&&<button onClick={()=>markDone(e.id)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #88cc88",background:"#edfaed",color:"#1a5a1a",cursor:"pointer",fontSize:10,marginRight:3}}>✅</button>}
                   {!e.hidden&&<button onClick={()=>hideEntry(e.id)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #ccc",background:"#f5f5f5",color:"#666",cursor:"pointer",fontSize:10}}>Hide</button>}
-                  {e.hidden&&<button onClick={()=>unhideEntry(e.id)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #c8a060",background:"#fff8ee",color:"#8a5800",cursor:"pointer",fontSize:10}}>Show</button>}
+                  {e.hidden&&<button onClick={()=>unhideEntry(e.id)} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #c8a060",background:"#fff8ee",color:"#8a5800",cursor:"pointer",fontSize:10}}>Show</button>}</span>
                 </td>
               </tr>;
             })}
