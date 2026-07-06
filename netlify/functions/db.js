@@ -5,6 +5,24 @@
 //  Uses Supabase REST (PostgREST) with the SERVICE ROLE key (server-side only).
 // ============================================================================
 const https = require("https");
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyeR53nHyQCmk7UGGVcdbapL62AcppjYn_HxhW2AserEoX5uZmHWYNv8q_EAw2k5CqEVw/exec";
+function appscriptPost(bodyObj){
+  return new Promise((resolve,reject)=>{
+    const u=new URL(SCRIPT_URL);
+    const bodyStr=JSON.stringify(bodyObj);
+    const req=https.request({hostname:u.hostname,path:u.pathname,method:"POST",headers:{"Content-Type":"application/json","Content-Length":Buffer.byteLength(bodyStr),"User-Agent":"Mozilla/5.0"}},(res)=>{
+      if([301,302,303,307,308].indexOf(res.statusCode)!==-1&&res.headers.location){
+        // follow redirect via GET
+        https.get(res.headers.location,{headers:{"User-Agent":"Mozilla/5.0"}},(r2)=>{let d="";r2.on("data",c=>d+=c);r2.on("end",()=>{try{resolve(JSON.parse(d));}catch(e){resolve({raw:d});}});}).on("error",reject);
+        return;
+      }
+      let d="";res.on("data",c=>d+=c);res.on("end",()=>{try{resolve(JSON.parse(d));}catch(e){resolve({raw:d});}});
+    });
+    req.on("error",reject);
+    req.setTimeout(25000,()=>{req.destroy();reject(new Error("Drive upload timeout"));});
+    req.write(bodyStr);req.end();
+  });
+}
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_KEY || "";
@@ -99,6 +117,16 @@ exports.handler = async (event) => {
 
   try {
     if (action === "ping") return OK({ ok: true, msg: "Supabase DB alive" });
+
+    // ---- UPLOAD FILE -> Google Drive (via Apps Script). Images live in Drive, links in Supabase.
+    if (action === "uploadFile" && body.file) {
+      try {
+        const r = await appscriptPost({ action: "uploadFile", file: body.file });
+        return OK(r || { error: "no response from Drive" });
+      } catch (e) {
+        return OK({ error: "drive_upload_failed", detail: String(e && e.message || e) });
+      }
+    }
 
     // ---- READ ALL ----
     if (action === "getAll") {
