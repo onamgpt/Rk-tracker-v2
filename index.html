@@ -3237,6 +3237,10 @@ function App(){
   const [teamView,setTeamView]=useState(null); // {user,label,entries,loading}
   const [teamMenuOpen,setTeamMenuOpen]=useState(false);
   const [navMenuOpen,setNavMenuOpen]=useState(false);
+  const [quickText,setQuickText]=useState("");
+  const [quickOpen,setQuickOpen]=useState(false);
+  const [quickBusy,setQuickBusy]=useState(false);
+  const [quickParsed,setQuickParsed]=useState(null);
   const [showDupes,setShowDupes]=useState(false);
   const [showAI,setShowAI]=useState(false);
   const [showAgeing,setShowAgeing]=useState(false);
@@ -3424,6 +3428,43 @@ function App(){
     await sheetsAPI("saveDropdowns",{dropdowns:dd});
   };
 
+  const quickAdd=async()=>{
+    if(!quickText.trim())return;
+    setQuickBusy(true);setQuickParsed(null);
+    try{
+      const cats=(dropdowns.categories||[]).join(", ");
+      const today=new Date().toISOString().slice(0,10);
+      const prompt="Convert this note into ONE tracker entry. Today is "+today+".\n"+
+        "Note: \""+quickText.trim()+"\"\n\n"+
+        "Pick the best category from: "+cats+".\n"+
+        "Return ONLY valid JSON: {\"title\":\"short title\",\"category\":\"one of the list\",\"person\":\"name or empty\",\"vendor\":\"name or empty\",\"amount\":\"number or empty\",\"paymentStatus\":\"Payment Pending/Payment Completed/empty\",\"date\":\"YYYY-MM-DD (default today)\",\"notes\":\"any extra detail\",\"tags\":[\"Pending\" or \"Paid\" etc]}";
+      const txt=await claudeAPI(prompt,"Return ONLY valid JSON, no markdown.","","","" );
+      const clean=String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
+      const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
+      const obj=JSON.parse(s>=0?clean.substring(s,e+1):clean);
+      obj.date=obj.date||today;
+      setQuickParsed(obj);
+    }catch(e){ setQuickParsed({error:"Couldn't understand that — try rephrasing, or use + New."}); }
+    setQuickBusy(false);
+  };
+  const quickConfirm=async()=>{
+    if(!quickParsed||quickParsed.error)return;
+    const entry={
+      id:genId(),
+      title:quickParsed.title||quickText.slice(0,60),
+      date:quickParsed.date||new Date().toISOString().slice(0,10),
+      category:quickParsed.category||"",
+      person:quickParsed.person||"",
+      vendor:quickParsed.vendor||"",
+      amount:quickParsed.amount?String(quickParsed.amount):"",
+      paymentStatus:quickParsed.paymentStatus||"",
+      notes:quickParsed.notes||"",
+      tags:Array.isArray(quickParsed.tags)?quickParsed.tags:[],
+      createdAt:new Date().toISOString()
+    };
+    try{ if(saveEntry)await saveEntry(entry); }catch(e){}
+    setQuickText("");setQuickParsed(null);setQuickOpen(false);
+  };
   const openTeam=async(member)=>{
     setTeamView({user:member.u,label:member.label,loading:true,entries:[]});
     try{
@@ -3651,8 +3692,30 @@ function App(){
             {l:"🏷",c:"Intelligence",t:"Competitor Spotted"},
           ].map(q=><button key={q.l} onClick={()=>{setEditE({category:q.c,taskType:q.t});setShowForm(true);}} style={{padding:"7px 10px",borderRadius:8,border:"none",background:"rgba(255,255,255,.15)",color:"#f5d890",cursor:"pointer",fontSize:16}}>{q.l}</button>)}
           <button onClick={()=>{setEditE(null);setShowForm(true);}} style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#e8a020,#c07010)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700,boxShadow:"0 4px 14px rgba(200,120,0,.35)"}}>+ New</button>
+          <button onClick={()=>setQuickOpen(o=>!o)} title="Type a note in plain English and it becomes an entry" style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#7a4ac0,#5a2a9a)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>✍️ Quick Add</button>
         </div>
       </div>
+      {quickOpen&&<div style={{margin:"6px 0 10px",padding:12,borderRadius:10,border:"1.5px solid #9a6ad0",background:"rgba(120,74,192,.12)"}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#c8a8f0",marginBottom:6}}>✍️ Type it naturally — e.g. "paid Prakash 5000 for voucher 264 today" or "Amar Trading invoice 12000 pending"</div>
+        <textarea value={quickText} onChange={e=>setQuickText(e.target.value)} placeholder="Type your entry in plain English…" style={{width:"100%",height:56,padding:9,borderRadius:8,border:"1px solid #9a6ad0",fontSize:13,resize:"vertical"}}/>
+        <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+          <button onClick={quickAdd} disabled={quickBusy||!quickText.trim()} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#5a2a9a",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:13}}>{quickBusy?"⏳ Reading…":"✨ Create entry"}</button>
+          <button onClick={()=>{setQuickOpen(false);setQuickText("");setQuickParsed(null);}} style={{padding:"8px 14px",borderRadius:8,border:"1px solid #b090e0",background:"#fff",color:"#5a2a9a",cursor:"pointer",fontSize:13}}>Cancel</button>
+        </div>
+        {quickParsed&&!quickParsed.error&&<div style={{marginTop:10,padding:10,borderRadius:8,background:"#fff",border:"1px solid #d0b8f0"}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#3a1a6a"}}>{quickParsed.title}</div>
+          <div style={{fontSize:12,color:"#666",marginTop:3}}>
+            {quickParsed.category&&<span>📁 {quickParsed.category} </span>}
+            {quickParsed.person&&<span>· 👤 {quickParsed.person} </span>}
+            {quickParsed.vendor&&<span>· 🏭 {quickParsed.vendor} </span>}
+            {quickParsed.amount&&<span>· 💰 {quickParsed.amount} </span>}
+            {quickParsed.paymentStatus&&<span>· {quickParsed.paymentStatus} </span>}
+            <span>· 📅 {quickParsed.date}</span>
+          </div>
+          <button onClick={quickConfirm} style={{marginTop:8,padding:"7px 16px",borderRadius:8,border:"none",background:"#1a7a3a",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:13}}>✅ Looks right — save it</button>
+        </div>}
+        {quickParsed&&quickParsed.error&&<div style={{marginTop:10,color:"#a33",fontSize:12}}>{quickParsed.error}</div>}
+      </div>}
       <div className="rk-filterbar" style={{display:"flex",flexWrap:"wrap",gap:5}}>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search all fields…" style={{...fSel,background:"rgba(255,255,255,.1)",width:150}}/>
         <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={fSel}>{ALL_CATS.map(c=><option key={c} value={c} style={{background:"#3a2000"}}>{c}</option>)}</select>
