@@ -148,6 +148,16 @@ function parseDate(d){
 function fmtDate(d){if(!d)return"—";const p=parseDate(d);if(!p)return String(d);return new Date(p+"T00:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});}
 function fmtDT(d){if(!d)return"—";return new Date(d).toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});}
 function isOverdue(r){return r&&new Date(r)<new Date();}
+// A reminder is ACTIVE (should nag) if now >= reminder time, not marked done,
+// and within its repeat window (remindDays). "Once" = still shows until done.
+function reminderActive(e){
+  if(!e||!e.reminder||e.remindDone)return false;
+  const now=new Date(), start=new Date(e.reminder);
+  if(now<start)return false; // not yet due
+  const days=parseInt(e.remindDays||"0",10);
+  if(days>0){ const end=new Date(start); end.setDate(end.getDate()+days); return now<=end; }
+  return true; // "Once" but not done -> keep showing until done
+}
 
 function _normKeys(e){
   if(!e||typeof e!=="object")return e;
@@ -214,6 +224,8 @@ function sanitizeEntry(e){
   else out.sharedWith=[];
   out.hidden=!!e.hidden;
   out.recurring=!!e.recurring;
+  out.remindDays=(e.remindDays===null||e.remindDays===undefined)?"":String(e.remindDays);
+  out.remindDone=!!e.remindDone;
   if(e._shared)out._shared=true;
   if(!out.title){
     // Never discard a real entry just because Title cell is empty/shifted — synthesize a label.
@@ -1434,7 +1446,7 @@ function DropdownManager({dropdowns,onSave,onClose}){
 }
 
 // ── ENTRY FORM ────────────────────────────────────────────────────────────────
-const EMPTY_E={id:null,date:"",title:"",category:"Sales - Order",taskType:"",person:"",account:"",vendor:"",property:"",financialType:"",paymentStatus:"",month:"",chemical:"",tags:[],notes:"",reminder:"",reminderNote:"",amount:"",attachments:[],link:"",linkLabel:"",isRecurring:false,createdAt:""};
+const EMPTY_E={id:null,date:"",title:"",category:"Sales - Order",taskType:"",person:"",account:"",vendor:"",property:"",financialType:"",paymentStatus:"",month:"",chemical:"",tags:[],notes:"",reminder:"",reminderNote:"",remindDays:"",remindDone:false,amount:"",attachments:[],link:"",linkLabel:"",isRecurring:false,createdAt:""};
 
 function EntryForm({initial,onSave,onClose,dropdowns,onAddToDropdown,saving}){
   const [f,setF]=useState({...EMPTY_E,date:today(),id:genId(),createdAt:new Date().toISOString(),...initial});
@@ -1528,6 +1540,7 @@ function EntryForm({initial,onSave,onClose,dropdowns,onAddToDropdown,saving}){
       <div style={G2}>
         <div><label className="lbl" style={{fontSize:10}}>Date & Time</label><input className="inp" type="datetime-local" value={f.reminder} onChange={e=>set("reminder",e.target.value)}/></div>
         <div><label className="lbl" style={{fontSize:10}}>Note</label><input className="inp" type="text" value={f.reminderNote} placeholder="What to do…" onChange={e=>set("reminderNote",e.target.value)}/></div>
+        <div><label className="lbl" style={{fontSize:10}}>Keep reminding (days)</label><select className="inp" value={f.remindDays||""} onChange={e=>set("remindDays",e.target.value)}><option value="">Once</option><option value="3">3 days</option><option value="5">5 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select></div>
       </div>
     </div>
     <div style={{marginBottom:18}}>
@@ -3545,7 +3558,7 @@ function App(){
     return(a.title||"").localeCompare(b.title||"");
   }),[entries,hideDone,filterCat,filterTag,filterPerson,filterAccount,filterVendor,filterStatus,search,sort]);
 
-  const overdueN=entries.filter(e=>isOverdue(e.reminder)&&!e.tags?.includes("Done")).length;
+  const overdueN=entries.filter(e=>reminderActive(e)&&!e.tags?.includes("Done")).length;
   const superN=entries.filter(e=>e.tags?.includes("Super Pending")).length;
   const dupeN=useMemo(()=>{const s={};entries.forEach(e=>{const k=(e.title||"").toLowerCase().trim();if(k)s[k]=(s[k]||0)+1;});return Object.values(s).filter(n=>n>1).length;},[entries]);
 
@@ -3849,6 +3862,23 @@ function App(){
         {viewE.reminder&&<div style={{background:isOverdue(viewE.reminder)?"#fff0f0":"#e8f4fb",border:`1.5px solid ${isOverdue(viewE.reminder)?"#f5a8ab":"#b0d8f0"}`,borderRadius:9,padding:"9px 13px",marginBottom:12}}>
           <span style={{fontSize:13,fontWeight:700,color:isOverdue(viewE.reminder)?"#c00":"#006aaa"}}>📲 {isOverdue(viewE.reminder)?"OVERDUE · ":""}{fmtDT(viewE.reminder)}{viewE.isRecurring&&<span style={{marginLeft:8,fontSize:11,color:"#5a8a30"}}>🔁 Monthly</span>}</span>
           {viewE.reminderNote&&<div style={{fontSize:12,color:"#005a8a",marginTop:3}}>{viewE.reminderNote}</div>}
+          {viewE.remindDays&&<div style={{fontSize:11,color:"#5a7a30",marginTop:3}}>🔁 Repeats daily for {viewE.remindDays} days until done</div>}
+          {viewE.remindDone&&<div style={{fontSize:11,color:"#1a7a3a",marginTop:3,fontWeight:700}}>✅ Reminder completed</div>}
+          <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+            {!viewE.remindDone&&<button onClick={()=>{
+              const upd={...viewE,remindDone:true};
+              setViewE(upd);
+              setEntries(p=>{const a=p.map(x=>x.id===upd.id?upd:x);saveCache(a);return a;});
+              sheetsAPI("save",{entry:lightForSheet(upd)}).catch(()=>{});
+            }} style={{padding:"6px 12px",borderRadius:7,border:"none",background:"#1a7a3a",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>✓ Mark reminder done</button>}
+            {!viewE.remindDone&&<button onClick={()=>{
+              const next=new Date(); next.setDate(next.getDate()+1); next.setHours(9,0,0,0);
+              const upd={...viewE,reminder:next.toISOString().slice(0,16)};
+              setViewE(upd);
+              setEntries(p=>{const a=p.map(x=>x.id===upd.id?upd:x);saveCache(a);return a;});
+              sheetsAPI("save",{entry:lightForSheet(upd)}).catch(()=>{});
+            }} style={{padding:"6px 12px",borderRadius:7,border:"1px solid #c8a060",background:"#fff8ee",color:"#8a5800",fontWeight:600,fontSize:12,cursor:"pointer"}}>😴 Snooze 1 day</button>}
+          </div>
         </div>}
         {URL_USER==="main"&&<div style={{marginBottom:10,padding:"8px 10px",background:"#f2f8ff",border:"1px solid #cfe0f0",borderRadius:8}}>
           <div style={{fontSize:12,fontWeight:700,color:"#1a5a8a",marginBottom:6}}>🔗 Share this entry (live) with:</div>
