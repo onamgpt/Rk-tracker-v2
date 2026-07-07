@@ -2358,12 +2358,12 @@ Return ONLY valid JSON:
     }
     setLoading(true); setStatusMsg("🧠 Understanding entry…");
     try {
-      const prompt = `Parse this casual health log entry for a person tracking their wellbeing. Do NOT diagnose or give medical advice — just structure the information.
+      const prompt = `Parse this casual health log entry. Do NOT diagnose or give medical advice — just structure it. If it is a MEAL/food, give a ROUGH protein estimate in grams (use standard nutrition knowledge, e.g. 2 egg whites ≈ 7g, 1 whole egg ≈ 6g, 100g dal cooked ≈ 5g, 1 cup milk ≈ 8g, 100g paneer ≈ 18g, 100g chicken ≈ 27g). Estimate conservatively.
 
 Entry: "${text}"
 
 Return ONLY valid JSON:
-{"type":"Meal"|"Symptom"|"Medication"|"Vitals"|"Other","summary":"short title","details":"key details extracted","severity":"mild"|"moderate"|"severe"|null,"time":"morning"|"afternoon"|"evening"|"night"|null}`;
+{"type":"Meal"|"Symptom"|"Medication"|"Vitals"|"Other","summary":"short title","details":"key details","proteinGrams":<number if food, else 0>,"severity":"mild"|"moderate"|"severe"|null,"time":"morning"|"afternoon"|"evening"|"night"|null}`;
       const txt = await claudeAPI(prompt, "Return ONLY valid JSON, no markdown.", "", "", "");
       const clean = String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
       const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
@@ -3156,9 +3156,14 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
         createdAt:new Date().toISOString()
       };
 
-      // Save entry (sheet copy gets links only — no heavy base64)
-      const sheetEntry=Object.assign({},entry,{attachments:allAtts.map(a=>({name:a.name,type:a.type,data:(a.data&&String(a.data).indexOf("http")===0)?a.data:""}))});
-      await intelAPI("saveEntry",{entry:sheetEntry});
+      // Detect routing tag in subject: #Prakash/#staff1-4 -> that tracker; else -> main
+      const subjLower=String(email.subject||"").toLowerCase();
+      let routeUser="main";
+      const routeMap={"#prakash":"prakash","#staff1":"staff1","#staff2":"staff2","#staff3":"staff3","#staff4":"staff4"};
+      for(const tag in routeMap){ if(subjLower.indexOf(tag)>-1){ routeUser=routeMap[tag]; break; } }
+      // Light copy (links only) for the database
+      const dbEntry=Object.assign({},entry,{attachments:allAtts.map(a=>({name:a.name,type:a.type,data:(a.data&&String(a.data).indexOf("http")===0)?a.data:""}))});
+      await sheetsAPI("save",{entry:dbEntry,user:routeUser});
       auto60Reminder(entry);
     if(routeUser==="main"){ try{if(onSaveEntry)await onSaveEntry(Object.assign({},entry))}catch(e){} }
       try{await intelAPI("logIntel",{intel:{date:email.date,source:"email",title:entry.title,vendor:(obj&&obj.vendor)||"",customer:(obj&&obj.person)||"",amount:(obj&&obj.amount)||"",invoiceNo:(obj&&obj.invoiceNo)||"",category:entry.category,summary:(obj&&obj.summary)||email.subject,gmailId:email.gmailId}});}catch(e){}
