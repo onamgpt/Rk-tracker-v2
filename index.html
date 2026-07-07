@@ -3147,7 +3147,7 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
       const sheetEntry=Object.assign({},entry,{attachments:allAtts.map(a=>({name:a.name,type:a.type,data:(a.data&&String(a.data).indexOf("http")===0)?a.data:""}))});
       await intelAPI("saveEntry",{entry:sheetEntry});
       auto60Reminder(entry);
-    try{if(onSaveEntry)await onSaveEntry(Object.assign({},entry))}catch(e){}
+    if(routeUser==="main"){ try{if(onSaveEntry)await onSaveEntry(Object.assign({},entry))}catch(e){} }
       try{await intelAPI("logIntel",{intel:{date:email.date,source:"email",title:entry.title,vendor:(obj&&obj.vendor)||"",customer:(obj&&obj.person)||"",amount:(obj&&obj.amount)||"",invoiceNo:(obj&&obj.invoiceNo)||"",category:entry.category,summary:(obj&&obj.summary)||email.subject,gmailId:email.gmailId}});}catch(e){}
 
       // Mark imported
