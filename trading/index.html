@@ -178,18 +178,18 @@ function load(){ try{ return JSON.parse(localStorage.getItem(K)) || defaults(); 
 function save(s){
   try{ localStorage.setItem(K, JSON.stringify(s)); }catch(e){}
   try{
-    fetch("/.netlify/functions/sheets", {
+    fetch("/.netlify/functions/db", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "savePortfolio", key: K, data: s })
+      body: JSON.stringify({ action: "savePortfolio", key: K, data: s, user: "india_portfolio" })
     }).catch(function(){});
   }catch(e){}
 }
 function loadFromCloud(){
-  fetch("/.netlify/functions/sheets", {
+  fetch("/.netlify/functions/db", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "getPortfolio", key: K })
+    body: JSON.stringify({ action: "getPortfolio", key: K, user: "india_portfolio" })
   }).then(function(r){ return r.json(); }).then(function(r){
     if (r && r.data) {
       S = r.data;
