@@ -171,18 +171,18 @@ function save(s){
   try{ localStorage.setItem(K, JSON.stringify(s)); }catch(e){}
   // Permanent backup to Google Sheets — survives browser data clearing
   try{
-    fetch("/.netlify/functions/sheets", {
+    fetch("/.netlify/functions/db", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "savePortfolio", key: K, data: s })
+      body: JSON.stringify({ action: "savePortfolio", key: K, data: s, user: "usa_portfolio" })
     }).catch(function(){});
   }catch(e){}
 }
 function loadFromCloud(){
-  fetch("/.netlify/functions/sheets", {
+  fetch("/.netlify/functions/db", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "getPortfolio", key: K })
+    body: JSON.stringify({ action: "getPortfolio", key: K, user: "usa_portfolio" })
   }).then(function(r){ return r.json(); }).then(function(r){
     if (r && r.data) {
       S = r.data;
