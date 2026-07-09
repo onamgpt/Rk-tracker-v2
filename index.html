@@ -2307,6 +2307,105 @@ Return ONLY valid JSON array, no markdown:
 
 
 // ── HealthFamilyQuick — natural language health/family logging ──────────
+function CFOBrief({ entries, onClose }) {
+  const [loading, setLoading] = useState(false);
+  const [brief, setBrief] = useState(null);
+  const [mode, setMode] = useState("weekly"); // weekly | daily
+  const [err, setErr] = useState("");
+
+  // Build a compact financial snapshot from tracker entries (no heavy data sent)
+  function buildSnapshot() {
+    const money = e => { const n = parseFloat(String(e.amount||"").replace(/[^0-9.]/g,"")); return isNaN(n)?0:n; };
+    const isPending = e => /pending|due|asked|partial|overdue/i.test(e.paymentStatus||"") || (e.tags||[]).some(t=>/pending|due/i.test(t));
+    const isPaid = e => /paid|completed|received/i.test(e.paymentStatus||"");
+    const today = new Date();
+    const daysAgo = d => { const t=Date.parse(d); return isNaN(t)?9999:Math.floor((today-t)/86400000); };
+
+    const fin = entries.filter(e => money(e) > 0 || /purchase|sales|payment|finance|receipt/i.test(e.category||""));
+    let receivablesTotal=0, payablesTotal=0, pendingCount=0;
+    const overdue=[]; const recentSales=[]; const recentPurch=[];
+    entries.forEach(e => {
+      const amt = money(e);
+      const cat = (e.category||"").toLowerCase();
+      const pend = isPending(e);
+      if (pend && amt>0) { pendingCount++;
+        if (/sales|receiv/i.test(cat) || /sales/i.test(e.taskType||"")) receivablesTotal += amt;
+        else payablesTotal += amt;
+        const age = daysAgo(e.date);
+        if (age>0 && age<9999) overdue.push({ who:e.vendor||e.person||e.title||"?", amt, age, status:e.paymentStatus||"", cat });
+      }
+      if (/sales/i.test(cat) && amt>0) recentSales.push({who:e.vendor||e.person||e.title,amt,date:e.date});
+      if (/purchase/i.test(cat) && amt>0) recentPurch.push({who:e.vendor||e.person||e.title,amt,date:e.date});
+    });
+    overdue.sort((a,b)=>b.amt-a.amt);
+    return {
+      totalEntries: entries.length,
+      receivablesTotal: Math.round(receivablesTotal),
+      payablesTotal: Math.round(payablesTotal),
+      pendingCount,
+      topOverdue: overdue.slice(0,12),
+      salesCount: recentSales.length,
+      purchaseCount: recentPurch.length,
+    };
+  }
+
+  const run = async () => {
+    setLoading(true); setErr(""); setBrief(null);
+    try {
+      const snap = buildSnapshot();
+      const period = mode==="daily" ? "today / this working day" : "this week";
+      const prompt =
+"You are an experienced Chief Financial Officer preparing a concise "+(mode)+" executive brief for the business owner of Onam Agarbathi (a century-old incense manufacturer, ~Rs 10 crore turnover, exports + domestic). "+
+"You are NOT doing bookkeeping or recalculating figures. You interpret the financial snapshot below into executive insight and clear ACTIONS the owner can take on the go.\n\n"+
+"FINANCIAL SNAPSHOT (from the owner's tracker, "+period+"):\n"+
+JSON.stringify(snap, null, 2)+"\n\n"+
+"Write a brief with these sections, short and punchy (owner reads on phone):\n"+
+"1. HEADLINE - one line on overall financial health right now.\n"+
+"2. CASH & RECEIVABLES - what's owed to the business, what it owes, and the risk.\n"+
+"3. TOP ATTENTION - the 3-5 specific accounts/items to chase or act on first (name them, with amounts and how overdue).\n"+
+"4. RISKS - any concerning patterns (concentration, ageing, cash gaps).\n"+
+"5. CFO ACTIONS - a numbered list of 3-6 concrete actions the owner should take this "+(mode==='daily'?'day':'week')+".\n\n"+
+"Be direct and practical, like a seasoned CFO. Use Rs for amounts. If data is thin, say so honestly and note what to track better. Do not invent numbers not in the snapshot.";
+      const txt = await claudeAPI(prompt, "You are a sharp, honest CFO. Be concise and action-oriented. Plain text with clear section headers.", "", "", "");
+      setBrief(txt || "No brief generated.");
+    } catch(e) { setErr("Couldn't generate the brief: "+(e.message||e)); }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ padding: 4 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+        <span style={{ fontSize:28 }}>📈</span>
+        <div>
+          <h2 style={{ margin:0, fontSize:18, color:"#1a3a2a" }}>CFO Brief</h2>
+          <div style={{ fontSize:11, color:"#6a7a6a" }}>Your finances, read like a CFO &mdash; with actions to take now</div>
+        </div>
+      </div>
+
+      <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+        <button onClick={()=>setMode("daily")} style={{ flex:1, padding:"9px", borderRadius:8, border: mode==="daily"?"2px solid #1a7a4a":"1px solid #ccc", background: mode==="daily"?"#eafaf0":"#fff", color:"#1a5a3a", fontWeight:700, cursor:"pointer", fontSize:13 }}>Daily</button>
+        <button onClick={()=>setMode("weekly")} style={{ flex:1, padding:"9px", borderRadius:8, border: mode==="weekly"?"2px solid #1a7a4a":"1px solid #ccc", background: mode==="weekly"?"#eafaf0":"#fff", color:"#1a5a3a", fontWeight:700, cursor:"pointer", fontSize:13 }}>Weekly</button>
+      </div>
+
+      <button onClick={run} disabled={loading} style={{ width:"100%", padding:"12px", borderRadius:10, border:"none", background:"linear-gradient(135deg,#1a7a4a,#0a5a2a)", color:"#fff", fontWeight:700, fontSize:15, cursor:"pointer", marginBottom:12 }}>
+        {loading ? "⏳ Analyzing your finances…" : "📈 Generate "+(mode==="daily"?"Daily":"Weekly")+" CFO Brief"}
+      </button>
+
+      {err && <div style={{ color:"#a33", fontSize:12, marginBottom:10 }}>{err}</div>}
+
+      {brief && (
+        <div style={{ background:"#f7faf7", border:"1px solid #cfe0cf", borderRadius:10, padding:14, whiteSpace:"pre-wrap", fontSize:13.5, lineHeight:1.6, color:"#233", maxHeight:"55vh", overflowY:"auto" }}>
+          {brief}
+        </div>
+      )}
+
+      <div style={{ fontSize:10, color:"#8a9a8a", marginTop:10, fontStyle:"italic" }}>
+        Based on the financial entries in your tracker. Once Tally is connected, this brief will read directly from your live accounts. This is an executive interpretation, not a substitute for your auditor.
+      </div>
+    </div>
+  );
+}
+
 function HealthFamilyQuick({ onClose, onSaveEntry, mode, entries }) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -3255,6 +3354,7 @@ function App(){
   const [teamView,setTeamView]=useState(null); // {user,label,entries,loading}
   const [teamMenuOpen,setTeamMenuOpen]=useState(false);
   const [navMenuOpen,setNavMenuOpen]=useState(false);
+  const [showCFO,setShowCFO]=useState(false);
   const [quickText,setQuickText]=useState("");
   const [quickOpen,setQuickOpen]=useState(false);
   const [quickBusy,setQuickBusy]=useState(false);
@@ -3668,6 +3768,7 @@ function App(){
             <button onClick={()=>setNavMenuOpen(o=>!o)} style={{fontSize:12,padding:"7px 14px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#5a3a1a,#3a2a0a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>☰ Menu ▾</button>
             {navMenuOpen&&<div style={{position:"absolute",top:"112%",left:0,zIndex:950,background:"#2a2318",border:"1px solid #c8a060",borderRadius:10,padding:5,minWidth:180,boxShadow:"0 8px 22px rgba(0,0,0,.5)"}}>
               {[
+                {l:"📈 CFO Brief",fn:()=>setShowCFO(true)},
                 {l:"📊 Tally",fn:()=>setShowTally(true)},
                 {l:"📍 Location",fn:()=>setShowLocation(true)},
                 {l:"📒 Day Book",fn:()=>setShowDayBook(true)},
@@ -3927,6 +4028,7 @@ function App(){
     <Modal open={showLocation} onClose={()=>setShowLocation(false)} wide><LocationTracker onClose={()=>setShowLocation(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showDayBook} onClose={()=>setShowDayBook(false)} wide><DayBook onClose={()=>setShowDayBook(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showHealth} onClose={()=>setShowHealth(false)}><HealthFamilyQuick onClose={()=>setShowHealth(false)} onSaveEntry={saveEntry} mode="health" entries={entries}/></Modal>
+    <Modal open={showCFO} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
     <Modal open={showFamily} onClose={()=>setShowFamily(false)}><HealthFamilyQuick onClose={()=>setShowFamily(false)} onSaveEntry={saveEntry} mode="family"/></Modal>
     <Modal open={showPaymentReminders} onClose={()=>setShowPaymentReminders(false)} wide><PaymentReminders onClose={()=>setShowPaymentReminders(false)} entries={entries} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showTally} onClose={()=>setShowTally(false)} wide><TallyUpload onClose={()=>setShowTally(false)}/></Modal>
