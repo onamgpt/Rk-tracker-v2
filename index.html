@@ -2307,6 +2307,202 @@ Return ONLY valid JSON array, no markdown:
 
 
 // ── HealthFamilyQuick — natural language health/family logging ──────────
+function Spectrum({ onClose }) {
+  // Product master (per DOZEN economics) — SP, COGS, Gross Profit, GP%
+  const MASTER = [
+    {sku:"ONAONA002380", name:"Onam Vaishak 100 gms", sp:377.16, cogs:222, gp:155.16, gpp:41.14},
+    {sku:"ONAONA002382", name:"Onam Black Gem 100 gms", sp:377.16, cogs:221, gp:156.16, gpp:41.40},
+    {sku:"ONAONA002384", name:"Onam Mysore Royal Sandal 115 gms", sp:445.68, cogs:242, gp:203.68, gpp:45.70},
+    {sku:"ONAONA002386", name:"Onam Gulab 110 gms", sp:377.16, cogs:215, gp:162.16, gpp:43.00},
+    {sku:"ONAONA002388", name:"Onam Lavender 100 Sticks", sp:377.16, cogs:271, gp:106.16, gpp:28.15},
+    {sku:"ONAONA002390", name:"Onam Musk 90 gms", sp:377.16, cogs:201, gp:176.16, gpp:46.71},
+    {sku:"ONAONA002391", name:"Onam Golden Buddha 50 gms", sp:514.32, cogs:170, gp:344.32, gpp:66.95},
+    {sku:"ONAONA002377", name:"Onam Janthar Manthar 50 Sticks", sp:205.68, cogs:110, gp:95.68, gpp:46.52},
+    {sku:"ONAONA002376", name:"Onam Kathakali 50 gms", sp:205.68, cogs:109, gp:96.68, gpp:47.01},
+    {sku:"ONAONA002374", name:"Onam Vaishak Special 20 Sticks", sp:137.16, cogs:90, gp:47.16, gpp:34.38},
+    {sku:"ONAONA002375", name:"Onam Nagarjuna 25 gms", sp:137.16, cogs:108, gp:29.16, gpp:21.26},
+    {sku:"ONAONA002378", name:"Onam Mrignayani 3 x 1 15 Sticks", sp:102.84, cogs:66, gp:36.84, gpp:35.82},
+    {sku:"UPDATE_NAGSAMB", name:"Onam Nag Sambrani 8 Sticks", sp:102.84, cogs:45, gp:57.84, gpp:56.24},
+    {sku:"UPDATE_BGEMDC", name:"Onam Black gem 50 grams Dhoop Cones", sp:320.04, cogs:146, gp:174.04, gpp:54.38},
+    {sku:"UPDATE_MRSDC", name:"Onam Mysore Royal Sandal 50 gms Dhoop Cones", sp:320.04, cogs:146, gp:174.04, gpp:54.38},
+    {sku:"ONAONA002387", name:"Onam Gulab 50 gms Dhoop Cones", sp:320.04, cogs:146, gp:174.04, gpp:54.38},
+    {sku:"UPDATE_KAILDC", name:"Onam Kailash 50 gms Dhoop Cones", sp:320.04, cogs:146, gp:174.04, gpp:54.38},
+    {sku:"UPDATE_50DC", name:"Onam 50 gms Dhoop Cones", sp:320.04, cogs:146, gp:174.04, gpp:54.38},
+    {sku:"ONAONA002379", name:"Onam Chandan 50 gms Cones", sp:320.04, cogs:146, gp:174.04, gpp:54.38},
+  ];
+  const OFFICERS = ["Sooraj","Sunil","Biju","Murugan","Sebi","Sugeesh","Satish","Sadasivan","Vinod"];
+
+  const [tab, setTab] = useState("upload"); // upload | officers | products
+  const [orders, setOrders] = useState([]);        // {id,date,customer,officer,total,lines:[{sku,name,doz,gp}], gpTotal}
+  const [expenses, setExpenses] = useState({});     // officer -> monthly expense
+  const [photo, setPhoto] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(null);     // parsed order awaiting officer tag
+  const [tagOfficer, setTagOfficer] = useState("");
+  const [msg, setMsg] = useState("");
+  const fileRef = useRef(null);
+
+  // load saved
+  useEffect(()=>{(async()=>{
+    try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses(r.data.expenses||{}); } }catch(e){}
+  })()},[]);
+  const persist = async (o=orders, e=expenses) => { try{ await sheetsAPI("savePortfolio",{key:"spectrum",data:{orders:o,expenses:e}}); }catch(err){} };
+
+  const fmt = n => "₹"+Math.round(n).toLocaleString("en-IN");
+  function matchSku(s){ const t=String(s||"").toUpperCase().replace(/\s/g,""); return MASTER.find(m=>m.sku.toUpperCase()===t) || MASTER.find(m=>t && m.sku.toUpperCase().indexOf(t.slice(-6))>-1); }
+  function matchName(nm){ const t=String(nm||"").toLowerCase(); let best=null,bs=0; MASTER.forEach(m=>{const a=m.name.toLowerCase();let sc=0;t.split(/\s+/).forEach(w=>{if(w.length>2&&a.indexOf(w)>-1)sc++;});if(sc>bs){bs=sc;best=m;}}); return bs>=2?best:null; }
+
+  const onPick = ev => { const f=ev.target.files&&ev.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>setPhoto({dataUrl:r.result,type:f.type||"image/jpeg"}); r.readAsDataURL(f); };
+
+  const scanOrder = async () => {
+    if(!photo)return; setBusy(true); setMsg("📄 Reading sales order…"); setPending(null);
+    try{
+      const b64=String(photo.dataUrl).split(",")[1];
+      const prompt="Read this sales order / purchase order. Extract each line item. For each line return the SKU code (like ONAONA002xxx if present), the product name, and the ordered quantity in DOZENS (if the qty is in Cases or Pieces, convert: note pieces and cases; a 'Case = N Piece' means that many pieces; 12 pieces = 1 dozen). Also extract customer name, order/PO number, date, and grand total if shown.\\nReturn ONLY JSON: {\"customer\":\"\",\"orderNo\":\"\",\"date\":\"\",\"grandTotal\":<number or 0>,\"lines\":[{\"sku\":\"\",\"name\":\"\",\"pieces\":<number>,\"dozens\":<number>}]}";
+      const txt=await claudeAPI(prompt,"Return ONLY valid JSON. Convert quantities to dozens where possible.",b64,photo.type,"");
+      const clean=String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
+      const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
+      const obj=JSON.parse(s>=0?clean.substring(s,e+1):clean);
+      // match lines to master, compute GP
+      let gpTotal=0; const lines=(obj.lines||[]).map(l=>{
+        const m=matchSku(l.sku)||matchName(l.name);
+        const doz = l.dozens || (l.pieces? l.pieces/12 : 0);
+        const gp = m ? Math.round(m.gp*doz) : 0;
+        gpTotal += gp;
+        return { sku:m?m.sku:(l.sku||"?"), name:m?m.name:(l.name||"unmatched"), doz:Math.round(doz*100)/100, gp, matched:!!m, gpp:m?m.gpp:null };
+      });
+      setPending({ customer:obj.customer||"", orderNo:obj.orderNo||"", date:obj.date||new Date().toISOString().slice(0,10), grandTotal:obj.grandTotal||0, lines, gpTotal });
+      setMsg("");
+    }catch(e){ setMsg("❌ Couldn't read the order clearly. Try a clearer image."); }
+    setBusy(false);
+  };
+
+  const confirmOrder = async () => {
+    if(!pending||!tagOfficer){ setMsg("Pick a salesperson to tag."); return; }
+    const o={ id:"ord_"+Date.now(), date:pending.date, customer:pending.customer, orderNo:pending.orderNo, officer:tagOfficer, total:pending.grandTotal, gpTotal:pending.gpTotal, lines:pending.lines };
+    const no=[o,...orders]; setOrders(no); setPending(null); setPhoto(null); setTagOfficer(""); setMsg("✓ Order tagged to "+tagOfficer);
+    await persist(no, expenses);
+    setTimeout(()=>setMsg(""),2500);
+  };
+  const delOrder = async id => { const no=orders.filter(o=>o.id!==id); setOrders(no); await persist(no,expenses); };
+  const setExp = async (off,val) => { const ne={...expenses,[off]:val}; setExpenses(ne); await persist(orders,ne); };
+
+  // officer rollups
+  function officerStats(off){
+    const os=orders.filter(o=>o.officer===off);
+    const sales=os.reduce((s,o)=>s+(o.total||0),0);
+    const gp=os.reduce((s,o)=>s+(o.gpTotal||0),0);
+    const exp=parseFloat(String(expenses[off]||"").replace(/[^0-9.]/g,""))||0;
+    const net=gp-exp;
+    return { orders:os.length, sales, gp, exp, net };
+  }
+  // product rollups
+  function productStats(){
+    const map={};
+    orders.forEach(o=>o.lines.forEach(l=>{ if(!map[l.name])map[l.name]={doz:0,gp:0}; map[l.name].doz+=l.doz||0; map[l.name].gp+=l.gp||0; }));
+    return Object.entries(map).map(([name,v])=>({name,...v})).sort((a,b)=>b.gp-a.gp);
+  }
+
+  const inp={padding:"7px 8px",borderRadius:6,border:"1px solid #ccd",fontSize:12.5};
+
+  return (
+    <div style={{padding:4}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+        <span style={{fontSize:26}}>🌈</span>
+        <div><h2 style={{margin:0,fontSize:18,color:"#3a2a6a"}}>Spectrum</h2>
+        <div style={{fontSize:11,color:"#7a6a9a"}}>Salesperson profitability &mdash; tag orders, track who earns their keep</div></div>
+      </div>
+
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        {[["upload","📤 Upload Order"],["officers","👥 Officers"],["products","📦 Products"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"8px",borderRadius:8,border:tab===k?"2px solid #5a3a9a":"1px solid #ccc",background:tab===k?"#f0eafa":"#fff",color:"#3a2a6a",fontWeight:700,cursor:"pointer",fontSize:12}}>{l}</button>
+        ))}
+      </div>
+
+      {msg && <div style={{fontSize:12,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:8}}>{msg}</div>}
+
+      {tab==="upload" && <div>
+        <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onPick} style={{display:"none"}}/>
+        <button onClick={()=>fileRef.current&&fileRef.current.click()} style={{width:"100%",padding:"11px",borderRadius:10,border:"1.5px dashed #7a5aba",background:"#f5f0fc",color:"#4a2a8a",fontWeight:700,fontSize:14,cursor:"pointer",marginBottom:10}}>📄 Upload / snap the sales order</button>
+        {photo && <div style={{textAlign:"center",marginBottom:10}}>
+          <img src={photo.dataUrl} alt="order" style={{maxWidth:"100%",maxHeight:160,borderRadius:8,border:"1px solid #ddd"}}/>
+          <button onClick={scanOrder} disabled={busy} className="bg" style={{width:"100%",marginTop:8}}>{busy?"⏳ Reading…":"🔍 Scan & match products"}</button>
+        </div>}
+
+        {pending && <div style={{background:"#faf8ff",border:"1px solid #d8c8f0",borderRadius:10,padding:12,marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#3a2a6a"}}>{pending.customer||"Order"} {pending.orderNo?("· "+pending.orderNo):""}</div>
+          <div style={{fontSize:11,color:"#777",marginBottom:8}}>{pending.date} · Order value {fmt(pending.total)} · Gross profit {fmt(pending.gpTotal)}</div>
+          {pending.lines.map((l,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0",color:l.matched?"#233":"#a33"}}>
+              <span>{l.matched?"✓":"⚠"} {l.name} {l.doz?("· "+l.doz+" doz"):""}</span>
+              <span style={{fontWeight:700}}>{l.matched?fmt(l.gp):"unmatched"}</span>
+            </div>
+          ))}
+          <div style={{marginTop:10,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <select value={tagOfficer} onChange={e=>setTagOfficer(e.target.value)} style={inp}>
+              <option value="">Tag salesperson…</option>
+              {OFFICERS.map(o=><option key={o} value={o}>{o}</option>)}
+            </select>
+            <button onClick={confirmOrder} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#5a3a9a",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:13}}>✓ Save & tag</button>
+          </div>
+          <div style={{fontSize:10,color:"#999",marginTop:6,fontStyle:"italic"}}>Unmatched (⚠) items usually mean a SKU still marked UPDATE_LATER, or a new product. You can still save; matched lines count toward profit.</div>
+        </div>}
+
+        <div style={{fontSize:12,fontWeight:700,color:"#3a2a6a",marginTop:8,marginBottom:4}}>Recent tagged orders</div>
+        {orders.length===0 && <div style={{fontSize:11,color:"#999",fontStyle:"italic"}}>No orders yet. Upload one above.</div>}
+        {orders.slice(0,10).map(o=>(
+          <div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 8px",borderBottom:"1px solid #eee"}}>
+            <span><b style={{color:"#5a3a9a"}}>{o.officer}</b> · {o.customer||"—"} · {o.date}</span>
+            <span>{fmt(o.gpTotal)} GP <button onClick={()=>delOrder(o.id)} style={{border:"none",background:"none",color:"#c33",cursor:"pointer"}}>×</button></span>
+          </div>
+        ))}
+      </div>}
+
+      {tab==="officers" && <div>
+        <div style={{fontSize:11,color:"#777",marginBottom:8}}>Enter each salesperson's monthly expense/salary. Net = Gross Profit from their tagged orders − their cost.</div>
+        {OFFICERS.map(off=>{ const s=officerStats(off); return (
+          <div key={off} style={{border:"1px solid #e5e0f0",borderRadius:10,padding:10,marginBottom:8,background:s.net>=0?"#f5fbf5":"#fdf3f3"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{fontWeight:700,color:"#3a2a6a",fontSize:14}}>{off}</span>
+              <span style={{fontWeight:800,fontSize:15,color:s.net>=0?"#1a7a3a":"#c33"}}>{s.net>=0?"+":""}{fmt(s.net)}</span>
+            </div>
+            <div style={{fontSize:11,color:"#666",marginTop:3}}>{s.orders} orders · Sales {fmt(s.sales)} · Gross profit {fmt(s.gp)}</div>
+            <div style={{display:"flex",gap:6,alignItems:"center",marginTop:6}}>
+              <label style={{fontSize:11,color:"#555"}}>Monthly cost ₹</label>
+              <input value={expenses[off]||""} onChange={e=>setExp(off,e.target.value)} placeholder="salary+expenses" style={{...inp,flex:1}}/>
+            </div>
+            <div style={{fontSize:10,marginTop:4,color:s.net>=0?"#1a7a3a":"#c33",fontWeight:600}}>
+              {s.net>=0 ? "✓ Covering their cost" : "⚠ Not yet covering cost — needs more/higher-margin orders"}
+            </div>
+          </div>
+        );})}
+      </div>}
+
+      {tab==="products" && <div>
+        <div style={{fontSize:11,color:"#777",marginBottom:8}}>Which products are actually moving through this channel, and the profit they generate.</div>
+        {productStats().length===0 && <div style={{fontSize:11,color:"#999",fontStyle:"italic"}}>No orders tagged yet.</div>}
+        {productStats().map((p,i)=>(
+          <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"6px 4px",borderBottom:"1px solid #eee"}}>
+            <span>{p.name} <span style={{color:"#999"}}>({Math.round(p.doz)} doz)</span></span>
+            <span style={{fontWeight:700,color:"#1a7a3a"}}>{fmt(p.gp)}</span>
+          </div>
+        ))}
+        <div style={{marginTop:12,fontSize:11,fontWeight:700,color:"#3a2a6a"}}>Reference: profit per dozen (top earners)</div>
+        {MASTER.slice().sort((a,b)=>b.gp-a.gp).slice(0,6).map((m,i)=>(
+          <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"3px 4px",color:"#555"}}>
+            <span>{m.name}</span><span>{fmt(m.gp)}/doz · {m.gpp}%</span>
+          </div>
+        ))}
+      </div>}
+
+      <div style={{fontSize:10,color:"#999",marginTop:12,fontStyle:"italic"}}>
+        Data stays in your own database. Profit = (SP − COGS) per dozen × dozens ordered. Update the 5 pending SKUs to improve auto-matching.
+      </div>
+    </div>
+  );
+}
+
+
 function AvailableFunds() {
   const [data, setData] = useState({ bankBalance:"", asOf:"", cheques:[], payments:[] });
   const [loaded, setLoaded] = useState(false);
@@ -3463,6 +3659,7 @@ function App(){
   const [teamMenuOpen,setTeamMenuOpen]=useState(false);
   const [navMenuOpen,setNavMenuOpen]=useState(false);
   const [showCFO,setShowCFO]=useState(false);
+  const [showSpectrum,setShowSpectrum]=useState(false);
   const [quickText,setQuickText]=useState("");
   const [quickOpen,setQuickOpen]=useState(false);
   const [quickBusy,setQuickBusy]=useState(false);
@@ -3877,6 +4074,7 @@ function App(){
             {navMenuOpen&&<div style={{position:"absolute",top:"112%",left:0,zIndex:950,background:"#2a2318",border:"1px solid #c8a060",borderRadius:10,padding:5,minWidth:180,boxShadow:"0 8px 22px rgba(0,0,0,.5)"}}>
               {[
                 {l:"📈 CFO Brief",fn:()=>setShowCFO(true)},
+                {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true)},
                 {l:"📊 Tally",fn:()=>setShowTally(true)},
                 {l:"📍 Location",fn:()=>setShowLocation(true)},
                 {l:"📒 Day Book",fn:()=>setShowDayBook(true)},
@@ -4137,6 +4335,7 @@ function App(){
     <Modal open={showDayBook} onClose={()=>setShowDayBook(false)} wide><DayBook onClose={()=>setShowDayBook(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showHealth} onClose={()=>setShowHealth(false)}><HealthFamilyQuick onClose={()=>setShowHealth(false)} onSaveEntry={saveEntry} mode="health" entries={entries}/></Modal>
     <Modal open={showCFO} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
+    <Modal open={showSpectrum} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)}/></Modal>
     <Modal open={showFamily} onClose={()=>setShowFamily(false)}><HealthFamilyQuick onClose={()=>setShowFamily(false)} onSaveEntry={saveEntry} mode="family"/></Modal>
     <Modal open={showPaymentReminders} onClose={()=>setShowPaymentReminders(false)} wide><PaymentReminders onClose={()=>setShowPaymentReminders(false)} entries={entries} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showTally} onClose={()=>setShowTally(false)} wide><TallyUpload onClose={()=>setShowTally(false)}/></Modal>
