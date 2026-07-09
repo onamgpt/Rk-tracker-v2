@@ -2307,6 +2307,73 @@ Return ONLY valid JSON array, no markdown:
 
 
 // ── HealthFamilyQuick — natural language health/family logging ──────────
+function FieldReport({ onClose }) {
+  const me = (typeof URL_USER!=="undefined"?URL_USER:"main");
+  const officerName = me.charAt(0).toUpperCase()+me.slice(1);
+  const [sales,setSales]=useState("");
+  const [expenses,setExpenses]=useState("");
+  const [collections,setCollections]=useState("");
+  const [note,setNote]=useState("");
+  const [loc,setLoc]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState("");
+
+  const grabLocation=()=>{
+    if(!navigator.geolocation){ setLoc("(location unavailable)"); return; }
+    setMsg("📍 Getting location…");
+    navigator.geolocation.getCurrentPosition(
+      p=>{ setLoc(p.coords.latitude.toFixed(5)+","+p.coords.longitude.toFixed(5)); setMsg(""); },
+      ()=>{ setLoc("(denied)"); setMsg(""); }, {enableHighAccuracy:true,timeout:8000});
+  };
+  useEffect(()=>{ grabLocation(); },[]);
+
+  const submit=async()=>{
+    setBusy(true); setMsg("");
+    const rpt={ id:"fr_"+Date.now(), officer:officerName, user:me, date:new Date().toISOString().slice(0,10),
+      time:new Date().toISOString(), location:loc, sales:sales, expenses:expenses, collections:collections, note:note, verified:false };
+    try{
+      // append to shared field-reports store
+      let cur=[]; try{ const r=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(r&&r.data&&Array.isArray(r.data))cur=r.data; }catch(e){}
+      cur.unshift(rpt);
+      await sheetsAPI("savePortfolio",{key:"field_reports",user:"main",data:cur});
+      // also log a normal entry in the person's own tracker for their record
+      const entry={ id:genId(), title:"Field report — "+officerName, date:rpt.date,
+        category:"Sales - Visit", person:officerName,
+        notes:"Sales ₹"+(sales||0)+" | Expenses ₹"+(expenses||0)+" | Collections ₹"+(collections||0)+(loc?(" | Loc: "+loc):"")+(note?(" | "+note):"")+" [field-reported, unverified]",
+        amount:sales||"", tags:["Field Report"], createdAt:new Date().toISOString() };
+      try{ if(typeof saveEntry==="function") await saveEntry(entry); }catch(e){}
+      setMsg("✓ Report submitted"); setSales("");setExpenses("");setCollections("");setNote("");
+      setTimeout(()=>{ setMsg(""); onClose&&onClose(); },1200);
+    }catch(e){ setMsg("Submit failed — try again"); }
+    setBusy(false);
+  };
+
+  const inp={width:"100%",padding:"10px",borderRadius:8,border:"1.5px solid #cfd8cf",fontSize:14,marginBottom:10};
+  return (
+    <div style={{padding:4}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+        <span style={{fontSize:26}}>📝</span>
+        <div><h2 style={{margin:0,fontSize:18,color:"#1a5a3a"}}>Daily Field Report</h2>
+        <div style={{fontSize:11,color:"#6a7a6a"}}>{officerName} · {new Date().toLocaleDateString()}</div></div>
+      </div>
+      <div style={{fontSize:12,color:"#4a6a4a",background:"#eef7ee",border:"1px solid #cfe0cf",borderRadius:8,padding:"7px 10px",marginBottom:12}}>
+        📍 {loc||"locating…"} <button onClick={grabLocation} style={{marginLeft:6,fontSize:11,border:"none",background:"none",color:"#1a7a4a",cursor:"pointer",textDecoration:"underline"}}>refresh</button>
+      </div>
+      <label style={{fontSize:12,fontWeight:700,color:"#1a5a3a"}}>Sales today (₹)</label>
+      <input type="number" value={sales} onChange={e=>setSales(e.target.value)} placeholder="amount sold" style={inp}/>
+      <label style={{fontSize:12,fontWeight:700,color:"#1a5a3a"}}>Expenses today (₹)</label>
+      <input type="number" value={expenses} onChange={e=>setExpenses(e.target.value)} placeholder="travel, DA, etc." style={inp}/>
+      <label style={{fontSize:12,fontWeight:700,color:"#1a5a3a"}}>Collections today (₹)</label>
+      <input type="number" value={collections} onChange={e=>setCollections(e.target.value)} placeholder="payments received" style={inp}/>
+      <label style={{fontSize:12,fontWeight:700,color:"#1a5a3a"}}>Note (optional)</label>
+      <input value={note} onChange={e=>setNote(e.target.value)} placeholder="customers visited, remarks…" style={inp}/>
+      <button onClick={submit} disabled={busy} style={{width:"100%",padding:"12px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#1a7a4a,#0a5a2a)",color:"#fff",fontWeight:700,fontSize:15,cursor:"pointer"}}>{busy?"Submitting…":"📤 Submit report"}</button>
+      {msg && <div style={{fontSize:13,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginTop:8,textAlign:"center"}}>{msg}</div>}
+      <div style={{fontSize:10,color:"#8a9a8a",marginTop:10,fontStyle:"italic"}}>These figures are field-reported and marked unverified until reconciled against orders and bank collections.</div>
+    </div>
+  );
+}
+
 function Spectrum({ onClose }) {
   // Product master (per DOZEN economics) — SP, COGS, Gross Profit, GP%
   const MASTER = [
@@ -2343,8 +2410,10 @@ function Spectrum({ onClose }) {
   const fileRef = useRef(null);
 
   // load saved
+  const [fieldReports,setFieldReports]=useState([]);
   useEffect(()=>{(async()=>{
     try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses(r.data.expenses||{}); } }catch(e){}
+    try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
   })()},[]);
   const persist = async (o=orders, e=expenses) => { try{ await sheetsAPI("savePortfolio",{key:"spectrum",data:{orders:o,expenses:e}}); }catch(err){} };
 
@@ -2472,8 +2541,20 @@ function Spectrum({ onClose }) {
               <input value={expenses[off]||""} onChange={e=>setExp(off,e.target.value)} placeholder="salary+expenses" style={{...inp,flex:1}}/>
             </div>
             <div style={{fontSize:10,marginTop:4,color:s.net>=0?"#1a7a3a":"#c33",fontWeight:600}}>
-              {s.net>=0 ? "✓ Covering their cost" : "⚠ Not yet covering cost — needs more/higher-margin orders"}
+              {s.net>=0 ? "✓ Covering their cost (verified orders)" : "⚠ Not yet covering cost — needs more/higher-margin orders"}
             </div>
+            {(() => {
+              const frs = fieldReports.filter(f => (f.officer||"").toLowerCase()===off.toLowerCase()).slice(0,3);
+              if(!frs.length) return null;
+              return <div style={{marginTop:8,paddingTop:8,borderTop:"1px dashed #d8d0e8"}}>
+                <div style={{fontSize:10,color:"#8a6a2a",fontWeight:700,marginBottom:3}}>📝 Field-reported (UNVERIFIED)</div>
+                {frs.map((f,i)=>(
+                  <div key={i} style={{fontSize:10.5,color:"#775",padding:"2px 0"}}>
+                    {f.date}: Sales ₹{f.sales||0} · Exp ₹{f.expenses||0} · Coll ₹{f.collections||0}{f.location?" · 📍":""}
+                  </div>
+                ))}
+              </div>;
+            })()}
           </div>
         );})}
       </div>}
@@ -3660,6 +3741,7 @@ function App(){
   const [navMenuOpen,setNavMenuOpen]=useState(false);
   const [showCFO,setShowCFO]=useState(false);
   const [showSpectrum,setShowSpectrum]=useState(false);
+  const [showFieldReport,setShowFieldReport]=useState(false);
   const [quickText,setQuickText]=useState("");
   const [quickOpen,setQuickOpen]=useState(false);
   const [quickBusy,setQuickBusy]=useState(false);
@@ -4118,6 +4200,7 @@ function App(){
           ].map(q=><button key={q.l} onClick={()=>{setEditE({category:q.c,taskType:q.t});setShowForm(true);}} style={{padding:"7px 10px",borderRadius:8,border:"none",background:"rgba(255,255,255,.15)",color:"#f5d890",cursor:"pointer",fontSize:16}}>{q.l}</button>)}
           <button onClick={()=>{setEditE(null);setShowForm(true);}} style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#e8a020,#c07010)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700,boxShadow:"0 4px 14px rgba(200,120,0,.35)"}}>+ New</button>
           <button onClick={()=>setQuickOpen(o=>!o)} title="Type a note in plain English and it becomes an entry" style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#7a4ac0,#5a2a9a)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>✍️ Quick Add</button>
+          <button onClick={()=>setShowFieldReport(true)} title="Submit your daily field report" style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#1a7a4a,#0a5a2a)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>📝 Field Report</button>
         </div>
       </div>
       {quickOpen&&<div style={{margin:"6px 0 10px",padding:12,borderRadius:10,border:"1.5px solid #9a6ad0",background:"rgba(120,74,192,.12)"}}>
@@ -4336,6 +4419,7 @@ function App(){
     <Modal open={showHealth} onClose={()=>setShowHealth(false)}><HealthFamilyQuick onClose={()=>setShowHealth(false)} onSaveEntry={saveEntry} mode="health" entries={entries}/></Modal>
     <Modal open={showCFO} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
     <Modal open={showSpectrum} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)}/></Modal>
+    <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
     <Modal open={showFamily} onClose={()=>setShowFamily(false)}><HealthFamilyQuick onClose={()=>setShowFamily(false)} onSaveEntry={saveEntry} mode="family"/></Modal>
     <Modal open={showPaymentReminders} onClose={()=>setShowPaymentReminders(false)} wide><PaymentReminders onClose={()=>setShowPaymentReminders(false)} entries={entries} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showTally} onClose={()=>setShowTally(false)} wide><TallyUpload onClose={()=>setShowTally(false)}/></Modal>
