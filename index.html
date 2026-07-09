@@ -2307,6 +2307,112 @@ Return ONLY valid JSON array, no markdown:
 
 
 // ── HealthFamilyQuick — natural language health/family logging ──────────
+function AvailableFunds() {
+  const [data, setData] = useState({ bankBalance:"", asOf:"", cheques:[], payments:[] });
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await sheetsAPI("getPortfolio", { key: "available_funds" });
+        if (r && r.data) setData(Object.assign({ bankBalance:"", asOf:"", cheques:[], payments:[] }, r.data));
+      } catch(e) {}
+      setLoaded(true);
+    })();
+  }, []);
+
+  const num = v => { const n = parseFloat(String(v).replace(/[^0-9.-]/g,"")); return isNaN(n)?0:n; };
+  const bank = num(data.bankBalance);
+  const unclearedTotal = (data.cheques||[]).reduce((s,c)=> s + (c.cleared?0:num(c.amount)), 0);
+  const paymentsTotal = (data.payments||[]).reduce((s,p)=> s + num(p.amount), 0);
+  const available = bank - unclearedTotal - paymentsTotal;
+
+  const save = async () => {
+    setSaving(true); setSavedMsg("");
+    try { await sheetsAPI("savePortfolio", { key: "available_funds", data }); setSavedMsg("✓ Saved"); }
+    catch(e) { setSavedMsg("Save failed"); }
+    setSaving(false);
+    setTimeout(()=>setSavedMsg(""), 2500);
+  };
+
+  const addCheque = () => setData(d => ({...d, cheques:[...(d.cheques||[]), {no:"",payee:"",amount:"",date:"",cleared:false}]}));
+  const addPayment = () => setData(d => ({...d, payments:[...(d.payments||[]), {what:"",amount:""}]}));
+  const upCheque = (i,k,v) => setData(d => { const c=[...d.cheques]; c[i]={...c[i],[k]:v}; return {...d,cheques:c}; });
+  const upPayment = (i,k,v) => setData(d => { const p=[...d.payments]; p[i]={...p[i],[k]:v}; return {...d,payments:p}; });
+  const delCheque = i => setData(d => ({...d, cheques:d.cheques.filter((_,x)=>x!==i)}));
+  const delPayment = i => setData(d => ({...d, payments:d.payments.filter((_,x)=>x!==i)}));
+
+  const fmt = n => "₹" + Math.round(n).toLocaleString("en-IN");
+  const inp = {padding:"7px 8px",borderRadius:6,border:"1px solid #cfc",fontSize:12.5,width:"100%"};
+
+  if (!loaded) return <div style={{padding:20,textAlign:"center",color:"#6a7a6a"}}>Loading…</div>;
+
+  return (
+    <div style={{ marginBottom:14 }}>
+      {/* The headline number */}
+      <div style={{ background: available>=0?"linear-gradient(135deg,#1a7a4a,#0a5a2a)":"linear-gradient(135deg,#a33,#822)", borderRadius:12, padding:"14px 16px", color:"#fff", marginBottom:12 }}>
+        <div style={{ fontSize:11, opacity:.9, letterSpacing:".05em" }}>TRUE AVAILABLE FUNDS</div>
+        <div style={{ fontSize:28, fontWeight:800, lineHeight:1.1 }}>{fmt(available)}</div>
+        <div style={{ fontSize:10.5, opacity:.85, marginTop:3 }}>
+          Bank {fmt(bank)} − Uncleared cheques {fmt(unclearedTotal)} − Payments due {fmt(paymentsTotal)}
+        </div>
+      </div>
+
+      {/* Bank balance input */}
+      <div style={{ display:"flex", gap:8, marginBottom:10, alignItems:"center" }}>
+        <label style={{ fontSize:12.5, fontWeight:700, color:"#1a5a3a", minWidth:100 }}>Bank balance</label>
+        <input value={data.bankBalance} onChange={e=>setData(d=>({...d,bankBalance:e.target.value}))} placeholder="from statement" style={inp}/>
+        <input value={data.asOf} onChange={e=>setData(d=>({...d,asOf:e.target.value}))} placeholder="as of date" style={{...inp,maxWidth:110}}/>
+      </div>
+
+      {/* Uncleared cheques */}
+      <div style={{ marginBottom:10 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
+          <span style={{ fontSize:12.5, fontWeight:700, color:"#1a5a3a" }}>Cheques issued (tick when cleared)</span>
+          <button onClick={addCheque} style={{ fontSize:11, padding:"3px 10px", borderRadius:6, border:"1px solid #1a7a4a", background:"#eafaf0", color:"#1a5a3a", cursor:"pointer" }}>+ Cheque</button>
+        </div>
+        {(data.cheques||[]).map((c,i)=>(
+          <div key={i} style={{ display:"flex", gap:5, marginBottom:5, alignItems:"center" }}>
+            <input value={c.payee} onChange={e=>upCheque(i,"payee",e.target.value)} placeholder="payee" style={{...inp,flex:2}}/>
+            <input value={c.amount} onChange={e=>upCheque(i,"amount",e.target.value)} placeholder="₹" style={{...inp,flex:1}}/>
+            <label style={{ fontSize:10.5, display:"flex", alignItems:"center", gap:3, color: c.cleared?"#1a7a3a":"#a33", whiteSpace:"nowrap" }}>
+              <input type="checkbox" checked={!!c.cleared} onChange={e=>upCheque(i,"cleared",e.target.checked)}/>{c.cleared?"cleared":"pending"}
+            </label>
+            <button onClick={()=>delCheque(i)} style={{ border:"none", background:"none", color:"#c33", cursor:"pointer", fontSize:14 }}>×</button>
+          </div>
+        ))}
+        {(!data.cheques||!data.cheques.length) && <div style={{fontSize:11,color:"#8a9a8a",fontStyle:"italic"}}>No cheques logged. Add each cheque you issue.</div>}
+      </div>
+
+      {/* Committed payments */}
+      <div style={{ marginBottom:12 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
+          <span style={{ fontSize:12.5, fontWeight:700, color:"#1a5a3a" }}>Payments committed (this week)</span>
+          <button onClick={addPayment} style={{ fontSize:11, padding:"3px 10px", borderRadius:6, border:"1px solid #1a7a4a", background:"#eafaf0", color:"#1a5a3a", cursor:"pointer" }}>+ Payment</button>
+        </div>
+        {(data.payments||[]).map((p,i)=>(
+          <div key={i} style={{ display:"flex", gap:5, marginBottom:5, alignItems:"center" }}>
+            <input value={p.what} onChange={e=>upPayment(i,"what",e.target.value)} placeholder="what for" style={{...inp,flex:2}}/>
+            <input value={p.amount} onChange={e=>upPayment(i,"amount",e.target.value)} placeholder="₹" style={{...inp,flex:1}}/>
+            <button onClick={()=>delPayment(i)} style={{ border:"none", background:"none", color:"#c33", cursor:"pointer", fontSize:14 }}>×</button>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+        <button onClick={save} disabled={saving} style={{ padding:"9px 18px", borderRadius:8, border:"none", background:"#1a7a4a", color:"#fff", fontWeight:700, cursor:"pointer", fontSize:13 }}>{saving?"Saving…":"💾 Save"}</button>
+        {savedMsg && <span style={{ fontSize:12, color:"#1a7a3a", fontWeight:600 }}>{savedMsg}</span>}
+      </div>
+      <div style={{ fontSize:10, color:"#8a9a8a", marginTop:8, fontStyle:"italic" }}>
+        Update the bank balance weekly, tick cheques as they clear. "True available" = what you can actually spend. Your data stays in your own database.
+      </div>
+      <div style={{ borderBottom:"1px solid #dde", margin:"14px 0" }}/>
+    </div>
+  );
+}
+
 function CFOBrief({ entries, onClose }) {
   const [loading, setLoading] = useState(false);
   const [brief, setBrief] = useState(null);
@@ -2381,6 +2487,8 @@ JSON.stringify(snap, null, 2)+"\n\n"+
           <div style={{ fontSize:11, color:"#6a7a6a" }}>Your finances, read like a CFO &mdash; with actions to take now</div>
         </div>
       </div>
+
+      <AvailableFunds />
 
       <div style={{ display:"flex", gap:8, marginBottom:12 }}>
         <button onClick={()=>setMode("daily")} style={{ flex:1, padding:"9px", borderRadius:8, border: mode==="daily"?"2px solid #1a7a4a":"1px solid #ccc", background: mode==="daily"?"#eafaf0":"#fff", color:"#1a5a3a", fontWeight:700, cursor:"pointer", fontSize:13 }}>Daily</button>
