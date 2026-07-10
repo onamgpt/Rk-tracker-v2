@@ -779,7 +779,7 @@ function ScanBill({onResult,onMultiResult}){
 
   const openCamera=()=>{
     const i=document.createElement("input");
-    i.type="file";i.accept="image/*";i.capture="environment";
+    i.type="file";i.accept="image/*";
     i.onchange=e=>{if(e.target.files[0])processFile(e.target.files[0]);};
     i.click();
   };
@@ -1562,7 +1562,7 @@ function EntryForm({initial,onSave,onClose,dropdowns,onAddToDropdown,saving}){
       </div>
     </div>
     <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
-        <button onClick={()=>{const i=document.createElement("input");i.type="file";i.accept="image/*";i.capture="environment";i.onchange=e=>handleFiles(e.target.files);i.click();}}
+        <button onClick={()=>{const i=document.createElement("input");i.type="file";i.accept="image/*";i.onchange=e=>handleFiles(e.target.files);i.click();}}
           style={{padding:"8px 14px",borderRadius:8,border:"none",background:"#2a7a2a",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}}>📷 Camera</button>
         <button onClick={()=>fileRef.current.click()}
           style={{padding:"8px 14px",borderRadius:8,border:"none",background:"#3a5a8a",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}}>🖼 Gallery</button>
@@ -2487,7 +2487,7 @@ function Spectrum({ onClose }) {
       {msg && <div style={{fontSize:12,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:8}}>{msg}</div>}
 
       {tab==="upload" && <div>
-        <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onPick} style={{display:"none"}}/>
+        <input ref={fileRef} type="file" accept="image/*" onChange={onPick} style={{display:"none"}}/>
         <button onClick={()=>fileRef.current&&fileRef.current.click()} style={{width:"100%",padding:"11px",borderRadius:10,border:"1.5px dashed #7a5aba",background:"#f5f0fc",color:"#4a2a8a",fontWeight:700,fontSize:14,cursor:"pointer",marginBottom:10}}>📄 Upload / snap the sales order</button>
         {photo && <div style={{textAlign:"center",marginBottom:10}}>
           <img src={photo.dataUrl} alt="order" style={{maxWidth:"100%",maxHeight:160,borderRadius:8,border:"1px solid #ddd"}}/>
@@ -2961,7 +2961,7 @@ Return ONLY valid JSON:
 
       {isHealth && (
         <div style={{ marginBottom:10 }}>
-          <input ref={photoInputRef} type="file" accept="image/*" capture="environment" onChange={onPickPhoto} style={{ display:"none" }} />
+          <input ref={photoInputRef} type="file" accept="image/*" onChange={onPickPhoto} style={{ display:"none" }} />
           <button onClick={()=>photoInputRef.current&&photoInputRef.current.click()} style={{ width:"100%", padding:"11px", borderRadius:10, border:"1.5px dashed #4a9a9a", background:"#eefafa", color:"#0a5a5a", fontWeight:700, fontSize:14, cursor:"pointer" }}>
             📷 Snap / upload a meal photo → estimate protein
           </button>
