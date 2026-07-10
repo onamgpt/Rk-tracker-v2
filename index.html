@@ -1102,9 +1102,12 @@ function LogisticsTracker({entries,onClose,onUpdateEntry,onNewSalesOrder}){
   const [selectedId,setSelectedId]=useState(null);
   const [uploading,setUploading]=useState(false);
 
-  const JUNK_PATTERNS=[/^\s*to:\s*\[/i,/^\s*from:\s*onam/i,/^\s*incomplete/i,/^\s*\[customer/i,/^\s*scanned_/i,/customer details/i,/customer name\]/i,/not specified/i,/^#trackerv23/i];
+  const JUNK_PATTERNS=[/^\s*to:\s*\[/i,/^\s*from:\s*onam/i,/^\s*incomplete/i,/^\s*\[customer/i,/^\s*scanned_/i,/customer details/i,/customer name\]/i,/not specified/i,/^#trackerv2/i];
   const isJunk=(e)=>!e.title||JUNK_PATTERNS.some(p=>p.test(e.title));
-  const shipments=entries.filter(e=>(e.category==="Sales - Payment"||e.category==="Sales - Order")&&!isJunk(e));
+  // Only genuine sales orders belong in logistics: must have a logistics tag/stage OR be an explicit Sales-Order with a monetary value.
+  const hasStage=(e)=>e.tags&&(e.tags.includes("Logistics")||LOGISTICS_STAGES.some(s=>e.tags.includes("Stage: "+s)));
+  const hasValue=(e)=>{const a=parseFloat(String(e.amount||"").replace(/[^0-9.]/g,""));return !isNaN(a)&&a>0;};
+  const shipments=entries.filter(e=>!isJunk(e) && (hasStage(e) || (e.category==="Sales - Order"&&hasValue(e))));
   const junkCount=entries.filter(e=>(e.category==="Sales - Payment"||e.category==="Sales - Order")&&isJunk(e)).length;
   const selected=shipments.find(e=>e.id===selectedId);
 
@@ -2484,6 +2487,16 @@ function Spectrum({ onClose }) {
         ))}
       </div>
 
+      {IS_OWNER && (() => {
+        const totSales = orders.reduce((s,o)=>s+(o.total||0),0);
+        const totGP = orders.reduce((s,o)=>s+(o.gpTotal||0),0);
+        const pct = totSales? Math.round(totGP/totSales*10000)/100 : 0;
+        return <div style={{background:"linear-gradient(135deg,#3a2a6a,#5a3a9a)",borderRadius:12,padding:"12px 14px",color:"#fff",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+          <div><div style={{fontSize:10,opacity:.85,letterSpacing:".05em"}}>TOTAL SALES VALUE</div><div style={{fontSize:19,fontWeight:800}}>{fmt(totSales)}</div></div>
+          <div><div style={{fontSize:10,opacity:.85,letterSpacing:".05em"}}>TOTAL PROFIT</div><div style={{fontSize:19,fontWeight:800}}>{fmt(totGP)}</div></div>
+          <div><div style={{fontSize:10,opacity:.85,letterSpacing:".05em"}}>PROFIT %</div><div style={{fontSize:19,fontWeight:800}}>{pct}%</div></div>
+        </div>;
+      })()}
       {msg && <div style={{fontSize:12,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:8}}>{msg}</div>}
 
       {tab==="upload" && <div>
@@ -3674,8 +3687,15 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
       // Detect routing tag in subject: #Prakash/#staff1-4 -> that tracker; else -> main
       const subjLower=String(email.subject||"").toLowerCase();
       let routeUser="main";
-      const routeMap={"#prakash":"prakash","#staff1":"staff1","#staff2":"staff2","#staff3":"staff3","#staff4":"staff4"};
+      const routeMap={"#prakash":"prakash","#staff1":"staff1","#staff2":"staff2","#staff3":"staff3","#staff4":"staff4",
+        "#sooraj":"sooraj","#sunil":"sunil","#biju":"biju","#murugan":"murugan","#sebi":"sebi","#sugeesh":"sugeesh","#satish":"satish","#sadasivan":"sadasivan","#vinod":"vinod"};
       for(const tag in routeMap){ if(subjLower.indexOf(tag)>-1){ routeUser=routeMap[tag]; break; } }
+      // If routed to a sales officer, mark it as a sales order for Spectrum and tag the officer
+      const SALES_OFFICERS=["sooraj","sunil","biju","murugan","sebi","sugeesh","satish","sadasivan","vinod"];
+      if(SALES_OFFICERS.indexOf(routeUser)>-1){
+        entry.category="Sales - Order";
+        entry.tags=(entry.tags||[]).concat(["Sales Order","Officer: "+routeUser.charAt(0).toUpperCase()+routeUser.slice(1)]);
+      }
       // Light copy (links only) for the database
       const dbEntry=Object.assign({},entry,{attachments:allAtts.map(a=>({name:a.name,type:a.type,data:(a.data&&String(a.data).indexOf("http")===0)?a.data:""}))});
       await sheetsAPI("save",{entry:dbEntry,user:routeUser});
