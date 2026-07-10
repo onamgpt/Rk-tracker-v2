@@ -2848,6 +2848,21 @@ JSON.stringify(snap, null, 2)+"\n\n"+
     setLoading(false);
   };
 
+  // Click-to-chat: opens WhatsApp with the reminder pre-filled (works today, uses your own WhatsApp)
+  const chatReminder = (name, entryList) => {
+    const phone = contacts[name.trim().toLowerCase()];
+    const total = entryList.reduce((s, e) => s + (parseFloat(String(e.amount).replace(/[^\d.]/g, "")) || 0), 0);
+    const isSales = payType==="sales";
+    const msg = isSales
+      ? ("Dear "+name+", this is a gentle reminder regarding a pending payment of "+fmt(total)+" against "+entryList.length+" invoice(s) with Onam Agarbathi Pvt. Ltd. Kindly arrange at your earliest. Thank you.")
+      : ("Dear "+name+", regarding our pending payable of "+fmt(total)+" ("+entryList.length+" bill(s)). We will arrange payment shortly. Thank you.");
+    const num = phone ? phone.replace(/[^\d]/g,"") : "";
+    const url = "https://wa.me/"+(num?((num.length===10?"91":"")+num):"")+"?text="+encodeURIComponent(msg);
+    window.open(url, "_blank");
+    const updated = { ...sentIds, [name]: new Date().toISOString() };
+    setSentIds(updated); localStorage.setItem("waReminderSent", JSON.stringify(updated));
+  };
+
   return (
     <div style={{ padding: 4 }}>
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
@@ -3091,6 +3106,7 @@ Return ONLY valid JSON:
 // ── PaymentReminders — dealer contact book + WhatsApp payment reminders ──
 function PaymentReminders({ onClose, entries, onSaveEntry }) {
   const [view, setView] = useState("pending"); // pending | contacts
+  const [payType, setPayType] = useState("sales"); // sales(receivable) | purchase(payable)
   const [contacts, setContacts] = useState({}); // name(lower) -> phone
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
@@ -3124,9 +3140,19 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
     e.amount && parseFloat(String(e.amount).replace(/[^\d.]/g, "")) > 0
   ).slice(0, 100);
 
-  // Group by person/vendor for cleaner display
+  // Classify each entry: SALES (they owe us) vs PURCHASE (we owe them)
+  const daysOld = (d) => { const t=Date.parse(d); return isNaN(t)?0:Math.floor((Date.now()-t)/86400000); };
+  const classify = (e) => {
+    const cat=(e.category||"").toLowerCase();
+    const tags=(e.tags||[]).join(" ").toLowerCase();
+    if(/purchase|payable|vendor bill|buy/.test(cat)||/payable/.test(tags)) return "purchase";
+    if(/sales|receiv|invoice|order/.test(cat)||/receivable|sales/.test(tags)) return "sales";
+    // default: money we asked for = sales(receivable)
+    return "sales";
+  };
+  // Group by person/vendor within the selected payType
   const grouped = {};
-  pendingEntries.forEach(e => {
+  pendingEntries.filter(e=>classify(e)===payType).forEach(e => {
     const name = e.person || e.vendor || "Unknown";
     if (!grouped[name]) grouped[name] = [];
     grouped[name].push(e);
@@ -3186,6 +3212,11 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
         )}
       </div>
 
+      {view === "pending" && <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+        <button onClick={()=>setPayType("sales")} style={{ flex:1, padding:"7px", borderRadius:8, border:payType==="sales"?"2px solid #1a7a4a":"1px solid #ccc", background:payType==="sales"?"#eafaf0":"#fff", color:"#1a5a3a", fontWeight:700, fontSize:12, cursor:"pointer" }}>📥 Sales (they owe me)</button>
+        <button onClick={()=>setPayType("purchase")} style={{ flex:1, padding:"7px", borderRadius:8, border:payType==="purchase"?"2px solid #a35a1a":"1px solid #ccc", background:payType==="purchase"?"#fdf2e8":"#fff", color:"#8a4a1a", fontWeight:700, fontSize:12, cursor:"pointer" }}>📤 Purchases (I owe)</button>
+      </div>}
+
       {statusMsg && <div style={{
         fontSize: 12, padding: "8px 12px", borderRadius: 8, marginBottom: 10,
         background: statusMsg.startsWith("❌") ? "#fff0f0" : statusMsg.startsWith("⚠️") ? "#fff8e7" : "#f0fff0",
@@ -3214,18 +3245,27 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2a" }}>{name}</div>
                     <div style={{ fontSize: 11, color: "#888" }}>{list.length} invoice(s) · {fmt(total)} pending</div>
+                    {(() => { const oldest=Math.max(...list.map(e=>daysOld(e.date))); return oldest>=60
+                      ? <div style={{ fontSize:10, color:"#fff", background:"#c33", display:"inline-block", padding:"1px 7px", borderRadius:10, marginTop:3, fontWeight:700 }}>⚠ {oldest} days overdue</div>
+                      : <div style={{ fontSize:10, color:"#888", marginTop:2 }}>{oldest} days old</div>; })()}
                     {lastSent && <div style={{ fontSize: 10, color: "#2a8a2a", marginTop: 2 }}>✅ Reminded {new Date(lastSent).toLocaleDateString("en-IN")}</div>}
                     {!hasPhone && <div style={{ fontSize: 10, color: "#c08a00", marginTop: 2 }}>⚠️ No phone number saved</div>}
                   </div>
-                  <button
-                    onClick={() => sendReminder(name, list)}
-                    disabled={loading || !hasPhone}
-                    style={{
-                      fontSize: 11, padding: "8px 14px", borderRadius: 8, border: "none",
-                      background: hasPhone ? "#1a8a4a" : "#ccc", color: "#fff", fontWeight: 700,
-                      cursor: hasPhone ? "pointer" : "not-allowed", whiteSpace: "nowrap"
-                    }}
-                  >💬 Send Reminder</button>
+                  <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                    <button
+                      onClick={() => chatReminder(name, list)}
+                      style={{ fontSize: 11, padding: "8px 14px", borderRadius: 8, border: "none",
+                        background: "#25D366", color: "#fff", fontWeight: 700, cursor:"pointer", whiteSpace: "nowrap" }}
+                    >💬 WhatsApp{hasPhone?"":" (add no.)"}</button>
+                    <button
+                      onClick={() => sendReminder(name, list)}
+                      disabled={loading || !hasPhone}
+                      title="Auto-send via WhatsApp Business API (needs Meta approval)"
+                      style={{ fontSize: 10, padding: "5px 14px", borderRadius: 8, border: "1px solid #bbb",
+                        background: "#fff", color: hasPhone?"#666":"#bbb", fontWeight: 600,
+                        cursor: hasPhone ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
+                    >⚙ Auto-send (API)</button>
+                  </div>
                 </div>
               </div>
             );
