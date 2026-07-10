@@ -2857,10 +2857,37 @@ JSON.stringify(snap, null, 2)+"\n\n"+
       ? ("Dear "+name+", this is a gentle reminder regarding a pending payment of "+fmt(total)+" against "+entryList.length+" invoice(s) with Onam Agarbathi Pvt. Ltd. Kindly arrange at your earliest. Thank you.")
       : ("Dear "+name+", regarding our pending payable of "+fmt(total)+" ("+entryList.length+" bill(s)). We will arrange payment shortly. Thank you.");
     const num = phone ? phone.replace(/[^\d]/g,"") : "";
-    const url = "https://wa.me/"+(num?((num.length===10?"91":"")+num):"")+"?text="+encodeURIComponent(msg);
-    window.open(url, "_blank");
+    if(!num){
+      // No number saved — open the Contacts tab so owner can add it, and tell them
+      setStatusMsg("No WhatsApp number saved for "+name+". Add it in the Contacts tab, then tap WhatsApp again.");
+      setView("contacts");
+      return;
+    }
+    const waNum = (num.length===10?"91":"")+num;
+    const url = "https://wa.me/"+waNum+"?text="+encodeURIComponent(msg);
+    // Use a direct location navigation fallback if window.open is blocked
+    const win = window.open(url, "_blank");
+    if(!win){ window.location.href = url; }
     const updated = { ...sentIds, [name]: new Date().toISOString() };
     setSentIds(updated); localStorage.setItem("waReminderSent", JSON.stringify(updated));
+  };
+
+  // Mark a dealer's pending items as Paid/Settled — removes them from the list
+  const [busyPaid,setBusyPaid]=useState("");
+  const markPaid = async (name, entryList) => {
+    if(!onSaveEntry) return;
+    if(!window.confirm("Mark all "+entryList.length+" pending item(s) for "+name+" as PAID/settled?")) return;
+    setBusyPaid(name);
+    try{
+      for(const e of entryList){
+        const upd=Object.assign({},e,{ paymentStatus: (payType==="sales"?"Paid":"Settled"),
+          tags:(e.tags||[]).filter(t=>t!=="Payment Due").concat([payType==="sales"?"Payment Received":"Paid Out"]) });
+        await onSaveEntry(upd);
+      }
+      setStatusMsg("✓ Marked "+entryList.length+" item(s) as "+(payType==="sales"?"paid":"settled")+" for "+name);
+    }catch(err){ setStatusMsg("Couldn't update — try again."); }
+    setBusyPaid("");
+    setTimeout(()=>setStatusMsg(""),3000);
   };
 
   return (
@@ -3265,6 +3292,13 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
                         background: "#fff", color: hasPhone?"#666":"#bbb", fontWeight: 600,
                         cursor: hasPhone ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
                     >⚙ Auto-send (API)</button>
+                    <button
+                      onClick={() => markPaid(name, list)}
+                      disabled={busyPaid===name}
+                      style={{ fontSize: 10.5, padding: "6px 14px", borderRadius: 8, border: "1px solid #1a7a4a",
+                        background: "#eafaf0", color: "#1a5a3a", fontWeight: 700,
+                        cursor: "pointer", whiteSpace: "nowrap" }}
+                    >{busyPaid===name?"…":"✓ Mark Paid"}</button>
                   </div>
                 </div>
               </div>
