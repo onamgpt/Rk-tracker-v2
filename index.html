@@ -2853,9 +2853,16 @@ JSON.stringify(snap, null, 2)+"\n\n"+
     const phone = contacts[name.trim().toLowerCase()];
     const total = entryList.reduce((s, e) => s + (parseFloat(String(e.amount).replace(/[^\d.]/g, "")) || 0), 0);
     const isSales = payType==="sales";
+    // Build itemized invoice reference lines
+    const itemLines = entryList.map(e=>{
+      const amt = fmt(parseFloat(String(e.amount).replace(/[^\d.]/g,""))||0);
+      const inv = e.orderNo || e.invoiceNo || (e.title||"").replace(/\s+/g," ").slice(0,40) || "Invoice";
+      const dt = e.date ? (" ("+e.date+")") : "";
+      return "• "+inv+dt+" — "+amt;
+    }).join("\n");
     const msg = isSales
-      ? ("Dear "+name+", this is a gentle reminder regarding a pending payment of "+fmt(total)+" against "+entryList.length+" invoice(s) with Onam Agarbathi Pvt. Ltd. Kindly arrange at your earliest. Thank you.")
-      : ("Dear "+name+", regarding our pending payable of "+fmt(total)+" ("+entryList.length+" bill(s)). We will arrange payment shortly. Thank you.");
+      ? ("Dear "+name+",\n\nThis is a gentle reminder regarding the following pending payment(s) with Onam Agarbathi Pvt. Ltd.:\n\n"+itemLines+"\n\nTotal: "+fmt(total)+"\n\nKindly arrange payment at your earliest convenience. Thank you.")
+      : ("Dear "+name+",\n\nRegarding the following pending payable(s):\n\n"+itemLines+"\n\nTotal: "+fmt(total)+"\n\nWe will arrange payment shortly. Thank you.");
     const num = phone ? phone.replace(/[^\d]/g,"") : "";
     if(!num){
       // No number saved — open the Contacts tab so owner can add it, and tell them
@@ -3160,11 +3167,22 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
     setNewPhone("");
   };
 
-  // Pending payment entries — overdue or payment due
+  // Sales officers are staff, not dealers — never show them as pending payments
+  const SALES_OFFICERS_EXCL = ["sooraj","sunil","biju","murugan","sebi","sugeesh","satish","sadasivan","vinod","prakash","staff1","staff2","staff3","staff4"];
+  const isOfficer = (e) => {
+    const nm = (e.person||e.vendor||"").trim().toLowerCase();
+    if(SALES_OFFICERS_EXCL.indexOf(nm)>-1) return true;
+    const tags=(e.tags||[]).join(" ").toLowerCase();
+    if(/field report|officer:/.test(tags)) return true;
+    if(/field report|sales - visit/i.test((e.category||"")+" "+(e.title||""))) return true;
+    return false;
+  };
+  // Pending payment entries — overdue or payment due (excluding staff/officers)
   const pendingEntries = (entries || []).filter(e =>
     (e.paymentStatus === "Payment Pending" || e.paymentStatus === "Asked Payment" ||
      e.paymentStatus === "Overdue" || (e.tags || []).includes("Payment Due")) &&
-    e.amount && parseFloat(String(e.amount).replace(/[^\d.]/g, "")) > 0
+    e.amount && parseFloat(String(e.amount).replace(/[^\d.]/g, "")) > 0 &&
+    !isOfficer(e)
   ).slice(0, 100);
 
   // Classify each entry: SALES (they owe us) vs PURCHASE (we owe them)
