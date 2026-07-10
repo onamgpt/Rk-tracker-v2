@@ -2864,15 +2864,12 @@ JSON.stringify(snap, null, 2)+"\n\n"+
       ? ("Dear "+name+",\n\nThis is a gentle reminder regarding the following pending payment(s) with Onam Agarbathi Pvt. Ltd.:\n\n"+itemLines+"\n\nTotal: "+fmt(total)+"\n\nKindly arrange payment at your earliest convenience. Thank you.")
       : ("Dear "+name+",\n\nRegarding the following pending payable(s):\n\n"+itemLines+"\n\nTotal: "+fmt(total)+"\n\nWe will arrange payment shortly. Thank you.");
     const num = phone ? phone.replace(/[^\d]/g,"") : "";
-    if(!num){
-      // No number saved — open the Contacts tab so owner can add it, and tell them
-      setStatusMsg("No WhatsApp number saved for "+name+". Add it in the Contacts tab, then tap WhatsApp again.");
-      setView("contacts");
-      return;
-    }
-    const waNum = (num.length===10?"91":"")+num;
-    const url = "https://wa.me/"+waNum+"?text="+encodeURIComponent(msg);
-    // Use a direct location navigation fallback if window.open is blocked
+    const waNum = num ? ((num.length===10?"91":"")+num) : "";
+    // If a number is saved, go straight to that chat; otherwise open WhatsApp with the message
+    // pre-filled so you can PICK the contact yourself (your preferred flow).
+    const url = waNum
+      ? ("https://wa.me/"+waNum+"?text="+encodeURIComponent(msg))
+      : ("https://api.whatsapp.com/send?text="+encodeURIComponent(msg));
     const win = window.open(url, "_blank");
     if(!win){ window.location.href = url; }
     const updated = { ...sentIds, [name]: new Date().toISOString() };
@@ -3156,13 +3153,16 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
       const saved = JSON.parse(localStorage.getItem("dealerContacts") || "{}");
       setContacts(saved);
     } catch(e) {}
+    // durable load from Supabase (overrides cache if present)
+    (async()=>{ try{ const r=await sheetsAPI("getPortfolio",{key:"dealer_contacts",user:"main"}); if(r&&r.data&&typeof r.data==="object"){ setContacts(r.data); localStorage.setItem("dealerContacts", JSON.stringify(r.data)); } }catch(e){} })();
   }, []);
 
-  const saveContact = (name, phone) => {
+  const saveContact = async (name, phone) => {
     const key = name.trim().toLowerCase();
     const updated = { ...contacts, [key]: phone.replace(/[^\d]/g, "") };
     setContacts(updated);
-    localStorage.setItem("dealerContacts", JSON.stringify(updated));
+    localStorage.setItem("dealerContacts", JSON.stringify(updated));   // fast cache
+    try{ await sheetsAPI("savePortfolio",{key:"dealer_contacts",user:"main",data:updated}); }catch(e){}  // durable
     setEditingContact(null);
     setNewPhone("");
   };
@@ -3301,7 +3301,7 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
                       onClick={() => chatReminder(name, list)}
                       style={{ fontSize: 11, padding: "8px 14px", borderRadius: 8, border: "none",
                         background: "#25D366", color: "#fff", fontWeight: 700, cursor:"pointer", whiteSpace: "nowrap" }}
-                    >💬 WhatsApp{hasPhone?"":" (add no.)"}</button>
+                    >💬 WhatsApp</button>
                     <button
                       onClick={() => sendReminder(name, list)}
                       disabled={loading || !hasPhone}
