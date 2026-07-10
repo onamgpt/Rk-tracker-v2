@@ -3869,6 +3869,113 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
   </div>;
 }
 
+function PinManager({ onClose }){
+  const USERS=["main","prakash","sooraj","sunil","biju","murugan","sebi","sugeesh","satish","sadasivan","vinod","staff1","staff2","staff3","staff4"];
+  const [pins,setPins]=useState({});
+  const [drafts,setDrafts]=useState({});
+  const [msg,setMsg]=useState("");
+  const [loaded,setLoaded]=useState(false);
+
+  useEffect(()=>{(async()=>{
+    try{ const r=await sheetsAPI("getPortfolio",{key:"user_pins",user:"main"}); if(r&&r.data) setPins(r.data); }catch(e){}
+    setLoaded(true);
+  })()},[]);
+
+  const setPin=async(user)=>{
+    const d=(drafts[user]||"").trim();
+    if(d && !/^[0-9]{4,8}$/.test(d)){ setMsg("PIN must be 4–8 digits"); return; }
+    const np={...pins};
+    if(d==="") delete np[user]; else np[user]=await _pinHash(d);
+    setPins(np); setDrafts({...drafts,[user]:""});
+    try{ await sheetsAPI("savePortfolio",{key:"user_pins",user:"main",data:np}); setMsg(d===""?("Removed PIN for "+user):("✓ PIN set for "+user)); }
+    catch(e){ setMsg("Save failed"); }
+    // If I changed my own PIN, clear this device's remembered unlock so it re-checks next time
+    setTimeout(()=>setMsg(""),2500);
+  };
+
+  const inp={flex:1,padding:"8px",borderRadius:6,border:"1px solid #ccd",fontSize:13};
+  if(!IS_OWNER) return <div style={{padding:20,textAlign:"center",color:"#889"}}>Only the owner can manage PINs.</div>;
+  return (
+    <div style={{padding:4}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+        <span style={{fontSize:24}}>🔒</span>
+        <div><h2 style={{margin:0,fontSize:17,color:"#1a3a2a"}}>PIN Access</h2>
+        <div style={{fontSize:11,color:"#6a7a6a"}}>Set a PIN for each person. Blank = no PIN (open access).</div></div>
+      </div>
+      {msg && <div style={{fontSize:12,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:8}}>{msg}</div>}
+      {!loaded && <div style={{color:"#889",fontSize:12}}>Loading…</div>}
+      {loaded && USERS.map(u=>(
+        <div key={u} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid #eee"}}>
+          <span style={{width:80,fontSize:13,fontWeight:600,color:"#333"}}>{u.charAt(0).toUpperCase()+u.slice(1)}</span>
+          <span style={{fontSize:11,color:pins[u]?"#1a7a3a":"#aaa",width:60}}>{pins[u]?"● set":"— none"}</span>
+          <input value={drafts[u]||""} onChange={e=>setDrafts({...drafts,[u]:e.target.value.replace(/[^0-9]/g,"")})} type="password" inputMode="numeric" placeholder="new PIN" style={inp}/>
+          <button onClick={()=>setPin(u)} style={{padding:"7px 12px",borderRadius:6,border:"none",background:"#1a7a4a",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>Set</button>
+        </div>
+      ))}
+      <div style={{fontSize:10,color:"#8a9a8a",marginTop:10,fontStyle:"italic"}}>
+        To remove a PIN, clear the box and press Set. Each person enters their PIN once per device. If a device was already unlocked, changing a PIN takes effect next time they open on a new device or after clearing site data.
+      </div>
+    </div>
+  );
+}
+
+async function _pinHash(pin){
+  try{
+    const enc=new TextEncoder().encode("rkpin:"+pin);
+    const buf=await crypto.subtle.digest("SHA-256", enc);
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+  }catch(e){ return "plain:"+pin; }  // fallback (older browsers)
+}
+
+function PinGate({ children }){
+  const me=(typeof URL_USER!=="undefined"?URL_USER:"main");
+  const DEVICE_KEY="rkpin_ok_"+me;
+  const [state,setState]=useState("checking"); // checking | locked | open | setup
+  const [pins,setPins]=useState({});           // user -> hash
+  const [entry,setEntry]=useState("");
+  const [err,setErr]=useState("");
+
+  useEffect(()=>{(async()=>{
+    // Never lock out on error — fail OPEN
+    try{
+      // already unlocked on this device?
+      if(localStorage.getItem(DEVICE_KEY)==="1"){ setState("open"); return; }
+      const r=await sheetsAPI("getPortfolio",{key:"user_pins",user:"main"});
+      const map=(r&&r.data)||{};
+      setPins(map);
+      if(!map[me]){ setState("open"); }   // no PIN set for this user yet -> allow
+      else setState("locked");
+    }catch(e){ setState("open"); }        // any failure -> allow (do not lock owner out)
+  })()},[]);
+
+  const submit=async()=>{
+    setErr("");
+    const h=await _pinHash(entry.trim());
+    if(h===pins[me]){ localStorage.setItem(DEVICE_KEY,"1"); setState("open"); }
+    else setErr("Wrong PIN. Try again.");
+  };
+
+  if(state==="checking") return <div style={{padding:40,textAlign:"center",color:"#889",fontFamily:"system-ui"}}>…</div>;
+  if(state==="open") return children;
+
+  // locked screen
+  return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(160deg,#1a3a2a,#0a2a1a)",fontFamily:"system-ui",padding:20}}>
+      <div style={{background:"#fff",borderRadius:16,padding:"28px 24px",maxWidth:320,width:"100%",boxShadow:"0 10px 40px rgba(0,0,0,.3)",textAlign:"center"}}>
+        <div style={{fontSize:34,marginBottom:6}}>🔒</div>
+        <div style={{fontSize:18,fontWeight:700,color:"#1a3a2a"}}>RK Tracker</div>
+        <div style={{fontSize:12,color:"#889",marginBottom:18}}>Enter your PIN — {me.charAt(0).toUpperCase()+me.slice(1)}</div>
+        <input value={entry} onChange={e=>setEntry(e.target.value.replace(/[^0-9]/g,""))} onKeyDown={e=>{if(e.key==="Enter")submit();}}
+          type="password" inputMode="numeric" autoFocus placeholder="••••"
+          style={{width:"100%",padding:"14px",fontSize:22,textAlign:"center",letterSpacing:"8px",borderRadius:10,border:"2px solid #cfe0cf",marginBottom:12}}/>
+        {err && <div style={{color:"#c33",fontSize:12,marginBottom:10}}>{err}</div>}
+        <button onClick={submit} style={{width:"100%",padding:"13px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#1a7a4a,#0a5a2a)",color:"#fff",fontWeight:700,fontSize:15,cursor:"pointer"}}>Unlock</button>
+        <div style={{fontSize:10,color:"#aab",marginTop:12}}>Entered once per device.</div>
+      </div>
+    </div>
+  );
+}
+
 function App(){
   if(IS_VIEW_MODE) return<ShareableView/>;
 
@@ -3886,6 +3993,7 @@ function App(){
   const [showCFO,setShowCFO]=useState(false);
   const [showSpectrum,setShowSpectrum]=useState(false);
   const [showFieldReport,setShowFieldReport]=useState(false);
+  const [showPins,setShowPins]=useState(false);
   const [quickText,setQuickText]=useState("");
   const [quickOpen,setQuickOpen]=useState(false);
   const [quickBusy,setQuickBusy]=useState(false);
@@ -4301,6 +4409,7 @@ function App(){
               {[
                 {l:"📈 CFO Brief",fn:()=>setShowCFO(true)},
                 {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true)},
+                {l:"🔒 PIN Access",fn:()=>setShowPins(true)},
                 {l:"📊 Tally",fn:()=>setShowTally(true)},
                 {l:"📍 Location",fn:()=>setShowLocation(true)},
                 {l:"📒 Day Book",fn:()=>setShowDayBook(true)},
@@ -4564,6 +4673,7 @@ function App(){
     <Modal open={showCFO} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
     <Modal open={showSpectrum} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
+    <Modal open={showPins} onClose={()=>setShowPins(false)}><PinManager onClose={()=>setShowPins(false)}/></Modal>
     <Modal open={showFamily} onClose={()=>setShowFamily(false)}><HealthFamilyQuick onClose={()=>setShowFamily(false)} onSaveEntry={saveEntry} mode="family"/></Modal>
     <Modal open={showPaymentReminders} onClose={()=>setShowPaymentReminders(false)} wide><PaymentReminders onClose={()=>setShowPaymentReminders(false)} entries={entries} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showTally} onClose={()=>setShowTally(false)} wide><TallyUpload onClose={()=>setShowTally(false)}/></Modal>
@@ -4573,7 +4683,7 @@ function App(){
   </div>;
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+ReactDOM.createRoot(document.getElementById("root")).render(<PinGate><App/></PinGate>);
 </script>
 </body>
 </html>
