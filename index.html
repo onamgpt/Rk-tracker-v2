@@ -59,6 +59,7 @@ const SCRIPT_URL="https://script.google.com/macros/s/AKfycbwdvYUZYIGLy2Pf0_7-Dv0
 const BOT_TOKEN="8852628858:AAHAZ3ZjosHPrEC0OU8fDnRXBNcKnwO2gus";
 const OWNER_CHAT_ID="8632288596";
 const URL_USER=new URLSearchParams(window.location.search).get("user")||"main";
+const IS_OWNER=(URL_USER==="main");  // only the owner sees profit/margin figures
 const FAMILY_USERS=["wife","daughter"];
 const SALES_USERS=["satish","sebi","sugeesh","sunil","biju","sadasivan","sooraj","murugan"];
 const IS_FAMILY=FAMILY_USERS.includes(URL_USER);
@@ -2314,18 +2315,9 @@ function FieldReport({ onClose }) {
   const [expenses,setExpenses]=useState("");
   const [collections,setCollections]=useState("");
   const [note,setNote]=useState("");
-  const [loc,setLoc]=useState("");
   const [busy,setBusy]=useState(false);
   const [msg,setMsg]=useState("");
-
-  const grabLocation=()=>{
-    if(!navigator.geolocation){ setLoc("(location unavailable)"); return; }
-    setMsg("📍 Getting location…");
-    navigator.geolocation.getCurrentPosition(
-      p=>{ setLoc(p.coords.latitude.toFixed(5)+","+p.coords.longitude.toFixed(5)); setMsg(""); },
-      ()=>{ setLoc("(denied)"); setMsg(""); }, {enableHighAccuracy:true,timeout:8000});
-  };
-  useEffect(()=>{ grabLocation(); },[]);
+  const loc="";  // location tracking removed at team's request
 
   const submit=async()=>{
     setBusy(true); setMsg("");
@@ -2339,7 +2331,7 @@ function FieldReport({ onClose }) {
       // also log a normal entry in the person's own tracker for their record
       const entry={ id:genId(), title:"Field report — "+officerName, date:rpt.date,
         category:"Sales - Visit", person:officerName,
-        notes:"Sales ₹"+(sales||0)+" | Expenses ₹"+(expenses||0)+" | Collections ₹"+(collections||0)+(loc?(" | Loc: "+loc):"")+(note?(" | "+note):"")+" [field-reported, unverified]",
+        notes:"Sales ₹"+(sales||0)+" | Expenses ₹"+(expenses||0)+" | Collections ₹"+(collections||0)+(note?(" | "+note):"")+" [field-reported, unverified]",
         amount:sales||"", tags:["Field Report"], createdAt:new Date().toISOString() };
       try{ if(typeof saveEntry==="function") await saveEntry(entry); }catch(e){}
       setMsg("✓ Report submitted"); setSales("");setExpenses("");setCollections("");setNote("");
@@ -2355,9 +2347,6 @@ function FieldReport({ onClose }) {
         <span style={{fontSize:26}}>📝</span>
         <div><h2 style={{margin:0,fontSize:18,color:"#1a5a3a"}}>Daily Field Report</h2>
         <div style={{fontSize:11,color:"#6a7a6a"}}>{officerName} · {new Date().toLocaleDateString()}</div></div>
-      </div>
-      <div style={{fontSize:12,color:"#4a6a4a",background:"#eef7ee",border:"1px solid #cfe0cf",borderRadius:8,padding:"7px 10px",marginBottom:12}}>
-        📍 {loc||"locating…"} <button onClick={grabLocation} style={{marginLeft:6,fontSize:11,border:"none",background:"none",color:"#1a7a4a",cursor:"pointer",textDecoration:"underline"}}>refresh</button>
       </div>
       <label style={{fontSize:12,fontWeight:700,color:"#1a5a3a"}}>Sales today (₹)</label>
       <input type="number" value={sales} onChange={e=>setSales(e.target.value)} placeholder="amount sold" style={inp}/>
@@ -2376,7 +2365,7 @@ function FieldReport({ onClose }) {
 
 function Spectrum({ onClose }) {
   // Product master (per DOZEN economics) — SP, COGS, Gross Profit, GP%
-  const MASTER = [
+  const DEFAULT_MASTER = [
     {sku:"ONAONA002380", name:"Onam Vaishak 100 gms", sp:377.16, cogs:222, gp:155.16, gpp:41.14},
     {sku:"ONAONA002382", name:"Onam Black Gem 100 gms", sp:377.16, cogs:221, gp:156.16, gpp:41.40},
     {sku:"ONAONA002384", name:"Onam Mysore Royal Sandal 115 gms", sp:445.68, cogs:242, gp:203.68, gpp:45.70},
@@ -2397,6 +2386,8 @@ function Spectrum({ onClose }) {
     {sku:"UPDATE_50DC", name:"Onam 50 gms Dhoop Cones", sp:320.04, cogs:146, gp:174.04, gpp:54.38},
     {sku:"ONAONA002379", name:"Onam Chandan 50 gms Cones", sp:320.04, cogs:146, gp:174.04, gpp:54.38},
   ];
+  const [master, setMaster] = useState(DEFAULT_MASTER);
+  const [editingProducts, setEditingProducts] = useState(false);
   const OFFICERS = ["Sooraj","Sunil","Biju","Murugan","Sebi","Sugeesh","Satish","Sadasivan","Vinod"];
 
   const [tab, setTab] = useState("upload"); // upload | officers | products
@@ -2414,12 +2405,17 @@ function Spectrum({ onClose }) {
   useEffect(()=>{(async()=>{
     try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses(r.data.expenses||{}); } }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
+    try{ const pm=await sheetsAPI("getPortfolio",{key:"spectrum_master",user:"main"}); if(pm&&pm.data&&Array.isArray(pm.data)&&pm.data.length) setMaster(pm.data); }catch(e){}
   })()},[]);
+  const persistMaster = async (m) => { setMaster(m); try{ await sheetsAPI("savePortfolio",{key:"spectrum_master",user:"main",data:m}); }catch(e){} };
+  const addProduct = () => persistMaster([...master, {sku:"",name:"New product",sp:0,cogs:0,gp:0,gpp:0}]);
+  const updProduct = (idx,field,val) => { const m=master.map((p,i)=>{ if(i!==idx) return p; const np={...p,[field]: (field==="name"||field==="sku")? val : (parseFloat(val)||0)}; np.gp=Math.round((np.sp-np.cogs)*100)/100; np.gpp=np.sp? Math.round(np.gp/np.sp*10000)/100 : 0; return np; }); persistMaster(m); };
+  const delProduct = (idx) => persistMaster(master.filter((_,i)=>i!==idx));
   const persist = async (o=orders, e=expenses) => { try{ await sheetsAPI("savePortfolio",{key:"spectrum",data:{orders:o,expenses:e}}); }catch(err){} };
 
   const fmt = n => "₹"+Math.round(n).toLocaleString("en-IN");
-  function matchSku(s){ const t=String(s||"").toUpperCase().replace(/\s/g,""); return MASTER.find(m=>m.sku.toUpperCase()===t) || MASTER.find(m=>t && m.sku.toUpperCase().indexOf(t.slice(-6))>-1); }
-  function matchName(nm){ const t=String(nm||"").toLowerCase(); let best=null,bs=0; MASTER.forEach(m=>{const a=m.name.toLowerCase();let sc=0;t.split(/\s+/).forEach(w=>{if(w.length>2&&a.indexOf(w)>-1)sc++;});if(sc>bs){bs=sc;best=m;}}); return bs>=2?best:null; }
+  function matchSku(s){ const t=String(s||"").toUpperCase().replace(/\s/g,""); return master.find(m=>m.sku.toUpperCase()===t) || master.find(m=>t && m.sku.toUpperCase().indexOf(t.slice(-6))>-1); }
+  function matchName(nm){ const t=String(nm||"").toLowerCase(); let best=null,bs=0; master.forEach(m=>{const a=m.name.toLowerCase();let sc=0;t.split(/\s+/).forEach(w=>{if(w.length>2&&a.indexOf(w)>-1)sc++;});if(sc>bs){bs=sc;best=m;}}); return bs>=2?best:null; }
 
   const onPick = ev => { const f=ev.target.files&&ev.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>setPhoto({dataUrl:r.result,type:f.type||"image/jpeg"}); r.readAsDataURL(f); };
 
@@ -2527,7 +2523,8 @@ function Spectrum({ onClose }) {
         ))}
       </div>}
 
-      {tab==="officers" && <div>
+      {tab==="officers" && !IS_OWNER && <div style={{fontSize:12,color:"#777",background:"#f6f6f9",borderRadius:8,padding:14,textAlign:"center"}}>Officer performance is visible to management only.</div>}
+      {tab==="officers" && IS_OWNER && <div>
         <div style={{fontSize:11,color:"#777",marginBottom:8}}>Enter each salesperson's monthly expense/salary. Net = Gross Profit from their tagged orders − their cost.</div>
         {OFFICERS.map(off=>{ const s=officerStats(off); return (
           <div key={off} style={{border:"1px solid #e5e0f0",borderRadius:10,padding:10,marginBottom:8,background:s.net>=0?"#f5fbf5":"#fdf3f3"}}>
@@ -2560,20 +2557,54 @@ function Spectrum({ onClose }) {
       </div>}
 
       {tab==="products" && <div>
-        <div style={{fontSize:11,color:"#777",marginBottom:8}}>Which products are actually moving through this channel, and the profit they generate.</div>
-        {productStats().length===0 && <div style={{fontSize:11,color:"#999",fontStyle:"italic"}}>No orders tagged yet.</div>}
-        {productStats().map((p,i)=>(
-          <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"6px 4px",borderBottom:"1px solid #eee"}}>
-            <span>{p.name} <span style={{color:"#999"}}>({Math.round(p.doz)} doz)</span></span>
-            <span style={{fontWeight:700,color:"#1a7a3a"}}>{fmt(p.gp)}</span>
+        {!IS_OWNER && <div style={{fontSize:12,color:"#777",background:"#f6f6f9",borderRadius:8,padding:10}}>
+          Product list. Volume moving through the channel:
+          {productStats().length===0 && <div style={{fontSize:11,color:"#999",fontStyle:"italic",marginTop:6}}>No orders tagged yet.</div>}
+          {productStats().map((p,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"5px 2px",borderBottom:"1px solid #eee"}}>
+              <span>{p.name}</span><span style={{color:"#999"}}>{Math.round(p.doz)} doz</span>
+            </div>
+          ))}
+        </div>}
+
+        {IS_OWNER && <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <span style={{fontSize:12,color:"#777"}}>Products moving through channel + profit</span>
+            <button onClick={()=>setEditingProducts(v=>!v)} style={{fontSize:11,padding:"4px 12px",borderRadius:6,border:"1px solid #5a3a9a",background:editingProducts?"#5a3a9a":"#f0eafa",color:editingProducts?"#fff":"#3a2a6a",cursor:"pointer",fontWeight:700}}>{editingProducts?"✓ Done":"✎ Edit products"}</button>
           </div>
-        ))}
-        <div style={{marginTop:12,fontSize:11,fontWeight:700,color:"#3a2a6a"}}>Reference: profit per dozen (top earners)</div>
-        {MASTER.slice().sort((a,b)=>b.gp-a.gp).slice(0,6).map((m,i)=>(
-          <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"3px 4px",color:"#555"}}>
-            <span>{m.name}</span><span>{fmt(m.gp)}/doz · {m.gpp}%</span>
-          </div>
-        ))}
+
+          {!editingProducts && <div>
+            {productStats().map((p,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"6px 4px",borderBottom:"1px solid #eee"}}>
+                <span>{p.name} <span style={{color:"#999"}}>({Math.round(p.doz)} doz)</span></span>
+                <span style={{fontWeight:700,color:"#1a7a3a"}}>{fmt(p.gp)}</span>
+              </div>
+            ))}
+            <div style={{marginTop:12,fontSize:11,fontWeight:700,color:"#3a2a6a"}}>Profit per dozen (top earners)</div>
+            {master.slice().sort((a,b)=>b.gp-a.gp).slice(0,8).map((m,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"3px 4px",color:"#555"}}>
+                <span>{m.name}</span><span>{fmt(m.gp)}/doz · {m.gpp}%</span>
+              </div>
+            ))}
+          </div>}
+
+          {editingProducts && <div>
+            <div style={{fontSize:10.5,color:"#888",marginBottom:8,fontStyle:"italic"}}>Add/edit products, SKU, SP & COGS per dozen. Gross profit auto-calculates. Costs change often — keep this current.</div>
+            {master.map((m,idx)=>(
+              <div key={idx} style={{border:"1px solid #e5e0f0",borderRadius:8,padding:8,marginBottom:8}}>
+                <input value={m.name} onChange={e=>updProduct(idx,"name",e.target.value)} placeholder="product name" style={{width:"100%",padding:"6px",borderRadius:6,border:"1px solid #ccd",fontSize:12.5,marginBottom:5,fontWeight:600}}/>
+                <div style={{display:"flex",gap:5}}>
+                  <input value={m.sku} onChange={e=>updProduct(idx,"sku",e.target.value)} placeholder="SKU (ONAONA…)" style={{flex:2,padding:"6px",borderRadius:6,border:"1px solid #ccd",fontSize:11}}/>
+                  <input value={m.sp} onChange={e=>updProduct(idx,"sp",e.target.value)} placeholder="SP/doz" type="number" style={{flex:1,padding:"6px",borderRadius:6,border:"1px solid #ccd",fontSize:11}}/>
+                  <input value={m.cogs} onChange={e=>updProduct(idx,"cogs",e.target.value)} placeholder="COGS/doz" type="number" style={{flex:1,padding:"6px",borderRadius:6,border:"1px solid #ccd",fontSize:11}}/>
+                  <button onClick={()=>delProduct(idx)} style={{border:"none",background:"none",color:"#c33",cursor:"pointer",fontSize:16,padding:"0 4px"}}>×</button>
+                </div>
+                <div style={{fontSize:10.5,color:"#1a7a3a",marginTop:4}}>GP: {fmt(m.gp)}/doz · {m.gpp}%</div>
+              </div>
+            ))}
+            <button onClick={addProduct} style={{width:"100%",padding:"9px",borderRadius:8,border:"1.5px dashed #5a3a9a",background:"#f5f0fc",color:"#4a2a8a",fontWeight:700,cursor:"pointer",fontSize:13}}>+ Add product</button>
+          </div>}
+        </div>}
       </div>}
 
       <div style={{fontSize:10,color:"#999",marginTop:12,fontStyle:"italic"}}>
