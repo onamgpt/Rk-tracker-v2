@@ -2880,7 +2880,6 @@ JSON.stringify(snap, null, 2)+"\n\n"+
   };
 
   // Mark a dealer's pending items as Paid/Settled — removes them from the list
-  const [busyPaid,setBusyPaid]=useState("");
   const markPaid = async (name, entryList) => {
     if(!onSaveEntry) return;
     if(!window.confirm("Mark all "+entryList.length+" pending item(s) for "+name+" as PAID/settled?")) return;
@@ -3141,6 +3140,7 @@ Return ONLY valid JSON:
 function PaymentReminders({ onClose, entries, onSaveEntry }) {
   const [view, setView] = useState("pending"); // pending | contacts
   const [payType, setPayType] = useState("sales"); // sales(receivable) | purchase(payable)
+  const [busyPaid,setBusyPaid]=useState("");
   const [contacts, setContacts] = useState({}); // name(lower) -> phone
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
