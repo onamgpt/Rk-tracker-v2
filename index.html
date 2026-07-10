@@ -2366,7 +2366,7 @@ function FieldReport({ onClose }) {
   );
 }
 
-function Spectrum({ onClose }) {
+function Spectrum({ onClose, onSaveEntry }) {
   // Product master (per DOZEN economics) — SP, COGS, Gross Profit, GP%
   const DEFAULT_MASTER = [
     {sku:"ONAONA002380", name:"Onam Vaishak 100 gms", sp:377.16, cogs:222, gp:155.16, gpp:41.14},
@@ -2405,6 +2405,8 @@ function Spectrum({ onClose }) {
 
   // load saved
   const [fieldReports,setFieldReports]=useState([]);
+  const [ordSearch,setOrdSearch]=useState("");
+  const [ordOfficer,setOrdOfficer]=useState("");
   useEffect(()=>{(async()=>{
     try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses(r.data.expenses||{}); } }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
@@ -2450,6 +2452,21 @@ function Spectrum({ onClose }) {
     const o={ id:"ord_"+Date.now(), date:pending.date, customer:pending.customer, orderNo:pending.orderNo, officer:tagOfficer, total:pending.grandTotal, gpTotal:pending.gpTotal, lines:pending.lines };
     const no=[o,...orders]; setOrders(no); setPending(null); setPhoto(null); setTagOfficer(""); setMsg("✓ Order tagged to "+tagOfficer);
     await persist(no, expenses);
+    // Also log into the main tracker (owner's record) so orders are searchable and never lost at volume
+    try{
+      if(onSaveEntry){
+        const itemsTxt=(o.lines||[]).map(l=>l.name+(l.doz?(" ("+l.doz+" doz)"):"")).join(", ");
+        const entry={ id:(typeof genId==="function"?genId():"sp_"+Date.now()),
+          title:"Sales Order — "+(o.customer||"Customer")+" · "+o.officer,
+          date:o.date, category:"Sales - Order", person:o.officer,
+          vendor:o.customer||"", amount:String(o.total||""),
+          paymentStatus:"", 
+          notes:"Spectrum order"+(o.orderNo?(" #"+o.orderNo):"")+" · Officer: "+o.officer+" · Value ₹"+(o.total||0)+" · Gross Profit ₹"+(o.gpTotal||0)+" · Items: "+itemsTxt,
+          tags:["Sales Order","Spectrum","Officer: "+o.officer],
+          spectrumId:o.id, createdAt:new Date().toISOString() };
+        await onSaveEntry(entry);
+      }
+    }catch(e){}
     setTimeout(()=>setMsg(""),2500);
   };
   const delOrder = async id => { const no=orders.filter(o=>o.id!==id); setOrders(no); await persist(no,expenses); };
@@ -2482,7 +2499,7 @@ function Spectrum({ onClose }) {
       </div>
 
       <div style={{display:"flex",gap:6,marginBottom:12}}>
-        {[["upload","📤 Upload Order"],["officers","👥 Officers"],["products","📦 Products"]].map(([k,l])=>(
+        {[["upload","📤 Upload"],["orders","📋 Orders"],["officers","👥 Officers"],["products","📦 Products"]].map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"8px",borderRadius:8,border:tab===k?"2px solid #5a3a9a":"1px solid #ccc",background:tab===k?"#f0eafa":"#fff",color:"#3a2a6a",fontWeight:700,cursor:"pointer",fontSize:12}}>{l}</button>
         ))}
       </div>
@@ -2534,6 +2551,38 @@ function Spectrum({ onClose }) {
             <span>{fmt(o.gpTotal)} GP <button onClick={()=>delOrder(o.id)} style={{border:"none",background:"none",color:"#c33",cursor:"pointer"}}>×</button></span>
           </div>
         ))}
+      </div>}
+
+      {tab==="orders" && <div>
+        <div style={{display:"flex",gap:6,marginBottom:8}}>
+          <input value={ordSearch} onChange={e=>setOrdSearch(e.target.value)} placeholder="Search customer / order no…" style={{flex:2,padding:"7px 8px",borderRadius:6,border:"1px solid #ccd",fontSize:12.5}}/>
+          <select value={ordOfficer} onChange={e=>setOrdOfficer(e.target.value)} style={{flex:1,padding:"7px",borderRadius:6,border:"1px solid #ccd",fontSize:12}}>
+            <option value="">All officers</option>
+            {OFFICERS.map(o=><option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+        {(() => {
+          let list=orders.slice();
+          if(ordOfficer) list=list.filter(o=>o.officer===ordOfficer);
+          if(ordSearch){ const q=ordSearch.toLowerCase(); list=list.filter(o=>((o.customer||"")+" "+(o.orderNo||"")+" "+(o.officer||"")).toLowerCase().indexOf(q)>-1); }
+          if(!list.length) return <div style={{fontSize:12,color:"#999",fontStyle:"italic",padding:12,textAlign:"center"}}>No matching orders.</div>;
+          return <div style={{maxHeight:"58vh",overflowY:"auto"}}>
+            <div style={{fontSize:11,color:"#777",marginBottom:6}}>{list.length} order{list.length===1?"":"s"}{IS_OWNER?(" · GP "+fmt(list.reduce((s,o)=>s+(o.gpTotal||0),0))):""}</div>
+            {list.map(o=>(
+              <div key={o.id} style={{border:"1px solid #eee",borderRadius:8,padding:"8px 10px",marginBottom:6}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontWeight:700,color:"#3a2a6a",fontSize:13}}>{o.customer||"Customer"}</span>
+                  <span style={{fontSize:11,color:"#777"}}>{o.date}</span>
+                </div>
+                <div style={{fontSize:11.5,color:"#555",marginTop:2}}>
+                  <b style={{color:"#5a3a9a"}}>{o.officer}</b>{o.orderNo?(" · #"+o.orderNo):""} · Value {fmt(o.total||0)}{IS_OWNER?(" · GP "+fmt(o.gpTotal||0)):""}
+                </div>
+                <div style={{fontSize:10.5,color:"#888",marginTop:3}}>{(o.lines||[]).map(l=>l.name+(l.doz?(" "+l.doz+"dz"):"")).join(", ")}</div>
+                <button onClick={()=>delOrder(o.id)} style={{marginTop:4,fontSize:10.5,border:"none",background:"none",color:"#c33",cursor:"pointer",padding:0}}>Delete</button>
+              </div>
+            ))}
+          </div>;
+        })()}
       </div>}
 
       {tab==="officers" && !IS_OWNER && <div style={{fontSize:12,color:"#777",background:"#f6f6f9",borderRadius:8,padding:14,textAlign:"center"}}>Officer performance is visible to management only.</div>}
@@ -4473,7 +4522,7 @@ function App(){
     <Modal open={showDayBook} onClose={()=>setShowDayBook(false)} wide><DayBook onClose={()=>setShowDayBook(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showHealth} onClose={()=>setShowHealth(false)}><HealthFamilyQuick onClose={()=>setShowHealth(false)} onSaveEntry={saveEntry} mode="health" entries={entries}/></Modal>
     <Modal open={showCFO} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
-    <Modal open={showSpectrum} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)}/></Modal>
+    <Modal open={showSpectrum} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
     <Modal open={showFamily} onClose={()=>setShowFamily(false)}><HealthFamilyQuick onClose={()=>setShowFamily(false)} onSaveEntry={saveEntry} mode="family"/></Modal>
     <Modal open={showPaymentReminders} onClose={()=>setShowPaymentReminders(false)} wide><PaymentReminders onClose={()=>setShowPaymentReminders(false)} entries={entries} onSaveEntry={saveEntry}/></Modal>
