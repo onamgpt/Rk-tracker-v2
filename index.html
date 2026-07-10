@@ -3687,14 +3687,18 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
       // Detect routing tag in subject: #Prakash/#staff1-4 -> that tracker; else -> main
       const subjLower=String(email.subject||"").toLowerCase();
       let routeUser="main";
-      const routeMap={"#prakash":"prakash","#staff1":"staff1","#staff2":"staff2","#staff3":"staff3","#staff4":"staff4",
-        "#sooraj":"sooraj","#sunil":"sunil","#biju":"biju","#murugan":"murugan","#sebi":"sebi","#sugeesh":"sugeesh","#satish":"satish","#sadasivan":"sadasivan","#vinod":"vinod"};
+      const routeMap={"#prakash":"prakash","#staff1":"staff1","#staff2":"staff2","#staff3":"staff3","#staff4":"staff4"};
       for(const tag in routeMap){ if(subjLower.indexOf(tag)>-1){ routeUser=routeMap[tag]; break; } }
-      // If routed to a sales officer, mark it as a sales order for Spectrum and tag the officer
-      const SALES_OFFICERS=["sooraj","sunil","biju","murugan","sebi","sugeesh","satish","sadasivan","vinod"];
-      if(SALES_OFFICERS.indexOf(routeUser)>-1){
-        entry.category="Sales - Order";
-        entry.tags=(entry.tags||[]).concat(["Sales Order","Officer: "+routeUser.charAt(0).toUpperCase()+routeUser.slice(1)]);
+      // Sales-officer tags: keep the order in the OWNER's tracker (do NOT push to the officer's tracker),
+      // but stamp it as a sales order attributed to that officer so Spectrum can pick it up when you process it.
+      const OFFICER_TAGS={"#sooraj":"Sooraj","#sunil":"Sunil","#biju":"Biju","#murugan":"Murugan","#sebi":"Sebi","#sugeesh":"Sugeesh","#satish":"Satish","#sadasivan":"Sadasivan","#vinod":"Vinod"};
+      for(const tag in OFFICER_TAGS){
+        if(subjLower.indexOf(tag)>-1){
+          entry.category="Sales - Order";
+          entry.tags=(entry.tags||[]).concat(["Sales Order","Officer: "+OFFICER_TAGS[tag]]);
+          // routeUser stays "main" — owner keeps the order; share manually if desired
+          break;
+        }
       }
       // Light copy (links only) for the database
       const dbEntry=Object.assign({},entry,{attachments:allAtts.map(a=>({name:a.name,type:a.type,data:(a.data&&String(a.data).indexOf("http")===0)?a.data:""}))});
