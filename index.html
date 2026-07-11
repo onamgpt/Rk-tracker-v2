@@ -2870,8 +2870,13 @@ JSON.stringify(snap, null, 2)+"\n\n"+
     const url = waNum
       ? ("https://wa.me/"+waNum+"?text="+encodeURIComponent(msg))
       : ("https://api.whatsapp.com/send?text="+encodeURIComponent(msg));
-    const win = window.open(url, "_blank");
-    if(!win){ window.location.href = url; }
+    let win=null;
+    try{ win = window.open(url, "_blank"); }catch(e){}
+    if(!win || win.closed || typeof win.closed==="undefined"){
+      // popup blocked (common on desktop) — copy message + navigate so nothing is lost
+      try{ if(navigator.clipboard) navigator.clipboard.writeText(msg); }catch(e){}
+      window.location.href = url;
+    }
     const updated = { ...sentIds, [name]: new Date().toISOString() };
     setSentIds(updated); localStorage.setItem("waReminderSent", JSON.stringify(updated));
   };
