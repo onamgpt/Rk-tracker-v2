@@ -3172,7 +3172,7 @@ Return ONLY valid JSON:
 
 
 // ── PaymentReminders — dealer contact book + WhatsApp payment reminders ──
-function PaymentReminders({ onClose, entries, onSaveEntry }) {
+function PaymentReminders({ onClose, entries, onSaveEntry, onFocusDealer }) {
   const [view, setView] = useState("pending"); // pending | contacts
   const [payType, setPayType] = useState("sales"); // sales(receivable) | purchase(payable)
   const [busyPaid,setBusyPaid]=useState("");
@@ -3322,7 +3322,7 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
               <div key={name} style={{ background: "#f8f8fc", borderRadius: 10, border: "1px solid #e0e0f0", padding: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2a" }}>{name}</div>
+                    <div onClick={()=>{ if(onFocusDealer) onFocusDealer(name); }} style={{ fontSize: 13, fontWeight: 700, color: "#1a3a7a", cursor:"pointer", textDecoration:"underline" }}>{name} ›</div>
                     <div style={{ fontSize: 11, color: "#888" }}>{list.length} invoice(s) · {fmt(total)} pending</div>
                     {(() => { const oldest=Math.max(...list.map(e=>daysOld(e.date))); return oldest>=60
                       ? <div style={{ fontSize:10, color:"#fff", background:"#c33", display:"inline-block", padding:"1px 7px", borderRadius:10, marginTop:3, fontWeight:700 }}>⚠ {oldest} days overdue</div>
@@ -3331,6 +3331,13 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
                     {!hasPhone && <div style={{ fontSize: 10, color: "#c08a00", marginTop: 2 }}>⚠️ No phone number saved</div>}
                   </div>
                   <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                    <button
+                      type="button"
+                      onClick={()=>{ if(onFocusDealer) onFocusDealer(name); }}
+                      style={{ fontSize: 10.5, padding: "8px 14px", borderRadius: 8, border: "1px solid #2a5a9a",
+                        background: "#e8f0fc", color: "#1a3a7a", fontWeight: 700,
+                        cursor: "pointer", whiteSpace: "nowrap" }}
+                    >📂 View in list ›</button>
                     <button
                       type="button"
                       onClick={()=>{ markPaid(name, list); }}
@@ -4755,7 +4762,7 @@ function App(){
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
     <Modal open={showPins} onClose={()=>setShowPins(false)}><PinManager onClose={()=>setShowPins(false)}/></Modal>
     <Modal open={showFamily} onClose={()=>setShowFamily(false)}><HealthFamilyQuick onClose={()=>setShowFamily(false)} onSaveEntry={saveEntry} mode="family"/></Modal>
-    <Modal open={showPaymentReminders} onClose={()=>setShowPaymentReminders(false)} wide><PaymentReminders onClose={()=>setShowPaymentReminders(false)} entries={entries} onSaveEntry={saveEntry}/></Modal>
+    <Modal open={showPaymentReminders} onClose={()=>setShowPaymentReminders(false)} wide><PaymentReminders onClose={()=>setShowPaymentReminders(false)} entries={entries} onSaveEntry={saveEntry} onFocusDealer={(nm)=>{ setSearch(nm); setShowPaymentReminders(false); setTimeout(()=>{ try{ window.scrollTo({top:0,behavior:"smooth"}); }catch(e){} }, 100); }}/></Modal>
     <Modal open={showTally} onClose={()=>setShowTally(false)} wide><TallyUpload onClose={()=>setShowTally(false)}/></Modal>
     <Modal open={showEmailScan} onClose={()=>setShowEmailScan(false)} wide><EmailScan entries={entries} onClose={()=>setShowEmailScan(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})} onRefresh={refresh}/></Modal>
     <Modal open={showDD} onClose={()=>setShowDD(false)} wide><DropdownManager dropdowns={dropdowns} onSave={saveDropdowns} onClose={()=>setShowDD(false)}/></Modal>
