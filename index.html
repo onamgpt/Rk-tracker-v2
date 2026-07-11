@@ -1871,20 +1871,20 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
         const fromEmail = (email.from || "").toLowerCase().replace(/.*<|>.*/g, "").trim();
         const salesperson = SALES_CONFIG.emailMap[fromEmail] || null;
         let coords = extractCoords(email.body) || extractCoords(email.subject);
-        if (!coords) {
+        // Capture any Google Maps link in the email so we can always show it, even if coords fail
+        const anyMapLink = (email.body||"").match(/https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|goo\.gl|maps\.google\.[a-z.]+|www\.google\.[a-z.]+\/maps)\/[A-Za-z0-9_\/?=&.%@,+-]+/);
+        const mapLink = anyMapLink ? anyMapLink[0] : "";
+        if (!coords && mapLink) {
           // Short Google Maps links carry no coords in the URL — expand them server-side
-          const sm = (email.body||"").match(/https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl)\/[A-Za-z0-9_/?=&.%-]+/);
-          if (sm) {
-            try {
-              const er = await fetch("/.netlify/functions/expand?url="+encodeURIComponent(sm[0]));
-              const ed = await er.json();
-              if (ed && ed.coords && typeof ed.coords.lat === "number") {
-                coords = ed.coords;
-              } else if (ed && ed.finalUrl) {
-                coords = extractCoords(ed.finalUrl);
-              }
-            } catch(e) {}
-          }
+          try {
+            const er = await fetch("/.netlify/functions/expand?url="+encodeURIComponent(mapLink));
+            const ed = await er.json();
+            if (ed && ed.coords && typeof ed.coords.lat === "number") {
+              coords = ed.coords;
+            } else if (ed && ed.finalUrl) {
+              coords = extractCoords(ed.finalUrl);
+            }
+          } catch(e) {}
         }
         let distKm = null, band = null, allowance = 0;
         if (coords && salesperson && salesperson.hqLat) {
@@ -1892,7 +1892,7 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
           band = classifyDistance(distKm);
           allowance = (salesperson.allowance && salesperson.allowance[band.label]) || 0;
         }
-        return { ...email, fromEmail, salesperson, coords, distKm, band, allowance };
+        return { ...email, fromEmail, salesperson, coords, distKm, band, allowance, mapLink };
       }));
 
       // Filter out already imported
@@ -2057,9 +2057,14 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
                     ⚠️ Email not mapped — add {email.fromEmail} to SALES_CONFIG Monday
                   </div>}
 
-                  {sp && !email.coords && <div style={{ marginTop:6, fontSize:11, color:"#8b4500",
+                  {sp && !email.coords && email.mapLink && <div style={{ marginTop:6, fontSize:11, color:"#1a5a3a",
+                    background:"#eef7ee", padding:"6px 8px", borderRadius:6 }}>
+                    📍 Location shared — couldn't auto-calc distance, but you can view it:
+                    <br/><a href={email.mapLink} target="_blank" rel="noopener" style={{ color:"#1a6ac0", wordBreak:"break-all" }}>Open {sp.name}'s location ›</a>
+                  </div>}
+                  {sp && !email.coords && !email.mapLink && <div style={{ marginTop:6, fontSize:11, color:"#8b4500",
                     background:"#fff8f0", padding:"4px 8px", borderRadius:6 }}>
-                    ⚠️ No GPS link found in email — ask {sp.name} to share Google Maps location link
+                    ⚠️ No location link in this email — ask {sp.name} to share a Google Maps location link
                   </div>}
                 </div>
               );
