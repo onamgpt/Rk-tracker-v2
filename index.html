@@ -2911,17 +2911,20 @@ JSON.stringify(snap, null, 2)+"\n\n"+
 
   // Mark a dealer's pending items as Paid/Settled — removes them from the list
   const markPaid = async (name, entryList) => {
-    if(!onSaveEntry) return;
+    if(!onSaveEntry){ setStatusMsg("⚠️ Can't update — save function unavailable. Reload the app."); return; }
     if(!window.confirm("Mark all "+entryList.length+" pending item(s) for "+name+" as PAID/settled?")) return;
     setBusyPaid(name);
-    try{
-      for(const e of entryList){
+    let done=0, failed=0;
+    for(const e of entryList){
+      try{
         const upd=Object.assign({},e,{ paymentStatus: (payType==="sales"?"Paid":"Settled"),
           tags:(e.tags||[]).filter(t=>t!=="Payment Due").concat([payType==="sales"?"Payment Received":"Paid Out"]) });
         await onSaveEntry(upd);
-      }
-      setStatusMsg("✓ Marked "+entryList.length+" item(s) as "+(payType==="sales"?"paid":"settled")+" for "+name);
-    }catch(err){ setStatusMsg("Couldn't update — try again."); }
+        done++;
+      }catch(err){ failed++; console.error("markPaid error:", err); }
+    }
+    if(failed===0) setStatusMsg("✓ Marked "+done+" item(s) as "+(payType==="sales"?"paid":"settled")+" for "+name);
+    else setStatusMsg("Marked "+done+", but "+failed+" failed. "+(failed?"Check console / try again.":""));
     setBusyPaid("");
     setTimeout(()=>setStatusMsg(""),3000);
   };
@@ -3328,19 +3331,8 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
                     {!hasPhone && <div style={{ fontSize: 10, color: "#c08a00", marginTop: 2 }}>⚠️ No phone number saved</div>}
                   </div>
                   <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
-                    <button
-                      onClick={() => chatReminder(name, list)}
-                      style={{ fontSize: 11, padding: "8px 14px", borderRadius: 8, border: "none",
-                        background: "#25D366", color: "#fff", fontWeight: 700, cursor:"pointer", whiteSpace: "nowrap" }}
-                    >💬 WhatsApp</button>
-                    <button
-                      onClick={() => sendReminder(name, list)}
-                      disabled={loading || !hasPhone}
-                      title="Auto-send via WhatsApp Business API (needs Meta approval)"
-                      style={{ fontSize: 10, padding: "5px 14px", borderRadius: 8, border: "1px solid #bbb",
-                        background: "#fff", color: hasPhone?"#666":"#bbb", fontWeight: 600,
-                        cursor: hasPhone ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
-                    >⚙ Auto-send (API)</button>
+                    
+                    
                     <button
                       onClick={() => markPaid(name, list)}
                       disabled={busyPaid===name}
