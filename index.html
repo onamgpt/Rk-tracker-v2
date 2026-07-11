@@ -2371,6 +2371,132 @@ function FieldReport({ onClose }) {
   );
 }
 
+function PurchaseSalesCapture({ mode, onSaveEntry, onClose }) {
+  const isPurchase = mode === "purchase";
+  const label = isPurchase ? "Purchase" : "Sales";
+  const accent = isPurchase ? "#c0392b" : "#1a7a4a";
+  const [photo, setPhoto] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [parsed, setParsed] = useState(null);
+  const [msg, setMsg] = useState("");
+  const camRef = useRef(null);
+  const galRef = useRef(null);
+
+  const onPick = ev => {
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => setPhoto({ dataUrl: r.result, type: f.type || "image/jpeg", name: f.name || "" });
+    r.readAsDataURL(f);
+    setParsed(null); setMsg("");
+  };
+
+  const scan = async () => {
+    if (!photo) return;
+    setBusy(true); setMsg("📄 Reading the " + label.toLowerCase() + " bill…");
+    try {
+      const b64 = String(photo.dataUrl).split(",")[1];
+      const who = isPurchase ? "supplier/vendor you are buying from" : "customer you are selling to";
+      const prompt =
+"Read this " + label + " bill/invoice/order image. Extract the key details for a business ledger entry.\\n" +
+"Return ONLY JSON: {\\\"party\\\":\\\"<" + who + ">\\\",\\\"date\\\":\\\"<YYYY-MM-DD or blank>\\\",\\\"invoiceNo\\\":\\\"<number or blank>\\\",\\\"amount\\\":<total amount as number>,\\\"items\\\":\\\"<short summary of items>\\\",\\\"notes\\\":\\\"<anything useful like GST, terms>\\\"}. Use numbers only for amount (no currency symbol). If unclear, leave blank/0.";
+      const txt = await claudeAPI(prompt, "Return ONLY valid JSON. Extract accurately from the bill.", b64, photo.type, "");
+      const clean = String(txt || "").replace(/```json/g, "").replace(/```/g, "").trim();
+      const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
+      const obj = JSON.parse(s >= 0 ? clean.substring(s, e + 1) : clean);
+      setParsed({
+        party: obj.party || "", date: obj.date || new Date().toISOString().slice(0, 10),
+        invoiceNo: obj.invoiceNo || "", amount: obj.amount || "", items: obj.items || "", notes: obj.notes || ""
+      });
+      setMsg("");
+    } catch (e) { setMsg("❌ Couldn't read it clearly. Try a sharper photo, or edit the fields below."); setParsed({ party: "", date: new Date().toISOString().slice(0,10), invoiceNo: "", amount: "", items: "", notes: "" }); }
+    setBusy(false);
+  };
+
+  const save = async () => {
+    if (!parsed) return;
+    setBusy(true);
+    const entry = {
+      id: genId(),
+      title: label + (parsed.party ? " — " + parsed.party : "") + (parsed.invoiceNo ? " #" + parsed.invoiceNo : ""),
+      date: parsed.date || new Date().toISOString().slice(0, 10),
+      category: isPurchase ? "Purchase" : "Sales",
+      taskType: isPurchase ? "Purchase" : "Sales",
+      [isPurchase ? "vendor" : "person"]: parsed.party || "",
+      amount: parsed.amount || "",
+      paymentStatus: "Pending",
+      notes: (parsed.items ? parsed.items : "") + (parsed.notes ? " | " + parsed.notes : ""),
+      tags: [label],
+      createdAt: new Date().toISOString()
+    };
+    try { await onSaveEntry(entry); setMsg("✓ " + label + " entry saved"); setTimeout(() => { onClose && onClose(); }, 1000); }
+    catch (e) { setMsg("Save failed — try again."); }
+    setBusy(false);
+  };
+
+  const inp = { width: "100%", padding: "9px", borderRadius: 8, border: "1px solid #ccd", fontSize: 13, marginBottom: 8 };
+  const bigBtn = (bg) => ({ flex: 1, padding: "14px 8px", borderRadius: 10, border: "none", background: bg, color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" });
+
+  return (
+    <div style={{ padding: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <span style={{ fontSize: 26 }}>📷</span>
+        <div><h2 style={{ margin: 0, fontSize: 18, color: accent }}>{label} Entry</h2>
+        <div style={{ fontSize: 11, color: "#777" }}>Snap or upload the {label.toLowerCase()} bill — details filled automatically</div></div>
+      </div>
+
+      {/* Hidden inputs: camera + gallery/file */}
+      <input ref={camRef} type="file" accept="image/*" capture="environment" onChange={onPick} style={{ display: "none" }} />
+      <input ref={galRef} type="file" accept="image/*,application/pdf" onChange={onPick} style={{ display: "none" }} />
+
+      {!photo && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <button onClick={() => camRef.current && camRef.current.click()} style={bigBtn("linear-gradient(135deg," + accent + ",#333)")}>📸 Camera</button>
+          <button onClick={() => galRef.current && galRef.current.click()} style={bigBtn("linear-gradient(135deg,#555,#333)")}>🖼️ Gallery / File</button>
+        </div>
+      )}
+
+      {photo && (
+        <div style={{ textAlign: "center", marginBottom: 12 }}>
+          <img src={photo.dataUrl} alt="bill" style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 8, border: "1px solid #ddd" }} />
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            {!parsed && <button onClick={scan} disabled={busy} style={bigBtn(accent)}>{busy ? "⏳ Reading…" : "🔍 Read the bill"}</button>}
+            <button onClick={() => { setPhoto(null); setParsed(null); setMsg(""); }} style={{ ...bigBtn("#888"), flex: parsed ? 1 : 0.4 }}>↺ Retake</button>
+          </div>
+        </div>
+      )}
+
+      {msg && <div style={{ fontSize: 12.5, color: msg[0] === "✓" ? "#1a7a3a" : "#a33", marginBottom: 10, textAlign: "center" }}>{msg}</div>}
+
+      {parsed && (
+        <div style={{ background: "#fafafa", border: "1px solid #eee", borderRadius: 10, padding: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: accent, marginBottom: 8 }}>Review & edit before saving:</div>
+          <label style={{ fontSize: 11, color: "#555" }}>{isPurchase ? "Supplier / Vendor" : "Customer"}</label>
+          <input value={parsed.party} onChange={e => setParsed({ ...parsed, party: e.target.value })} style={inp} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}><label style={{ fontSize: 11, color: "#555" }}>Amount ₹</label>
+              <input value={parsed.amount} onChange={e => setParsed({ ...parsed, amount: e.target.value })} style={inp} /></div>
+            <div style={{ flex: 1 }}><label style={{ fontSize: 11, color: "#555" }}>Date</label>
+              <input value={parsed.date} onChange={e => setParsed({ ...parsed, date: e.target.value })} style={inp} /></div>
+          </div>
+          <label style={{ fontSize: 11, color: "#555" }}>Invoice No.</label>
+          <input value={parsed.invoiceNo} onChange={e => setParsed({ ...parsed, invoiceNo: e.target.value })} style={inp} />
+          <label style={{ fontSize: 11, color: "#555" }}>Items / Notes</label>
+          <textarea value={parsed.items + (parsed.notes ? " | " + parsed.notes : "")} onChange={e => setParsed({ ...parsed, items: e.target.value, notes: "" })} rows={2} style={{ ...inp, resize: "vertical" }} />
+          <button onClick={save} disabled={busy} style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: accent, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
+            {busy ? "Saving…" : "💾 Save " + label + " entry"}
+          </button>
+        </div>
+      )}
+
+      <div style={{ fontSize: 10, color: "#999", marginTop: 10, fontStyle: "italic" }}>
+        Saved as a {label} entry, marked Pending. Your rules & reminders apply as usual.
+      </div>
+    </div>
+  );
+}
+
+
 function RulesEngine({ entries, onSaveEntry, onClose }) {
   const [rules, setRules] = useState([]);
   const [newRule, setNewRule] = useState("");
@@ -4229,6 +4355,7 @@ function App(){
   const [showCFO,setShowCFO]=useState(false);
   const [showSpectrum,setShowSpectrum]=useState(false);
   const [showRules,setShowRules]=useState(false);
+  const [capMode,setCapMode]=useState(null); // "purchase" | "sales" | null
   const [showFieldReport,setShowFieldReport]=useState(false);
   const [showPins,setShowPins]=useState(false);
   const [quickText,setQuickText]=useState("");
@@ -4647,6 +4774,7 @@ function App(){
                 {l:"📈 CFO Brief",fn:()=>setShowCFO(true)},
                 {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true)},
                 {l:"⚖️ Rules",fn:()=>setShowRules(true)},
+                {l:"📝 Field Report",fn:()=>setShowFieldReport(true)},
                 {l:"🔒 PIN Access",fn:()=>setShowPins(true)},
                 {l:"📊 Tally",fn:()=>setShowTally(true)},
                 {l:"📍 Location",fn:()=>setShowLocation(true)},
@@ -4690,8 +4818,10 @@ function App(){
             {l:"🏷",c:"Intelligence",t:"Competitor Spotted"},
           ].map(q=><button key={q.l} onClick={()=>{setEditE({category:q.c,taskType:q.t});setShowForm(true);}} style={{padding:"7px 10px",borderRadius:8,border:"none",background:"rgba(255,255,255,.15)",color:"#f5d890",cursor:"pointer",fontSize:16}}>{q.l}</button>)}
           <button onClick={()=>{setEditE(null);setShowForm(true);}} style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#e8a020,#c07010)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700,boxShadow:"0 4px 14px rgba(200,120,0,.35)"}}>+ New</button>
+          <button onClick={()=>setCapMode("purchase")} title="Snap or upload a purchase bill" style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#c0392b,#922b21)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>📷 Purchase</button>
+          <button onClick={()=>setCapMode("sales")} title="Snap or upload a sales bill/order" style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#1a7a4a,#0a5a2a)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>📷 Sales</button>
           <button onClick={()=>setQuickOpen(o=>!o)} title="Type a note in plain English and it becomes an entry" style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#7a4ac0,#5a2a9a)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>✍️ Quick Add</button>
-          <button onClick={()=>setShowFieldReport(true)} title="Submit your daily field report" style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#1a7a4a,#0a5a2a)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>📝 Field Report</button>
+          
         </div>
       </div>
       {quickOpen&&<div style={{margin:"6px 0 10px",padding:12,borderRadius:10,border:"1.5px solid #9a6ad0",background:"rgba(120,74,192,.12)"}}>
@@ -4911,6 +5041,7 @@ function App(){
     <Modal open={showCFO} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
     <Modal open={showSpectrum} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showRules} onClose={()=>setShowRules(false)} wide><RulesEngine entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRules(false)}/></Modal>
+    <Modal open={!!capMode} onClose={()=>setCapMode(null)}><PurchaseSalesCapture mode={capMode} onSaveEntry={saveEntry} onClose={()=>setCapMode(null)}/></Modal>
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
     <Modal open={showPins} onClose={()=>setShowPins(false)}><PinManager onClose={()=>setShowPins(false)}/></Modal>
     <Modal open={showFamily} onClose={()=>setShowFamily(false)}><HealthFamilyQuick onClose={()=>setShowFamily(false)} onSaveEntry={saveEntry} mode="family"/></Modal>
