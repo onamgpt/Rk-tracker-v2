@@ -3242,36 +3242,26 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
   const fmt = n => !n ? "—" : "₹" + Number(String(n).replace(/[^\d.]/g, "")).toLocaleString("en-IN");
 
   const sendReminder = async (name, entryList) => {
+    // Open WhatsApp with the full reminder pre-filled — you pick the chat and hit send.
+    // (No Business API / template needed — always works, no Meta approval required.)
     const phone = contacts[name.trim().toLowerCase()];
-    if (!phone) {
-      setStatusMsg("⚠️ No phone number saved for " + name + " — add it in Contacts tab first.");
-      return;
-    }
-    setLoading(true);
+    const msg = buildMessage(name, entryList);
     const total = entryList.reduce((s, e) => s + (parseFloat(String(e.amount).replace(/[^\d.]/g, "")) || 0), 0);
-    try {
-      const res = await fetch("/.netlify/functions/whatsapp", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "sendTemplate",
-          to: phone,
-          templateName: "onam_test_message",
-          languageCode: "en_US"
-        })
-      });
-      const data = await res.json();
-      if (data.ok && !data.result?.error) {
-        const updated = { ...sentIds, [name]: new Date().toISOString() };
-        setSentIds(updated);
-        localStorage.setItem("waReminderSent", JSON.stringify(updated));
-        setStatusMsg("✅ Reminder sent to " + name + " (" + fmt(total) + ")");
-      } else {
-        setStatusMsg("❌ Failed: " + (data.result?.error?.message || data.error || "Unknown error"));
-      }
-    } catch(e) {
-      setStatusMsg("❌ " + e.message);
+    const num = phone ? String(phone).replace(/[^\d]/g,"") : "";
+    const waNum = num ? ((num.length===10?"91":"")+num) : "";
+    const url = waNum
+      ? ("https://wa.me/"+waNum+"?text="+encodeURIComponent(msg))
+      : ("https://api.whatsapp.com/send?text="+encodeURIComponent(msg));
+    let win=null;
+    try{ win = window.open(url, "_blank"); }catch(e){}
+    if(!win || win.closed || typeof win.closed==="undefined"){
+      try{ if(navigator.clipboard) navigator.clipboard.writeText(msg); }catch(e){}
+      window.location.href = url;
     }
-    setLoading(false);
+    const updated = { ...sentIds, [name]: new Date().toISOString() };
+    setSentIds(updated);
+    localStorage.setItem("waReminderSent", JSON.stringify(updated));
+    setStatusMsg("✅ WhatsApp opened for " + name + " (" + fmt(total) + ") — pick the chat and press send.");
   };
 
   return (
