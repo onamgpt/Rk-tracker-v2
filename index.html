@@ -4790,19 +4790,11 @@ function App(){
             </div>}
           </div>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
-          <button onClick={()=>setShowHidden(h=>!h)} style={{...fSel,background:showHidden?"rgba(255,200,100,.15)":"rgba(255,255,255,.08)",color:showHidden?"#ffcc88":"#f0cc80",fontSize:11}}>👁</button>
-          <button onClick={()=>{const l=filterPerson||filterTag||filterAccount||filterVendor||filterStatus||(filterCat!=="All"?filterCat:"")||"All Tasks";exportPDF(filtered,l);}} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>↓PDF({filtered.length})</button>
-          <button onClick={()=>exportCSV(entries)} style={{...fSel,border:"1.5px solid #c8a060",background:"rgba(255,255,255,.08)",color:"#f0cc80",fontSize:11,fontWeight:600}}>↓CSV</button>
-          {URL_USER==="main"&&[
-            {l:"💰 Prakash",c:"Finance",t:"Payment Collected",p:"Prakash"},
-            {l:"💍 Wedding",c:"Personal",t:"Wedding Planning"},
-          ].map(q=><button key={q.l} onClick={()=>{setEditE({category:q.c,taskType:q.t,person:q.p||""});setShowForm(true);}} style={{padding:"6px 12px",borderRadius:8,border:"none",background:q.l.includes("Prakash")?"#1a5a8a":"#c8006a",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}}>{q.l}</button>)}
-          {URL_USER==="main"&&<div style={{position:"relative",display:"inline-block"}}>
-            <button onClick={()=>setTeamMenuOpen(o=>!o)} title="View a staff member's tracker (read-only)" style={{padding:"6px 12px",borderRadius:8,border:"1px solid #6a8aa0",background:"rgba(40,90,130,.25)",color:"#bfe0ff",cursor:"pointer",fontSize:12,fontWeight:700}}>👁 Team ▾</button>
-            {teamMenuOpen&&<div style={{position:"absolute",top:"110%",left:0,zIndex:900,background:"#2a2318",border:"1px solid #6a8aa0",borderRadius:8,padding:4,minWidth:130,boxShadow:"0 6px 18px rgba(0,0,0,.4)"}}>
-              {TEAM_MEMBERS.map(m=><button key={"tv_"+m.u} onClick={()=>{setTeamMenuOpen(false);openTeam(m);}} style={{display:"block",width:"100%",textAlign:"left",padding:"7px 10px",borderRadius:6,border:"none",background:"transparent",color:"#bfe0ff",cursor:"pointer",fontSize:13,fontWeight:600}}>👁 {m.label}</button>)}
-            </div>}
-          </div>}
+          
+          
+          
+          
+          
           {IS_FAMILY&&[
             {l:"💍",c:"Personal",t:"Wedding Planning"},
             {l:"💰",c:"Personal",t:"Expense"},
