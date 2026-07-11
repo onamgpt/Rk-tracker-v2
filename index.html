@@ -2898,6 +2898,7 @@ JSON.stringify(snap, null, 2)+"\n\n"+
 
   const copyMessage = async (name, entryList) => {
     const text = buildMessage(name, entryList);
+    setStatusMsg("Copying "+name+"…");
     try{
       if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(text); }
       else{ const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); }
@@ -2911,6 +2912,7 @@ JSON.stringify(snap, null, 2)+"\n\n"+
 
   // Mark a dealer's pending items as Paid/Settled — removes them from the list
   const markPaid = async (name, entryList) => {
+    setStatusMsg("Mark Paid clicked for "+name+"…");
     if(!onSaveEntry){ setStatusMsg("⚠️ Can't update — save function unavailable. Reload the app."); return; }
     if(!window.confirm("Mark all "+entryList.length+" pending item(s) for "+name+" as PAID/settled?")) return;
     setBusyPaid(name);
