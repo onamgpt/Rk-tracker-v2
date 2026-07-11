@@ -2876,6 +2876,34 @@ JSON.stringify(snap, null, 2)+"\n\n"+
     setSentIds(updated); localStorage.setItem("waReminderSent", JSON.stringify(updated));
   };
 
+  // Build the full filled-in reminder message (invoice details + amounts + total)
+  const buildMessage = (name, entryList) => {
+    const total = entryList.reduce((s,e)=>s+(parseFloat(String(e.amount).replace(/[^\d.]/g,""))||0),0);
+    const isSales = payType==="sales";
+    const itemLines = entryList.map(e=>{
+      const amt = fmt(parseFloat(String(e.amount).replace(/[^\d.]/g,""))||0);
+      const inv = e.orderNo || e.invoiceNo || (e.title||"").replace(/\s+/g," ").slice(0,40) || "Invoice";
+      const dt = e.date ? (" ("+e.date+")") : "";
+      return "• "+inv+dt+" — "+amt;
+    }).join("\n");
+    return isSales
+      ? ("Dear "+name+",\n\nThis is a gentle reminder regarding your pending payment(s) with Onam Agarbathi Pvt. Ltd.:\n\n"+itemLines+"\n\nTotal: "+fmt(total)+"\n\nKindly arrange payment at your earliest convenience. Thank you.")
+      : ("Dear "+name+",\n\nRegarding our pending payable(s):\n\n"+itemLines+"\n\nTotal: "+fmt(total)+"\n\nWe will arrange payment shortly. Thank you.");
+  };
+
+  const copyMessage = async (name, entryList) => {
+    const text = buildMessage(name, entryList);
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(text); }
+      else{ const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); }
+      setCopiedName(name); setTimeout(()=>setCopiedName(""),2500);
+    }catch(e){
+      // Fallback: show it so they can select manually
+      setPreviewText(text); setPreviewName(name);
+    }
+  };
+
+
   // Mark a dealer's pending items as Paid/Settled — removes them from the list
   const markPaid = async (name, entryList) => {
     if(!onSaveEntry) return;
@@ -3138,6 +3166,9 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
   const [view, setView] = useState("pending"); // pending | contacts
   const [payType, setPayType] = useState("sales"); // sales(receivable) | purchase(payable)
   const [busyPaid,setBusyPaid]=useState("");
+  const [copiedName,setCopiedName]=useState("");
+  const [previewText,setPreviewText]=useState("");
+  const [previewName,setPreviewName]=useState("");
   const [contacts, setContacts] = useState({}); // name(lower) -> phone
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
@@ -3257,6 +3288,11 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
         )}
       </div>
 
+      {previewText && <div style={{ background:"#fff", border:"2px solid #5a3a9a", borderRadius:10, padding:12, marginBottom:12 }}>
+        <div style={{ fontSize:12, fontWeight:700, color:"#3a2a6a", marginBottom:6 }}>Message for {previewName} — select all & copy:</div>
+        <textarea readOnly value={previewText} onClick={e=>e.target.select()} style={{ width:"100%", height:130, fontSize:12, padding:8, borderRadius:6, border:"1px solid #ccd" }}/>
+        <button onClick={()=>{setPreviewText("");setPreviewName("");}} style={{ marginTop:6, fontSize:11, padding:"5px 12px", borderRadius:6, border:"none", background:"#eee", cursor:"pointer" }}>Close</button>
+      </div>}
       {view === "pending" && <div style={{ display:"flex", gap:6, marginBottom:12 }}>
         <button onClick={()=>setPayType("sales")} style={{ flex:1, padding:"7px", borderRadius:8, border:payType==="sales"?"2px solid #1a7a4a":"1px solid #ccc", background:payType==="sales"?"#eafaf0":"#fff", color:"#1a5a3a", fontWeight:700, fontSize:12, cursor:"pointer" }}>📥 Sales (they owe me)</button>
         <button onClick={()=>setPayType("purchase")} style={{ flex:1, padding:"7px", borderRadius:8, border:payType==="purchase"?"2px solid #a35a1a":"1px solid #ccc", background:payType==="purchase"?"#fdf2e8":"#fff", color:"#8a4a1a", fontWeight:700, fontSize:12, cursor:"pointer" }}>📤 Purchases (I owe)</button>
@@ -3317,6 +3353,12 @@ function PaymentReminders({ onClose, entries, onSaveEntry }) {
                         background: "#eafaf0", color: "#1a5a3a", fontWeight: 700,
                         cursor: "pointer", whiteSpace: "nowrap" }}
                     >{busyPaid===name?"…":"✓ Mark Paid"}</button>
+                    <button
+                      onClick={() => copyMessage(name, list)}
+                      style={{ fontSize: 10.5, padding: "6px 14px", borderRadius: 8, border: "1px solid #5a3a9a",
+                        background: copiedName===name?"#5a3a9a":"#f0eafa", color: copiedName===name?"#fff":"#3a2a6a", fontWeight: 700,
+                        cursor: "pointer", whiteSpace: "nowrap" }}
+                    >{copiedName===name?"✓ Copied!":"📋 Copy message"}</button>
                   </div>
                 </div>
               </div>
