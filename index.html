@@ -3414,6 +3414,9 @@ Return ONLY valid JSON:
         <div style={{ background:"#f8f5f0", borderRadius:10, border:"1.5px solid #e0c87a", padding:12, marginBottom:12 }}>
           <div style={{ fontSize:12, fontWeight:700, marginBottom:6 }}>{parsed.type}: {parsed.summary}</div>
           <div style={{ fontSize:11, color:"#5a4a2a" }}>{parsed.details}</div>
+          {(parsed.proteinGrams>0) && <div style={{ marginTop:6, display:"inline-block", background:"#eefafa", border:"1px solid #4a9a9a", borderRadius:8, padding:"3px 10px", fontSize:12, fontWeight:700, color:"#0a5a5a" }}>
+            🍽 ≈ {parsed.proteinGrams}g protein <span style={{fontWeight:400,fontSize:10,color:"#5a8a8a"}}>(approx)</span>
+          </div>}
           {parsed.severity && <div style={{ fontSize:10, color:"#8a6a2a", marginTop:4 }}>Severity: {parsed.severity}</div>}
         </div>
       )}
