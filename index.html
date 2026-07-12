@@ -3242,6 +3242,45 @@ JSON.stringify(snap, null, 2)+"\n\n"+
   );
 }
 
+function FastingTimer({ entries }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
+
+  // Find the most recent saved meal (by createdAt)
+  const meals = (entries || []).filter(e => e && e.category === "Health" && (e.tags || []).indexOf("Meal") > -1 && e.createdAt);
+  meals.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const last = meals[0];
+
+  if (!last) return (
+    <div style={{ background:"#f6f6f6", border:"1px solid #ddd", borderRadius:10, padding:"10px 12px", marginBottom:12, fontSize:12, color:"#777" }}>
+      ⏱ Fasting timer — starts once you log a meal
+    </div>
+  );
+
+  const ms = now - Date.parse(last.createdAt);
+  const hrs = ms / 3600000;
+  const h = Math.floor(hrs);
+  const m = Math.floor((hrs - h) * 60);
+  const under2 = hrs < 2;
+
+  return (
+    <div style={{
+      background: under2 ? "#fff4f0" : "#eef8ee",
+      border: "1.5px solid " + (under2 ? "#d08a70" : "#4a9a5a"),
+      borderRadius: 10, padding: "10px 12px", marginBottom: 12
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: under2 ? "#8a3a1a" : "#0a5a2a" }}>
+        ⏱ {h}h {m}m since last meal
+      </div>
+      <div style={{ fontSize: 11, color: under2 ? "#8a5a4a" : "#4a7a5a", marginTop: 2 }}>
+        {under2
+          ? "Under 2 hours — hold off if you're spacing meals"
+          : "2+ hours since eating"}
+      </div>
+    </div>
+  );
+}
+
 function HealthFamilyQuick({ onClose, onSaveEntry, mode, entries }) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -3378,6 +3417,8 @@ Return ONLY valid JSON:
           </div>
         );
       })()}
+
+      {isHealth && <FastingTimer entries={entries} />}
 
       {isHealth && (
         <div style={{ marginBottom:10 }}>
