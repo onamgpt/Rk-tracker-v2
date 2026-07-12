@@ -80,3 +80,5 @@ exports.handler = async (event) => {
     return { statusCode: 500, headers: h, body: JSON.stringify({ ok: false, error: e.message }) };
   }
 };
+
+// redeploy trigger — picks up TELEGRAM_BOT_TOKEN env var
