@@ -6,3 +6,7 @@
   for = "/*"
   [headers.values]
     Access-Control-Allow-Origin = "*"
+
+# Run the Telegram scheduler every 5 minutes
+[functions."telegram-scheduler"]
+  schedule = "*/5 * * * *"
