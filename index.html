@@ -2497,6 +2497,185 @@ function PurchaseSalesCapture({ mode, onSaveEntry, onClose }) {
 }
 
 
+function TelegramTeam({ onClose }) {
+  const [tab, setTab] = useState("send"); // send | scheduled | team
+  const [contacts, setContacts] = useState([]);   // [{chatId,name,label}]
+  const [scheduled, setScheduled] = useState([]);
+  const [selected, setSelected] = useState([]);   // chatIds
+  const [text, setText] = useState("");
+  const [when, setWhen] = useState("");
+  const [repeat, setRepeat] = useState("once");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => { (async () => {
+    try { const r = await sheetsAPI("getPortfolio", { key: "tg_contacts" }); if (r && r.data && Array.isArray(r.data)) setContacts(r.data); } catch(e) {}
+    try { const s = await sheetsAPI("getPortfolio", { key: "tg_scheduled" }); if (s && s.data && Array.isArray(s.data.scheduled)) setScheduled(s.data.scheduled); } catch(e) {}
+  })(); }, []);
+
+  const saveContacts = async (c) => { setContacts(c); try { await sheetsAPI("savePortfolio", { key: "tg_contacts", data: c }); } catch(e) {} };
+  const saveScheduled = async (s) => { setScheduled(s); try { await sheetsAPI("savePortfolio", { key: "tg_scheduled", data: { scheduled: s } }); } catch(e) {} };
+
+  // Pull anyone who has messaged the bot
+  const syncContacts = async () => {
+    setBusy(true); setMsg("🔄 Looking for people who messaged the bot…");
+    try {
+      const r = await fetch("/.netlify/functions/telegram", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "contacts" })
+      });
+      const d = await r.json();
+      if (d && d.ok && Array.isArray(d.contacts)) {
+        const merged = [...contacts];
+        let added = 0;
+        d.contacts.forEach(c => {
+          if (!merged.find(x => x.chatId === c.chatId)) { merged.push({ chatId: c.chatId, name: c.name, label: c.name }); added++; }
+        });
+        await saveContacts(merged);
+        setMsg(added ? ("✓ Found " + added + " new contact(s)") : "No new contacts. Ask them to send any message to the bot first.");
+      } else { setMsg("Couldn't fetch contacts. Is TELEGRAM_BOT_TOKEN set in Netlify?"); }
+    } catch(e) { setMsg("Error: " + e.message); }
+    setBusy(false);
+  };
+
+  const sendNow = async () => {
+    if (!text.trim()) { setMsg("Type a message first."); return; }
+    if (!selected.length) { setMsg("Pick at least one person."); return; }
+    setBusy(true); setMsg("📤 Sending…");
+    try {
+      const r = await fetch("/.netlify/functions/telegram", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send", message: text, chatIds: selected })
+      });
+      const d = await r.json();
+      setMsg(d && d.ok ? ("✓ Sent to " + d.sent + " of " + d.total) : ("Failed: " + (d.error || "unknown")));
+      if (d && d.ok) setText("");
+    } catch(e) { setMsg("Error: " + e.message); }
+    setBusy(false);
+  };
+
+  const scheduleMsg = async () => {
+    if (!text.trim()) { setMsg("Type a message first."); return; }
+    if (!selected.length) { setMsg("Pick at least one person."); return; }
+    if (!when) { setMsg("Pick a date & time."); return; }
+    const item = { id: "tg_" + Date.now(), text, chatIds: [...selected], when: new Date(when).toISOString(), repeat, created: new Date().toISOString() };
+    await saveScheduled([...scheduled, item]);
+    setText(""); setWhen(""); setRepeat("once");
+    setMsg("✓ Scheduled");
+    setTimeout(() => setMsg(""), 2500);
+  };
+
+  const delScheduled = async (id) => { await saveScheduled(scheduled.filter(s => s.id !== id)); };
+  const toggle = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  const renameContact = async (chatId, label) => { await saveContacts(contacts.map(c => c.chatId === chatId ? { ...c, label } : c)); };
+  const delContact = async (chatId) => { await saveContacts(contacts.filter(c => c.chatId !== chatId)); setSelected(s => s.filter(x => x !== chatId)); };
+
+  const inp = { width: "100%", padding: "9px", borderRadius: 8, border: "1px solid #ccd", fontSize: 13, marginBottom: 8 };
+
+  return (
+    <div style={{ padding: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <span style={{ fontSize: 26 }}>✈️</span>
+        <div><h2 style={{ margin: 0, fontSize: 18, color: "#0088cc" }}>Telegram Team</h2>
+        <div style={{ fontSize: 11, color: "#6a8a9a" }}>Message your team — now or scheduled</div></div>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        {[["send", "📤 Send"], ["scheduled", "⏰ Scheduled"], ["team", "👥 Team"]].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "8px", borderRadius: 8, border: tab === k ? "2px solid #0088cc" : "1px solid #ccc", background: tab === k ? "#e8f5fc" : "#fff", color: "#0a5a7a", fontWeight: 700, cursor: "pointer", fontSize: 12 }}>{l}</button>
+        ))}
+      </div>
+
+      {msg && <div style={{ fontSize: 12, color: msg[0] === "✓" ? "#1a7a3a" : "#a33", marginBottom: 8 }}>{msg}</div>}
+
+      {(tab === "send" || tab === "scheduled") && (
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 700, color: "#0a5a7a" }}>Message</label>
+          <textarea value={text} onChange={e => setText(e.target.value)} rows={3} placeholder="Type your message to the team…" style={{ ...inp, resize: "vertical" }} />
+
+          <label style={{ fontSize: 12, fontWeight: 700, color: "#0a5a7a" }}>Send to ({selected.length} selected)</label>
+          <div style={{ maxHeight: 130, overflowY: "auto", border: "1px solid #dde", borderRadius: 8, padding: 6, marginBottom: 8 }}>
+            {contacts.length === 0 && <div style={{ fontSize: 11, color: "#999", fontStyle: "italic", padding: 4 }}>No contacts yet — go to 👥 Team and tap Sync.</div>}
+            {contacts.map(c => (
+              <label key={c.chatId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: 12.5, cursor: "pointer" }}>
+                <input type="checkbox" checked={selected.includes(c.chatId)} onChange={() => toggle(c.chatId)} />
+                {c.label || c.name}
+              </label>
+            ))}
+            {contacts.length > 1 && <button onClick={() => setSelected(selected.length === contacts.length ? [] : contacts.map(c => c.chatId))} style={{ fontSize: 11, marginTop: 4, border: "none", background: "none", color: "#0088cc", cursor: "pointer", textDecoration: "underline" }}>
+              {selected.length === contacts.length ? "Clear all" : "Select everyone"}
+            </button>}
+          </div>
+
+          {tab === "scheduled" && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <div style={{ flex: 2 }}>
+                <label style={{ fontSize: 11, color: "#555" }}>When</label>
+                <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} style={inp} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, color: "#555" }}>Repeat</label>
+                <select value={repeat} onChange={e => setRepeat(e.target.value)} style={inp}>
+                  <option value="once">Once</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          <button onClick={tab === "send" ? sendNow : scheduleMsg} disabled={busy} style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#0088cc,#005f8f)", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+            {busy ? "Working…" : (tab === "send" ? "📤 Send now" : "⏰ Schedule it")}
+          </button>
+
+          {tab === "scheduled" && scheduled.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#0a5a7a", marginBottom: 6 }}>Upcoming ({scheduled.length})</div>
+              {scheduled.map(s => (
+                <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, padding: "7px 8px", borderBottom: "1px solid #eee", fontSize: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ color: "#233" }}>{s.text.slice(0, 60)}{s.text.length > 60 ? "…" : ""}</div>
+                    <div style={{ fontSize: 10.5, color: "#888" }}>
+                      {new Date(s.when).toLocaleString()} · {s.repeat === "once" ? "one-off" : s.repeat} · {s.chatIds.length} recipient(s)
+                    </div>
+                  </div>
+                  <button onClick={() => delScheduled(s.id)} style={{ border: "none", background: "none", color: "#c33", cursor: "pointer", fontSize: 15 }}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "team" && (
+        <div>
+          <div style={{ background: "#e8f5fc", border: "1px solid #b8ddf0", borderRadius: 8, padding: 10, marginBottom: 10, fontSize: 11.5, color: "#0a5a7a" }}>
+            <b>To add someone:</b> ask them to open Telegram, find your bot, and send it any message (e.g. "hi"). Then tap Sync below.
+          </div>
+          <button onClick={syncContacts} disabled={busy} style={{ width: "100%", padding: "11px", borderRadius: 10, border: "none", background: "#0088cc", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 12 }}>
+            {busy ? "Syncing…" : "🔄 Sync contacts from bot"}
+          </button>
+
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#0a5a7a", marginBottom: 6 }}>Team ({contacts.length})</div>
+          {contacts.length === 0 && <div style={{ fontSize: 11, color: "#999", fontStyle: "italic" }}>Nobody yet.</div>}
+          {contacts.map(c => (
+            <div key={c.chatId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #eee" }}>
+              <input value={c.label || c.name} onChange={e => renameContact(c.chatId, e.target.value)} style={{ flex: 1, padding: "6px 8px", borderRadius: 6, border: "1px solid #ddd", fontSize: 12.5 }} />
+              <span style={{ fontSize: 10, color: "#aaa" }}>{c.chatId}</span>
+              <button onClick={() => delContact(c.chatId)} style={{ border: "none", background: "none", color: "#c33", cursor: "pointer", fontSize: 15 }}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ fontSize: 10, color: "#999", marginTop: 12, fontStyle: "italic" }}>
+        Scheduled messages are sent by the server, so they go out even when the app is closed. Everyone must message the bot once so it can reach them.
+      </div>
+    </div>
+  );
+}
+
+
 function RulesEngine({ entries, onSaveEntry, onClose }) {
   const [rules, setRules] = useState([]);
   const [newRule, setNewRule] = useState("");
@@ -4399,6 +4578,7 @@ function App(){
   const [showCFO,setShowCFO]=useState(false);
   const [showSpectrum,setShowSpectrum]=useState(false);
   const [showRules,setShowRules]=useState(false);
+  const [showTelegram,setShowTelegram]=useState(false);
   const [capMode,setCapMode]=useState(null); // "purchase" | "sales" | null
   const [showFieldReport,setShowFieldReport]=useState(false);
   const [showPins,setShowPins]=useState(false);
@@ -4818,6 +4998,7 @@ function App(){
                 {l:"📈 CFO Brief",fn:()=>setShowCFO(true)},
                 {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true)},
                 {l:"⚖️ Rules",fn:()=>setShowRules(true)},
+                {l:"✈️ Telegram",fn:()=>setShowTelegram(true)},
                 {l:"📝 Field Report",fn:()=>setShowFieldReport(true)},
                 {l:"🔒 PIN Access",fn:()=>setShowPins(true)},
                 {l:"📊 Tally",fn:()=>setShowTally(true)},
@@ -5077,6 +5258,7 @@ function App(){
     <Modal open={showCFO} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
     <Modal open={showSpectrum} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showRules} onClose={()=>setShowRules(false)} wide><RulesEngine entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRules(false)}/></Modal>
+    <Modal open={showTelegram} onClose={()=>setShowTelegram(false)}><TelegramTeam onClose={()=>setShowTelegram(false)}/></Modal>
     <Modal open={!!capMode} onClose={()=>setCapMode(null)}><PurchaseSalesCapture mode={capMode} onSaveEntry={saveEntry} onClose={()=>setCapMode(null)}/></Modal>
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
     <Modal open={showPins} onClose={()=>setShowPins(false)}><PinManager onClose={()=>setShowPins(false)}/></Modal>
