@@ -2497,6 +2497,124 @@ function PurchaseSalesCapture({ mode, onSaveEntry, onClose }) {
 }
 
 
+function TelegramShare({ entry, onClose }) {
+  const [contacts, setContacts] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [text, setText] = useState("");
+  const [when, setWhen] = useState("");
+  const [mode, setMode] = useState("now"); // now | schedule
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  // Build a clean summary from the entry
+  useEffect(() => {
+    if (!entry) return;
+    const L = [];
+    L.push("📋 " + (entry.title || "Entry"));
+    if (entry.date) L.push("📅 " + entry.date);
+    if (entry.person) L.push("👤 " + entry.person);
+    if (entry.vendor) L.push("🏭 " + entry.vendor);
+    if (entry.amount) L.push("💰 ₹" + entry.amount);
+    if (entry.paymentStatus) L.push("💳 " + entry.paymentStatus);
+    if (entry.notes) L.push("\n📝 " + String(entry.notes).slice(0, 300));
+    setText(L.join("\n"));
+  }, [entry]);
+
+  useEffect(() => { (async () => {
+    try { const r = await sheetsAPI("getPortfolio", { key: "tg_contacts" }); if (r && r.data && Array.isArray(r.data)) setContacts(r.data); } catch(e) {}
+  })(); }, []);
+
+  const toggle = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+
+  const sendNow = async () => {
+    if (!selected.length) { setMsg("Pick at least one person."); return; }
+    setBusy(true); setMsg("📤 Sending…");
+    try {
+      const r = await fetch("/.netlify/functions/telegram", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send", message: text, chatIds: selected })
+      });
+      const d = await r.json();
+      if (d && d.ok) { setMsg("✓ Sent to " + d.sent); setTimeout(() => onClose && onClose(), 1200); }
+      else setMsg("Failed: " + (d.error || "unknown"));
+    } catch(e) { setMsg("Error: " + e.message); }
+    setBusy(false);
+  };
+
+  const schedule = async () => {
+    if (!selected.length) { setMsg("Pick at least one person."); return; }
+    if (!when) { setMsg("Pick a date & time."); return; }
+    setBusy(true);
+    try {
+      const cur = await sheetsAPI("getPortfolio", { key: "tg_scheduled" });
+      const list = (cur && cur.data && Array.isArray(cur.data.scheduled)) ? cur.data.scheduled : [];
+      list.push({ id: "tg_" + Date.now(), text, chatIds: [...selected], when: new Date(when).toISOString(), repeat: "once", created: new Date().toISOString() });
+      await sheetsAPI("savePortfolio", { key: "tg_scheduled", data: { scheduled: list } });
+      setMsg("✓ Scheduled"); setTimeout(() => onClose && onClose(), 1200);
+    } catch(e) { setMsg("Couldn't schedule: " + e.message); }
+    setBusy(false);
+  };
+
+  // Quick presets for chasing payment
+  const preset = (days) => {
+    const d = new Date(); d.setDate(d.getDate() + days); d.setHours(10, 0, 0, 0);
+    const pad = n => String(n).padStart(2, "0");
+    setWhen(d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes()));
+    setMode("schedule");
+  };
+
+  const inp = { width: "100%", padding: "9px", borderRadius: 8, border: "1px solid #ccd", fontSize: 13, marginBottom: 8 };
+  if (!entry) return null;
+
+  return (
+    <div style={{ padding: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <span style={{ fontSize: 24 }}>✈️</span>
+        <div><h2 style={{ margin: 0, fontSize: 17, color: "#0088cc" }}>Send via Telegram</h2>
+        <div style={{ fontSize: 11, color: "#6a8a9a" }}>Now, or schedule it for later</div></div>
+      </div>
+
+      <label style={{ fontSize: 12, fontWeight: 700, color: "#0a5a7a" }}>Message (edit as you like)</label>
+      <textarea value={text} onChange={e => setText(e.target.value)} rows={6} style={{ ...inp, resize: "vertical", fontFamily: "inherit" }} />
+
+      <label style={{ fontSize: 12, fontWeight: 700, color: "#0a5a7a" }}>Send to ({selected.length})</label>
+      <div style={{ maxHeight: 110, overflowY: "auto", border: "1px solid #dde", borderRadius: 8, padding: 6, marginBottom: 10 }}>
+        {contacts.length === 0 && <div style={{ fontSize: 11, color: "#999", fontStyle: "italic", padding: 4 }}>No contacts yet — sync them in Menu → Telegram.</div>}
+        {contacts.map(c => (
+          <label key={c.chatId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 2px", fontSize: 12.5, cursor: "pointer" }}>
+            <input type="checkbox" checked={selected.includes(c.chatId)} onChange={() => toggle(c.chatId)} />
+            {c.label || c.name}
+          </label>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        <button onClick={() => setMode("now")} style={{ flex: 1, padding: "8px", borderRadius: 8, border: mode === "now" ? "2px solid #0088cc" : "1px solid #ccc", background: mode === "now" ? "#e8f5fc" : "#fff", color: "#0a5a7a", fontWeight: 700, cursor: "pointer", fontSize: 12 }}>📤 Send now</button>
+        <button onClick={() => setMode("schedule")} style={{ flex: 1, padding: "8px", borderRadius: 8, border: mode === "schedule" ? "2px solid #0088cc" : "1px solid #ccc", background: mode === "schedule" ? "#e8f5fc" : "#fff", color: "#0a5a7a", fontWeight: 700, cursor: "pointer", fontSize: 12 }}>⏰ Schedule</button>
+      </div>
+
+      {mode === "schedule" && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "#666", alignSelf: "center" }}>Remind in:</span>
+            {[3, 7, 15, 30, 60].map(d => (
+              <button key={d} onClick={() => preset(d)} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 20, border: "1px solid #0088cc", background: "#fff", color: "#0088cc", cursor: "pointer" }}>{d}d</button>
+            ))}
+          </div>
+          <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} style={inp} />
+        </div>
+      )}
+
+      {msg && <div style={{ fontSize: 12, color: msg[0] === "✓" ? "#1a7a3a" : "#a33", marginBottom: 8 }}>{msg}</div>}
+
+      <button onClick={mode === "now" ? sendNow : schedule} disabled={busy} style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#0088cc,#005f8f)", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+        {busy ? "Working…" : (mode === "now" ? "📤 Send now" : "⏰ Schedule it")}
+      </button>
+    </div>
+  );
+}
+
+
 function TelegramTeam({ onClose }) {
   const [tab, setTab] = useState("send"); // send | scheduled | team
   const [contacts, setContacts] = useState([]);   // [{chatId,name,label}]
@@ -4579,6 +4697,7 @@ function App(){
   const [showSpectrum,setShowSpectrum]=useState(false);
   const [showRules,setShowRules]=useState(false);
   const [showTelegram,setShowTelegram]=useState(false);
+  const [tgShareEntry,setTgShareEntry]=useState(null);
   const [capMode,setCapMode]=useState(null); // "purchase" | "sales" | null
   const [showFieldReport,setShowFieldReport]=useState(false);
   const [showPins,setShowPins]=useState(false);
@@ -5180,6 +5299,7 @@ function App(){
           <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
             {!viewE.tags?.includes("Done")&&<button onClick={()=>markDone(viewE.id)} style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid #88cc88",background:"#edfaed",color:"#1a5a1a",cursor:"pointer",fontSize:12,fontWeight:700}}>✅ Done</button>}
             <button onClick={()=>shareEntry(viewE)} style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid #0088cc",background:"#e8f4fb",color:"#006aaa",cursor:"pointer",fontSize:12,fontWeight:700}}>📤 Share</button>
+            <button onClick={()=>setTgShareEntry(viewE)} style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid #0088cc",background:"#d8eefb",color:"#005f8f",cursor:"pointer",fontSize:12,fontWeight:700}}>✈️ Telegram</button>
             <button onClick={()=>shareEntryHTML(viewE)} style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid #5a3a8a",background:"#f5eeff",color:"#5a1a8a",cursor:"pointer",fontSize:12}}>🖼 Card</button>
             <button onClick={()=>{setEditE(viewE);setViewE(null);setShowForm(true);}} style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid #c8a060",background:"#fff8ee",color:"#8a5a00",cursor:"pointer",fontSize:12}}>✏️</button>
             <button onClick={()=>hideEntry(viewE.id)} style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid #ccc",background:"#f5f5f5",color:"#555",cursor:"pointer",fontSize:12}}>👁 Hide</button>
@@ -5259,6 +5379,7 @@ function App(){
     <Modal open={showSpectrum} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showRules} onClose={()=>setShowRules(false)} wide><RulesEngine entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRules(false)}/></Modal>
     <Modal open={showTelegram} onClose={()=>setShowTelegram(false)}><TelegramTeam onClose={()=>setShowTelegram(false)}/></Modal>
+    <Modal open={!!tgShareEntry} onClose={()=>setTgShareEntry(null)}><TelegramShare entry={tgShareEntry} onClose={()=>setTgShareEntry(null)}/></Modal>
     <Modal open={!!capMode} onClose={()=>setCapMode(null)}><PurchaseSalesCapture mode={capMode} onSaveEntry={saveEntry} onClose={()=>setCapMode(null)}/></Modal>
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
     <Modal open={showPins} onClose={()=>setShowPins(false)}><PinManager onClose={()=>setShowPins(false)}/></Modal>
