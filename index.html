@@ -3110,7 +3110,9 @@ function Spectrum({ onClose, onSaveEntry }) {
   ];
   const [master, setMaster] = useState(DEFAULT_MASTER);
   const [editingProducts, setEditingProducts] = useState(false);
-  const OFFICERS = ["Sooraj","Sunil","Biju","Murugan","Sebi","Sugeesh","Satish","Sadasivan","Vinod"];
+  const OFFICERS = ["Sooraj","Sunil","Biju","Murugan","Sebi","Sugeesh","Satish","Sadasivan","Vinod","Rupesh (Agent 2)"];
+  const AGENT2 = "Rupesh (Agent 2)";
+  const AGENT2_RATE = 0.14;   // 14% commission, only on orders tagged to him, payable on realisation
 
   const [tab, setTab] = useState("upload"); // upload | officers | products
   const [orders, setOrders] = useState([]);        // {id,date,customer,officer,total,lines:[{sku,name,doz,gp}], gpTotal}
@@ -3168,7 +3170,12 @@ function Spectrum({ onClose, onSaveEntry }) {
 
   const confirmOrder = async () => {
     if(!pending||!tagOfficer){ setMsg("Pick a salesperson to tag."); return; }
-    const o={ id:"ord_"+Date.now(), date:pending.date, customer:pending.customer, orderNo:pending.orderNo, officer:tagOfficer, total:pending.grandTotal, gpTotal:pending.gpTotal, lines:pending.lines };
+    const o={ id:"ord_"+Date.now(), date:pending.date, customer:pending.customer, orderNo:pending.orderNo,
+      officer:tagOfficer, total:pending.grandTotal, gpTotal:pending.gpTotal, lines:pending.lines,
+      stage:"invoiced",          // invoiced -> dispatched -> delivered -> paid
+      transport:0,               // freight, you enter it
+      received:0,                // part-payments allowed
+      commissionPaid:false };
     const no=[o,...orders]; setOrders(no); setPending(null); setPhoto(null); setTagOfficer(""); setMsg("✓ Order tagged to "+tagOfficer);
     await persist(no, expenses);
     // Also log into the main tracker (owner's record) so orders are searchable and never lost at volume
@@ -3187,6 +3194,11 @@ function Spectrum({ onClose, onSaveEntry }) {
       }
     }catch(e){}
     setTimeout(()=>setMsg(""),2500);
+  };
+  const updOrder = async (id, patch) => {
+    const no = orders.map(o => o.id===id ? {...o, ...patch} : o);
+    setOrders(no);
+    await persist(no, expenses);
   };
   const delOrder = async id => { const no=orders.filter(o=>o.id!==id); setOrders(no); await persist(no,expenses); };
   const setExp = async (off,val) => { const ne={...expenses,[off]:val}; setExpenses(ne); await persist(orders,ne); };
@@ -3287,19 +3299,65 @@ function Spectrum({ onClose, onSaveEntry }) {
           if(!list.length) return <div style={{fontSize:12,color:"#999",fontStyle:"italic",padding:12,textAlign:"center"}}>No matching orders.</div>;
           return <div style={{maxHeight:"58vh",overflowY:"auto"}}>
             <div style={{fontSize:11,color:"#777",marginBottom:6}}>{list.length} order{list.length===1?"":"s"}{IS_OWNER?(" · GP "+fmt(list.reduce((s,o)=>s+(o.gpTotal||0),0))):""}</div>
-            {list.map(o=>(
-              <div key={o.id} style={{border:"1px solid #eee",borderRadius:8,padding:"8px 10px",marginBottom:6}}>
+            {list.map(o=>{
+              const STAGES=["invoiced","dispatched","delivered","paid"];
+              const stage=o.stage||"invoiced";
+              const total=Number(o.total)||0;
+              const recd=Number(o.received)||0;
+              const due=Math.max(0,total-recd);
+              const transport=Number(o.transport)||0;
+              const isAgent2=(o.officer===AGENT2);
+              const commission=isAgent2?(total*AGENT2_RATE):0;
+              const commissionDue=isAgent2 && recd>0;   // payable on realisation only
+              const netProfit=(Number(o.gpTotal)||0)-transport-commission;
+              return (
+              <div key={o.id} style={{border:"1px solid "+(due<=0.5?"#cfe0cf":"#eee"),background:due<=0.5?"#f7fbf7":"#fff",borderRadius:8,padding:"9px 10px",marginBottom:7}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span style={{fontWeight:700,color:"#3a2a6a",fontSize:13}}>{o.customer||"Customer"}</span>
                   <span style={{fontSize:11,color:"#777"}}>{o.date}</span>
                 </div>
                 <div style={{fontSize:11.5,color:"#555",marginTop:2}}>
-                  <b style={{color:"#5a3a9a"}}>{o.officer}</b>{o.orderNo?(" · #"+o.orderNo):""} · Value {fmt(o.total||0)}{IS_OWNER?(" · GP "+fmt(o.gpTotal||0)):""}
+                  <b style={{color:"#5a3a9a"}}>{o.officer}</b>{o.orderNo?(" · #"+o.orderNo):""} · Value {fmt(total)}{IS_OWNER?(" · GP "+fmt(o.gpTotal||0)):""}
                 </div>
-                <div style={{fontSize:10.5,color:"#888",marginTop:3}}>{(o.lines||[]).map(l=>l.name+(l.doz?(" "+l.doz+"dz"):"")).join(", ")}</div>
+
+                {/* stage pipeline */}
+                <div style={{display:"flex",gap:4,marginTop:7}}>
+                  {STAGES.map(s=>{
+                    const done=STAGES.indexOf(stage)>=STAGES.indexOf(s);
+                    return <button key={s} onClick={()=>updOrder(o.id,{stage:s})}
+                      style={{flex:1,padding:"5px 2px",borderRadius:6,fontSize:9.5,fontWeight:700,cursor:"pointer",
+                        border:"1px solid "+(done?"#1a7a4a":"#ddd"),
+                        background:done?"#1a7a4a":"#fff",color:done?"#fff":"#999"}}>
+                      {s==="invoiced"?"📄 Invoiced":s==="dispatched"?"🚚 Dispatched":s==="delivered"?"📦 Delivered":"💰 Paid"}
+                    </button>;
+                  })}
+                </div>
+
+                {IS_OWNER && <div style={{marginTop:8,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                  <label style={{fontSize:10.5,color:"#666"}}>Transport ₹</label>
+                  <input type="number" value={o.transport||""} onChange={e=>updOrder(o.id,{transport:Number(e.target.value)||0})}
+                    placeholder="freight" style={{width:80,padding:"5px 6px",borderRadius:6,border:"1px solid #ccd",fontSize:11.5}}/>
+                  <label style={{fontSize:10.5,color:"#666"}}>Received ₹</label>
+                  <input type="number" value={o.received||""} onChange={e=>updOrder(o.id,{received:Number(e.target.value)||0})}
+                    placeholder="0" style={{width:90,padding:"5px 6px",borderRadius:6,border:"1px solid #ccd",fontSize:11.5}}/>
+                  <button onClick={()=>updOrder(o.id,{received:total,stage:"paid"})}
+                    style={{fontSize:10,padding:"4px 9px",borderRadius:14,border:"1px solid #1a7a4a",background:"#fff",color:"#1a7a4a",cursor:"pointer"}}>Full</button>
+                </div>}
+
+                {IS_OWNER && <div style={{marginTop:6,fontSize:11,display:"flex",gap:10,flexWrap:"wrap"}}>
+                  {due>0.5
+                    ? <span style={{color:"#c33",fontWeight:700}}>Outstanding {fmt(due)}</span>
+                    : <span style={{color:"#1a7a3a",fontWeight:700}}>✓ Fully received</span>}
+                  {isAgent2 && <span style={{color:commissionDue?"#8a5a1a":"#999"}}>
+                    Agent 2 commission 14% = {fmt(commission)}{commissionDue?" (due)":" (on realisation)"}
+                  </span>}
+                  <span style={{color:"#1a5a3a",fontWeight:700}}>Net after transport{isAgent2?" + commission":""}: {fmt(netProfit)}</span>
+                </div>}
+
+                <div style={{fontSize:10.5,color:"#888",marginTop:5}}>{(o.lines||[]).map(l=>l.name+(l.doz?(" "+l.doz+"dz"):"")).join(", ")}</div>
                 <button onClick={()=>delOrder(o.id)} style={{marginTop:4,fontSize:10.5,border:"none",background:"none",color:"#c33",cursor:"pointer",padding:0}}>Delete</button>
-              </div>
-            ))}
+              </div>);
+            })}
           </div>;
         })()}
       </div>}
