@@ -2510,8 +2510,18 @@ function Receivables({ entries, onSaveEntry, onClose }) {
   // Sales entries that still have money outstanding
   const open = (entries || []).filter(e => {
     if (!e) return false;
-    const isSale = /sales/i.test(e.category || "") || /sales/i.test(e.taskType || "");
+    const cat = String(e.category || "");
+    const tt  = String(e.taskType || "");
+    const tags = (e.tags || []).map(t => String(t).toLowerCase());
+    // Only true customer sales invoices — money owed TO us
+    const isSale = /^\s*sales\s*$/i.test(cat) || /^\s*sales\s*$/i.test(tt);
     if (!isSale) return false;
+    // Exclude officer visits / travel allowance / field reports — money we PAY OUT
+    const notInvoice =
+      /visit|allowance|travel|field|expense|report|salary/i.test(cat) ||
+      /visit|allowance|travel|field|expense|report|salary/i.test(tt) ||
+      tags.some(t => /visit|allowance|travel|field report|expense/.test(t));
+    if (notInvoice) return false;
     const total = num(e.amount);
     if (total <= 0) return false;
     const paid = num(e.amountPaid);
