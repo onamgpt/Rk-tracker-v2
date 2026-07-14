@@ -2497,6 +2497,143 @@ function PurchaseSalesCapture({ mode, onSaveEntry, onClose }) {
 }
 
 
+function Receivables({ entries, onSaveEntry, onClose }) {
+  const [payFor, setPayFor] = useState(null);   // entry being paid
+  const [payAmt, setPayAmt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const num = v => { const n = parseFloat(String(v ?? "").replace(/[^0-9.]/g, "")); return isNaN(n) ? 0 : n; };
+  const fmt = n => "₹" + Math.round(n).toLocaleString("en-IN");
+  const daysOld = d => { const t = Date.parse(d); return isNaN(t) ? 0 : Math.floor((Date.now() - t) / 86400000); };
+
+  // Sales entries that still have money outstanding
+  const open = (entries || []).filter(e => {
+    if (!e) return false;
+    const isSale = /sales/i.test(e.category || "") || /sales/i.test(e.taskType || "");
+    if (!isSale) return false;
+    const total = num(e.amount);
+    if (total <= 0) return false;
+    const paid = num(e.amountPaid);
+    return paid < total - 0.5;   // still something owed
+  });
+
+  const withCalc = open.map(e => {
+    const total = num(e.amount), paid = num(e.amountPaid);
+    return { e, total, paid, due: total - paid, age: daysOld(e.date) };
+  }).sort((a, b) => b.age - a.age);   // oldest first
+
+  const totalDue = withCalc.reduce((s, x) => s + x.due, 0);
+  const overdue60 = withCalc.filter(x => x.age >= 60);
+  const overdueDue = overdue60.reduce((s, x) => s + x.due, 0);
+
+  const openPay = (x) => { setPayFor(x); setPayAmt(String(Math.round(x.due))); setMsg(""); };
+
+  const record = async (full) => {
+    if (!payFor) return;
+    const amt = full ? payFor.due : num(payAmt);
+    if (amt <= 0) { setMsg("Enter an amount."); return; }
+    if (amt > payFor.due + 0.5) { setMsg("That's more than the outstanding amount."); return; }
+    setBusy(true);
+    const newPaid = payFor.paid + amt;
+    const settled = newPaid >= payFor.total - 0.5;
+    const upd = {
+      ...payFor.e,
+      amountPaid: newPaid,
+      paymentStatus: settled ? "Paid" : "Partially Paid",
+      notes: (payFor.e.notes ? payFor.e.notes + " | " : "") +
+             "Received " + fmt(amt) + " on " + new Date().toISOString().slice(0, 10) +
+             (settled ? " — settled in full" : (" — " + fmt(payFor.total - newPaid) + " still due")),
+      tags: Array.from(new Set([...(payFor.e.tags || []).filter(t => t !== "Payment Due"),
+                                settled ? "Payment Received" : "Partially Paid"]))
+    };
+    try {
+      await onSaveEntry(upd);
+      setMsg("✓ Recorded " + fmt(amt) + (settled ? " — fully settled" : " — " + fmt(payFor.total - newPaid) + " still due"));
+      setPayFor(null); setPayAmt("");
+      setTimeout(() => setMsg(""), 3000);
+    } catch (err) { setMsg("Couldn't save — try again."); }
+    setBusy(false);
+  };
+
+  const inp = { width: "100%", padding: "10px", borderRadius: 8, border: "1.5px solid #cfd8cf", fontSize: 15, marginBottom: 10 };
+
+  return (
+    <div style={{ padding: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <span style={{ fontSize: 26 }}>📥</span>
+        <div><h2 style={{ margin: 0, fontSize: 18, color: "#1a5a3a" }}>Receivables</h2>
+        <div style={{ fontSize: 11, color: "#6a7a6a" }}>Who owes you, how much, how long</div></div>
+      </div>
+
+      {/* Headline */}
+      <div style={{ background: totalDue > 0 ? "linear-gradient(135deg,#1a7a4a,#0a5a2a)" : "#888", borderRadius: 12, padding: "14px 16px", color: "#fff", marginBottom: 12 }}>
+        <div style={{ fontSize: 11, opacity: .9, letterSpacing: ".05em" }}>TOTAL OUTSTANDING</div>
+        <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1 }}>{fmt(totalDue)}</div>
+        <div style={{ fontSize: 10.5, opacity: .85, marginTop: 3 }}>
+          {withCalc.length} invoice{withCalc.length === 1 ? "" : "s"}
+          {overdue60.length > 0 && <span> · <b>{fmt(overdueDue)} over 60 days</b></span>}
+        </div>
+      </div>
+
+      {msg && <div style={{ fontSize: 12.5, color: msg[0] === "✓" ? "#1a7a3a" : "#a33", marginBottom: 10 }}>{msg}</div>}
+
+      {/* Payment entry */}
+      {payFor && (
+        <div style={{ background: "#f2f9f2", border: "2px solid #1a7a4a", borderRadius: 10, padding: 12, marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#1a5a3a" }}>{payFor.e.person || payFor.e.title}</div>
+          <div style={{ fontSize: 11, color: "#666", marginBottom: 8 }}>
+            Invoice {fmt(payFor.total)} · already paid {fmt(payFor.paid)} · <b>{fmt(payFor.due)} due</b>
+          </div>
+          <label style={{ fontSize: 12, fontWeight: 700, color: "#1a5a3a" }}>Amount received ₹</label>
+          <input type="number" value={payAmt} onChange={e => setPayAmt(e.target.value)} style={inp} autoFocus />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => { setPayFor(null); setMsg(""); }} style={{ flex: 1, padding: "10px", borderRadius: 8, border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontSize: 13 }}>Cancel</button>
+            <button onClick={() => record(false)} disabled={busy} style={{ flex: 1, padding: "10px", borderRadius: 8, border: "1px solid #1a7a4a", background: "#eafaf0", color: "#1a5a3a", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Record part</button>
+            <button onClick={() => record(true)} disabled={busy} style={{ flex: 1.2, padding: "10px", borderRadius: 8, border: "none", background: "#1a7a4a", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>✓ Paid in full</button>
+          </div>
+        </div>
+      )}
+
+      {/* List */}
+      {withCalc.length === 0 && <div style={{ fontSize: 12.5, color: "#777", fontStyle: "italic", textAlign: "center", padding: 20 }}>
+        Nothing outstanding. Every sales invoice is settled.
+      </div>}
+
+      {withCalc.map((x, i) => {
+        const red = x.age >= 60, amber = x.age >= 30 && x.age < 60;
+        return (
+          <div key={i} style={{
+            border: "1px solid " + (red ? "#e0a0a0" : amber ? "#e0c890" : "#dde0dd"),
+            background: red ? "#fdf5f5" : amber ? "#fdfaf2" : "#fafafa",
+            borderRadius: 10, padding: 10, marginBottom: 8
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2a" }}>{x.e.person || x.e.title || "—"}</div>
+                <div style={{ fontSize: 10.5, color: "#777", marginTop: 2 }}>
+                  {x.e.date} · {x.age} days old
+                  {x.paid > 0 && <span style={{ color: "#1a7a4a" }}> · part-paid {fmt(x.paid)} of {fmt(x.total)}</span>}
+                </div>
+                {red && <div style={{ display: "inline-block", marginTop: 4, fontSize: 9.5, color: "#fff", background: "#c33", padding: "1px 7px", borderRadius: 10 }}>60+ DAYS</div>}
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: red ? "#c33" : "#1a5a3a" }}>{fmt(x.due)}</div>
+                <button onClick={() => openPay(x)} style={{ marginTop: 4, fontSize: 11, padding: "5px 12px", borderRadius: 7, border: "1px solid #1a7a4a", background: "#eafaf0", color: "#1a5a3a", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>₹ Received</button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{ fontSize: 10, color: "#999", marginTop: 12, fontStyle: "italic" }}>
+        Part-payments are supported — record what came in, and the balance stays outstanding until settled.
+      </div>
+    </div>
+  );
+}
+
+
 function TelegramShare({ entry, onClose }) {
   const [contacts, setContacts] = useState([]);
   const [selected, setSelected] = useState([]);
@@ -4795,6 +4932,7 @@ function App(){
   const [showRules,setShowRules]=useState(false);
   const [showTelegram,setShowTelegram]=useState(false);
   const [showGym,setShowGym]=useState(false);
+  const [showRecv,setShowRecv]=useState(false);
   const [tgShareEntry,setTgShareEntry]=useState(null);
   const [capMode,setCapMode]=useState(null); // "purchase" | "sales" | null
   const [showFieldReport,setShowFieldReport]=useState(false);
@@ -5213,6 +5351,7 @@ function App(){
             {navMenuOpen&&<div style={{position:"absolute",top:"112%",left:0,zIndex:950,background:"#2a2318",border:"1px solid #c8a060",borderRadius:10,padding:5,minWidth:180,boxShadow:"0 8px 22px rgba(0,0,0,.5)"}}>
               {[
                 {l:"📈 CFO Brief",fn:()=>setShowCFO(true)},
+                {l:"📥 Receivables",fn:()=>setShowRecv(true)},
                 {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true)},
                 {l:"⚖️ Rules",fn:()=>setShowRules(true)},
                 {l:"✈️ Telegram",fn:()=>setShowTelegram(true)},
@@ -5479,6 +5618,7 @@ function App(){
     <Modal open={showRules} onClose={()=>setShowRules(false)} wide><RulesEngine entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRules(false)}/></Modal>
     <Modal open={showTelegram} onClose={()=>setShowTelegram(false)}><TelegramTeam onClose={()=>setShowTelegram(false)}/></Modal>
     <Modal open={showGym} onClose={()=>setShowGym(false)}><GymLog entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowGym(false)}/></Modal>
+    <Modal open={showRecv} onClose={()=>setShowRecv(false)}><Receivables entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRecv(false)}/></Modal>
     <Modal open={!!tgShareEntry} onClose={()=>setTgShareEntry(null)}><TelegramShare entry={tgShareEntry} onClose={()=>setTgShareEntry(null)}/></Modal>
     <Modal open={!!capMode} onClose={()=>setCapMode(null)}><PurchaseSalesCapture mode={capMode} onSaveEntry={saveEntry} onClose={()=>setCapMode(null)}/></Modal>
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
