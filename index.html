@@ -5351,6 +5351,7 @@ function App(){
             {navMenuOpen&&<div style={{position:"absolute",top:"112%",left:0,zIndex:950,background:"#2a2318",border:"1px solid #c8a060",borderRadius:10,padding:5,minWidth:180,boxShadow:"0 8px 22px rgba(0,0,0,.5)"}}>
               {[
                 {l:"📈 CFO Brief",fn:()=>setShowCFO(true)},
+                {l:"💰 Receivables",fn:()=>setShowRecv(true)},
                 {l:"📥 Receivables",fn:()=>setShowRecv(true)},
                 {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true)},
                 {l:"⚖️ Rules",fn:()=>setShowRules(true)},
@@ -5616,6 +5617,7 @@ function App(){
     <Modal open={showCFO} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
     <Modal open={showSpectrum} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showRules} onClose={()=>setShowRules(false)} wide><RulesEngine entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRules(false)}/></Modal>
+    
     <Modal open={showTelegram} onClose={()=>setShowTelegram(false)}><TelegramTeam onClose={()=>setShowTelegram(false)}/></Modal>
     <Modal open={showGym} onClose={()=>setShowGym(false)}><GymLog entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowGym(false)}/></Modal>
     <Modal open={showRecv} onClose={()=>setShowRecv(false)}><Receivables entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRecv(false)}/></Modal>
