@@ -3539,6 +3539,94 @@ JSON.stringify(snap, null, 2)+"\n\n"+
   );
 }
 
+function GymLog({ entries, onSaveEntry, onClose }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [parsed, setParsed] = useState(null);
+  const [msg, setMsg] = useState("");
+
+  const analyze = async () => {
+    if (!text.trim()) return;
+    setBusy(true); setMsg("");
+    try {
+      const prompt =
+"Parse this gym/workout note into structured data. Estimate calories burned roughly if possible.\n\n\"" + text + "\"\n\n" +
+"Return ONLY valid JSON: {\"summary\":\"short workout name\",\"exercises\":[{\"name\":\"\",\"sets\":<number or 0>,\"reps\":<number or 0>,\"weightKg\":<number or 0>}],\"durationMin\":<number or 0>,\"caloriesBurned\":<rough number or 0>,\"note\":\"one-line caveat that estimates are approximate\"}";
+      const txt = await claudeAPI(prompt, "You log workouts. Estimates are rough. Return ONLY valid JSON.", "", "", "");
+      const clean = String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
+      const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
+      setParsed(JSON.parse(s>=0?clean.substring(s,e+1):clean));
+    } catch(e) { setMsg("Couldn't read that — try simpler wording."); }
+    setBusy(false);
+  };
+
+  const save = async () => {
+    if (!parsed) return;
+    setBusy(true);
+    const ex = (parsed.exercises||[]).map(x =>
+      x.name + (x.sets?(" "+x.sets+"x"+(x.reps||"")):"") + (x.weightKg?(" @"+x.weightKg+"kg"):"")
+    ).join(", ");
+    const entry = {
+      id: genId(),
+      title: "Gym — " + (parsed.summary || "Workout"),
+      date: new Date().toISOString().slice(0,10),
+      category: "Health",
+      taskType: "Gym",
+      notes: ex + (parsed.durationMin?(" | "+parsed.durationMin+" min"):"") + (parsed.caloriesBurned?(" | ≈"+parsed.caloriesBurned+" kcal burned"):"") + " | " + (parsed.note||"approximate"),
+      caloriesBurned: parsed.caloriesBurned || 0,
+      durationMin: parsed.durationMin || 0,
+      tags: ["Gym"],
+      createdAt: new Date().toISOString()
+    };
+    try { await onSaveEntry(entry); setMsg("✓ Workout logged"); setText(""); setParsed(null); setTimeout(()=>onClose&&onClose(), 900); }
+    catch(e) { setMsg("Save failed."); }
+    setBusy(false);
+  };
+
+  const inp = { width:"100%", padding:"10px", borderRadius:8, border:"1.5px solid #cfd8cf", fontSize:14, marginBottom:10 };
+
+  return (
+    <div style={{ padding: 4 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+        <span style={{ fontSize:26 }}>🏋️</span>
+        <div><h2 style={{ margin:0, fontSize:18, color:"#2a5a8a" }}>Gym Log</h2>
+        <div style={{ fontSize:11, color:"#6a7a8a" }}>Just type your workout naturally</div></div>
+      </div>
+
+      <textarea value={text} onChange={e=>setText(e.target.value)} rows={3}
+        placeholder='e.g. "Bench press 3 sets of 10 at 60kg, squats 4x8 80kg, 20 min treadmill"'
+        style={{...inp, resize:"vertical"}}/>
+
+      {!parsed && <button onClick={analyze} disabled={busy||!text.trim()} style={{ width:"100%", padding:"12px", borderRadius:10, border:"none", background:"linear-gradient(135deg,#2a5a8a,#1a3a6a)", color:"#fff", fontWeight:700, fontSize:15, cursor:"pointer" }}>
+        {busy ? "⏳ Reading…" : "🧠 Analyze & Review"}
+      </button>}
+
+      {msg && <div style={{ fontSize:12.5, color: msg[0]==="✓"?"#1a7a3a":"#a33", marginTop:8, textAlign:"center" }}>{msg}</div>}
+
+      {parsed && <div style={{ background:"#f5f8fc", border:"1.5px solid #a8c8e0", borderRadius:10, padding:12, marginTop:10 }}>
+        <div style={{ fontSize:13, fontWeight:700, color:"#2a5a8a", marginBottom:6 }}>{parsed.summary || "Workout"}</div>
+        {(parsed.exercises||[]).map((x,i)=>(
+          <div key={i} style={{ fontSize:12.5, color:"#334", padding:"2px 0" }}>
+            • {x.name}{x.sets?(" — "+x.sets+" x "+(x.reps||"?")):""}{x.weightKg?(" @ "+x.weightKg+" kg"):""}
+          </div>
+        ))}
+        <div style={{ marginTop:8, display:"flex", gap:8, flexWrap:"wrap" }}>
+          {parsed.durationMin>0 && <span style={{ background:"#e8f0fa", border:"1px solid #a8c8e0", borderRadius:8, padding:"3px 10px", fontSize:12, fontWeight:700, color:"#2a5a8a" }}>⏱ {parsed.durationMin} min</span>}
+          {parsed.caloriesBurned>0 && <span style={{ background:"#fff4e8", border:"1px solid #d09a4a", borderRadius:8, padding:"3px 10px", fontSize:12, fontWeight:700, color:"#8a5a1a" }}>🔥 ≈ {parsed.caloriesBurned} kcal burned</span>}
+        </div>
+        <div style={{ display:"flex", gap:8, marginTop:12 }}>
+          <button onClick={()=>{setParsed(null);}} style={{ flex:1, padding:"10px", borderRadius:8, border:"1px solid #ccc", background:"#fff", cursor:"pointer", fontSize:13 }}>✕ Redo</button>
+          <button onClick={save} disabled={busy} style={{ flex:2, padding:"10px", borderRadius:8, border:"none", background:"#2a5a8a", color:"#fff", fontWeight:700, cursor:"pointer", fontSize:14 }}>✅ Save workout</button>
+        </div>
+      </div>}
+
+      <div style={{ fontSize:10, color:"#8a9a9a", marginTop:10, fontStyle:"italic" }}>
+        Calories burned are a rough estimate — for your own pattern-tracking, not medical use.
+      </div>
+    </div>
+  );
+}
+
 function FastingTimer({ entries }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
@@ -3611,7 +3699,7 @@ Return ONLY valid JSON:
       obj.type = "Meal";
       obj._photo = true;
       obj.summary = obj.summary || "Meal";
-      obj.details = (Array.isArray(obj.foods)?obj.foods.join(", "):"") + " | ≈ " + (obj.proteinGrams||"?") + "g protein (approx) | " + (obj.note||"estimate only");
+      obj.details = (Array.isArray(obj.foods)?obj.foods.join(", "):"") + " | ≈ " + (obj.proteinGrams||"?") + "g protein, ≈ " + (obj.calories||"?") + " kcal (approx) | " + (obj.note||"estimate only");
       setParsed(obj);
       setStatusMsg("");
     } catch(e) {
@@ -3677,8 +3765,9 @@ Return ONLY valid JSON:
       title: parsed.summary || text.slice(0,80),
       date: new Date().toISOString().slice(0,10),
       category: "Health",
-      notes: (parsed.details||text) + (parsed.severity?(" | Severity: "+parsed.severity):"") + (parsed.time?(" | Time: "+parsed.time):"") + (parsed.proteinGrams?(" | protein≈"+parsed.proteinGrams+"g"):""),
+      notes: (parsed.details||text) + (parsed.severity?(" | Severity: "+parsed.severity):"") + (parsed.time?(" | Time: "+parsed.time):"") + (parsed.proteinGrams?(" | protein≈"+parsed.proteinGrams+"g"):"") + (parsed.calories?(" | ≈"+parsed.calories+" kcal"):""),
       amount: parsed.proteinGrams ? String(parsed.proteinGrams) : "",
+      calories: parsed.calories || 0,
       tags: parsed.type ? [parsed.type] : [],
       createdAt: new Date().toISOString()
     };
@@ -3708,9 +3797,11 @@ Return ONLY valid JSON:
         const today = new Date().toISOString().slice(0,10);
         const meals = (entries||[]).filter(e => e && e.category==="Health" && e.date===today && (e.tags||[]).indexOf("Meal")>-1);
         let total = 0; meals.forEach(m => { const p = parseFloat(m.amount); if(!isNaN(p)) total += p; });
+        let kcal = 0; meals.forEach(m => { const c = parseFloat(m.calories); if(!isNaN(c)) kcal += c; });
         return (
           <div style={{ background:"#eefafa", border:"1.5px solid #4a9a9a", borderRadius:10, padding:"10px 12px", marginBottom:12 }}>
             <div style={{ fontSize:13, fontWeight:700, color:"#0a5a5a" }}>🍽 Today ≈ {Math.round(total)}g protein <span style={{fontWeight:400,fontSize:11,color:"#5a8a8a"}}>(rough, from {meals.length} meal{meals.length===1?"":"s"})</span></div>
+            {kcal>0 && <div style={{ fontSize:13, fontWeight:700, color:"#8a5a1a", marginTop:3 }}>🔥 Today ≈ {Math.round(kcal)} kcal <span style={{fontWeight:400,fontSize:11,color:"#a08050"}}>(approx)</span></div>}
           </div>
         );
       })()}
@@ -3754,6 +3845,12 @@ Return ONLY valid JSON:
           <div style={{ fontSize:11, color:"#5a4a2a" }}>{parsed.details}</div>
           {(parsed.proteinGrams>0) && <div style={{ marginTop:6, display:"inline-block", background:"#eefafa", border:"1px solid #4a9a9a", borderRadius:8, padding:"3px 10px", fontSize:12, fontWeight:700, color:"#0a5a5a" }}>
             🍽 ≈ {parsed.proteinGrams}g protein <span style={{fontWeight:400,fontSize:10,color:"#5a8a8a"}}>(approx)</span>
+          </div>}
+          {(parsed.calories>0) && <span style={{ marginTop:6, marginLeft:6, display:"inline-block", background:"#fff4e8", border:"1px solid #d09a4a", borderRadius:8, padding:"3px 10px", fontSize:12, fontWeight:700, color:"#8a5a1a" }}>
+            🔥 ≈ {parsed.calories} kcal
+          </span>}
+          {(parsed.calories>0) && <div style={{ marginTop:6, marginLeft:6, display:"inline-block", background:"#fff4e8", border:"1px solid #d09a4a", borderRadius:8, padding:"3px 10px", fontSize:12, fontWeight:700, color:"#8a5a1a" }}>
+            🔥 ≈ {parsed.calories} kcal <span style={{fontWeight:400,fontSize:10,color:"#a08050"}}>(approx)</span>
           </div>}
           {parsed.severity && <div style={{ fontSize:10, color:"#8a6a2a", marginTop:4 }}>Severity: {parsed.severity}</div>}
         </div>
@@ -4697,6 +4794,7 @@ function App(){
   const [showSpectrum,setShowSpectrum]=useState(false);
   const [showRules,setShowRules]=useState(false);
   const [showTelegram,setShowTelegram]=useState(false);
+  const [showGym,setShowGym]=useState(false);
   const [tgShareEntry,setTgShareEntry]=useState(null);
   const [capMode,setCapMode]=useState(null); // "purchase" | "sales" | null
   const [showFieldReport,setShowFieldReport]=useState(false);
@@ -5124,6 +5222,7 @@ function App(){
                 {l:"📍 Location",fn:()=>setShowLocation(true)},
                 {l:"📒 Day Book",fn:()=>setShowDayBook(true)},
                 {l:"🏥 Health",fn:()=>setShowHealth(true)},
+                {l:"🏋️ Gym",fn:()=>setShowGym(true)},
                 {l:"👨‍👩‍👧 Family",fn:()=>setShowFamily(true)},
                 {l:"💬 Remind",fn:()=>setShowPaymentReminders(true)},
                 {l:"🚚 Logistics",fn:()=>setShowLogistics(true)},
@@ -5379,6 +5478,7 @@ function App(){
     <Modal open={showSpectrum} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showRules} onClose={()=>setShowRules(false)} wide><RulesEngine entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRules(false)}/></Modal>
     <Modal open={showTelegram} onClose={()=>setShowTelegram(false)}><TelegramTeam onClose={()=>setShowTelegram(false)}/></Modal>
+    <Modal open={showGym} onClose={()=>setShowGym(false)}><GymLog entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowGym(false)}/></Modal>
     <Modal open={!!tgShareEntry} onClose={()=>setTgShareEntry(null)}><TelegramShare entry={tgShareEntry} onClose={()=>setTgShareEntry(null)}/></Modal>
     <Modal open={!!capMode} onClose={()=>setCapMode(null)}><PurchaseSalesCapture mode={capMode} onSaveEntry={saveEntry} onClose={()=>setCapMode(null)}/></Modal>
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
