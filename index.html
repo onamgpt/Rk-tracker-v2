@@ -3085,6 +3085,182 @@ function RulesEngine({ entries, onSaveEntry, onClose }) {
 }
 
 
+function Kerala({ onClose, onSaveEntry }) {
+  const KERALA_OFFICERS = ["Sooraj","Sunil","Biju","Murugan","Sebi","Sugeesh","Satish"];
+  const [reqs, setReqs] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [filter, setFilter] = useState("all");   // all | Kochi | Kozhikode
+  const [intel, setIntel] = useState("");
+
+  const load = async () => {
+    try {
+      const r = await sheetsAPI("getPortfolio", { key: "kesar_requests" });
+      if (r && r.data && Array.isArray(r.data)) setReqs(r.data);
+    } catch(e) {}
+  };
+  useEffect(() => { load(); }, []);
+  const persist = async (list) => { try { await sheetsAPI("savePortfolio", { key: "kesar_requests", data: list }); } catch(e) {} };
+
+  const upd = async (id, patch) => {
+    const n = reqs.map(r => r.id===id ? { ...r, ...patch } : r);
+    setReqs(n); await persist(n);
+  };
+  const del = async (id) => { const n = reqs.filter(r => r.id!==id); setReqs(n); await persist(n); };
+
+  const ageDays = r => {
+    const t = Date.parse(r.requested);
+    return isNaN(t) ? 0 : Math.floor((Date.now() - t) / 86400000);
+  };
+
+  const shown = reqs.filter(r => filter==="all" ? true : r.city===filter);
+
+  // funnel
+  const total = reqs.length;
+  const assigned = reqs.filter(r => r.officer).length;
+  const delivered = reqs.filter(r => r.delivered).length;
+  const shops = reqs.filter(r => r.shopOpened).length;
+  const reorders = reqs.filter(r => r.reordered).length;
+  const stale = reqs.filter(r => !r.delivered && ageDays(r) >= 3).length;
+
+  const brief = async () => {
+    setBusy(true); setIntel("");
+    try {
+      const snap = reqs.map(r => ({
+        city: r.city, area: r.area, temple: r.temple || "",
+        ageDays: ageDays(r), officer: r.officer || "unassigned",
+        delivered: !!r.delivered, shopOpened: !!r.shopOpened, reordered: !!r.reordered
+      }));
+      const prompt =
+        "You are advising an incense manufacturer launching 'Kesar Chandan' in Kerala, in Kochi and Kozhikode only.\n" +
+        "People request a free sample. One of seven field officers delivers it by hand, and then approaches the nearest shop " +
+        "using that request as proof of demand. A shop that REORDERS is the only real success.\n\n" +
+        "SAMPLE REQUESTS:\n" + JSON.stringify(snap, null, 2) + "\n\n" +
+        "Brief the owner, briefly and bluntly:\n" +
+        "1. FULFILMENT — are requests being delivered, or piling up? Name officers who are slow.\n" +
+        "2. WHERE THE DEMAND IS — which areas and temples keep appearing. That is where to push distribution.\n" +
+        "3. CONVERSION — are deliveries turning into shops, and shops into reorders? If not, the loop is broken.\n" +
+        "4. THREE THINGS TO DO THIS WEEK.\n\n" +
+        "If the data is thin, say so honestly rather than inventing a pattern.";
+      const txt = await claudeAPI(prompt, "You are a sharp, honest sales strategist. Be concise.", "", "", "");
+      setIntel(txt || "No briefing.");
+    } catch(e) { setMsg("Couldn't brief: " + (e.message||e)); }
+    setBusy(false);
+  };
+
+  const pill = (n, label, colour) => (
+    <div style={{ flex:1, textAlign:"center", padding:"8px 4px", background:"#fff", border:"1px solid #eee", borderRadius:8 }}>
+      <div style={{ fontSize:18, fontWeight:800, color:colour }}>{n}</div>
+      <div style={{ fontSize:9.5, color:"#888", letterSpacing:".04em" }}>{label}</div>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: 4 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+        <span style={{ fontSize:26 }}>🪔</span>
+        <div><h2 style={{ margin:0, fontSize:18, color:"#8a3a1a" }}>Kesar Chandan &mdash; Kerala</h2>
+        <div style={{ fontSize:11, color:"#9a7a5a" }}>Kochi &amp; Kozhikode · sample &rarr; officer &rarr; shop &rarr; reorder</div></div>
+      </div>
+
+      {/* funnel */}
+      <div style={{ display:"flex", gap:5, marginBottom:10 }}>
+        {pill(total, "REQUESTS", "#8a3a1a")}
+        {pill(delivered, "DELIVERED", "#c9860a")}
+        {pill(shops, "SHOPS", "#2a6a9a")}
+        {pill(reorders, "REORDERS", "#1a7a3a")}
+      </div>
+
+      {stale > 0 && <div style={{ background:"#fdf0f0", border:"1px solid #e0b0b0", borderRadius:8, padding:"8px 10px", marginBottom:10, fontSize:12, color:"#a33" }}>
+        ⚠ <b>{stale}</b> request{stale===1?"":"s"} waiting more than 3 days. Demand you created and did not collect.
+      </div>}
+
+      {/* filter */}
+      <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+        {["all","Kochi","Kozhikode"].map(c => (
+          <button key={c} onClick={()=>setFilter(c)} style={{ flex:1, padding:"7px", borderRadius:7, fontSize:12, fontWeight:700, cursor:"pointer",
+            border: filter===c ? "2px solid #8a3a1a" : "1px solid #ddd", background: filter===c ? "#fdf4ea" : "#fff", color:"#8a3a1a" }}>
+            {c==="all"?"All":c}
+          </button>
+        ))}
+        <button onClick={load} style={{ padding:"7px 12px", borderRadius:7, fontSize:12, border:"1px solid #ddd", background:"#fff", color:"#666", cursor:"pointer" }}>↻</button>
+      </div>
+
+      {msg && <div style={{ fontSize:12, color:"#a33", marginBottom:8 }}>{msg}</div>}
+
+      {/* requests */}
+      {shown.length===0 && <div style={{ fontSize:12, color:"#999", fontStyle:"italic", marginBottom:12 }}>
+        No sample requests yet. Share the campaign page and they will appear here.
+      </div>}
+
+      {shown.map(r => {
+        const age = ageDays(r);
+        const late = !r.delivered && age >= 3;
+        return (
+          <div key={r.id} style={{ border:"1px solid "+(late?"#e0b0b0":"#e8e0d0"), background: late?"#fdf7f7":"#fff",
+            borderRadius:10, padding:10, marginBottom:7 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+              <div>
+                <div style={{ fontSize:13.5, fontWeight:700, color:"#3a2a1a" }}>{r.name}</div>
+                <div style={{ fontSize:11.5, color:"#7a6a55" }}>
+                  {r.area}, {r.city} · <a href={"tel:"+r.phone} style={{ color:"#2a6a9a" }}>{r.phone}</a>
+                  {r.temple && <span> · 🛕 {r.temple}</span>}
+                </div>
+              </div>
+              <span style={{ fontSize:10.5, color: late?"#c33":"#999", fontWeight: late?700:400, whiteSpace:"nowrap" }}>
+                {age===0?"today":age+"d ago"}
+              </span>
+            </div>
+
+            <div style={{ display:"flex", gap:6, marginTop:8, flexWrap:"wrap", alignItems:"center" }}>
+              <select value={r.officer||""} onChange={e=>upd(r.id,{officer:e.target.value})}
+                style={{ padding:"5px 7px", borderRadius:6, border:"1px solid #ddd", fontSize:11.5, background: r.officer?"#f4faf4":"#fff" }}>
+                <option value="">— assign officer —</option>
+                {KERALA_OFFICERS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+
+              <label style={{ fontSize:11, display:"flex", alignItems:"center", gap:4, cursor:"pointer", color: r.delivered?"#c9860a":"#999" }}>
+                <input type="checkbox" checked={!!r.delivered}
+                  onChange={e=>upd(r.id,{delivered: e.target.checked ? new Date().toISOString().slice(0,10) : ""})}/>
+                delivered
+              </label>
+
+              <label style={{ fontSize:11, display:"flex", alignItems:"center", gap:4, cursor:"pointer", color: r.shopOpened?"#2a6a9a":"#999" }}>
+                <input type="checkbox" checked={!!r.shopOpened} onChange={e=>upd(r.id,{shopOpened:e.target.checked})}/>
+                shop stocked
+              </label>
+
+              <label style={{ fontSize:11, display:"flex", alignItems:"center", gap:4, cursor:"pointer", color: r.reordered?"#1a7a3a":"#999", fontWeight: r.reordered?700:400 }}>
+                <input type="checkbox" checked={!!r.reordered} onChange={e=>upd(r.id,{reordered:e.target.checked})}/>
+                reordered ★
+              </label>
+
+              <button onClick={()=>del(r.id)} style={{ border:"none", background:"none", color:"#c33", cursor:"pointer", fontSize:14, marginLeft:"auto" }}>×</button>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* intelligence */}
+      <button onClick={brief} disabled={busy || reqs.length===0}
+        style={{ width:"100%", marginTop:12, padding:"11px", borderRadius:10, border:"none",
+          background:"linear-gradient(135deg,#8a3a1a,#5a2a10)", color:"#fff", fontWeight:700, fontSize:13.5, cursor:"pointer" }}>
+        {busy ? "⏳ Thinking…" : "🧠 Brief me on the campaign"}
+      </button>
+
+      {intel && <div style={{ marginTop:10, background:"#fdf8f2", border:"1px solid #e8dcc6", borderRadius:10, padding:13,
+        whiteSpace:"pre-wrap", fontSize:13, lineHeight:1.6, color:"#3a2a1a", maxHeight:"45vh", overflowY:"auto" }}>
+        {intel}
+      </div>}
+
+      <div style={{ fontSize:10, color:"#999", marginTop:12, fontStyle:"italic" }}>
+        A shop that reorders is a customer. A shop that stocked once is a favour. Only the last column counts.
+      </div>
+    </div>
+  );
+}
+
+
 function CSD({ onClose, onSaveEntry }) {
   // Four CSD-exclusive products (COGS to be filled after price revision)
   const CSD_PRODUCTS = [
@@ -5419,6 +5595,7 @@ function App(){
   const [showCFO,setShowCFO]=useState(false);
   const [showSpectrum,setShowSpectrum]=useState(false);
   const [showCSD,setShowCSD]=useState(false);
+  const [showKerala,setShowKerala]=useState(false);
   const [showRules,setShowRules]=useState(false);
   const [showTelegram,setShowTelegram]=useState(false);
   const [showGym,setShowGym]=useState(false);
@@ -5845,6 +6022,7 @@ function App(){
                 {l:"📥 Receivables",fn:()=>setShowRecv(true)},
                 {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true)},
                 {l:"🛡️ CSD",fn:()=>setShowCSD(true)},
+                {l:"🪔 Kerala",fn:()=>setShowKerala(true)},
                 {l:"⚖️ Rules",fn:()=>setShowRules(true)},
                 {l:"✈️ Telegram",fn:()=>setShowTelegram(true)},
                 {l:"📝 Field Report",fn:()=>setShowFieldReport(true)},
@@ -6108,6 +6286,7 @@ function App(){
     <Modal open={showCFO} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
     <Modal open={showSpectrum} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showCSD} onClose={()=>setShowCSD(false)} wide><CSD onClose={()=>setShowCSD(false)} onSaveEntry={saveEntry}/></Modal>
+    <Modal open={showKerala} onClose={()=>setShowKerala(false)} wide><Kerala onClose={()=>setShowKerala(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showRules} onClose={()=>setShowRules(false)} wide><RulesEngine entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRules(false)}/></Modal>
     
     <Modal open={showTelegram} onClose={()=>setShowTelegram(false)}><TelegramTeam onClose={()=>setShowTelegram(false)}/></Modal>
