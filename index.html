@@ -3424,7 +3424,7 @@ function CSD({ onClose, onSaveEntry }) {
         <div style={{ background:"#eef3fb", border:"1px solid #c8d8f0", borderRadius:8, padding:10, marginBottom:10, fontSize:11.5, color:"#2a4a7a" }}>
           Upload the CSD purchase order <b>and</b> its depot-wise allocation sheet. The allocation creates one dispatch row per depot.
         </div>
-        <input ref={fileRef} type="file" accept="image/*,application/pdf" capture="environment" onChange={onPick} style={{ display:"none" }}/>
+        <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={onPick} style={{ display:"none" }}/>
         <button onClick={()=>fileRef.current && fileRef.current.click()} style={{ width:"100%", padding:"11px", borderRadius:10, border:"1.5px dashed #2a4a7a", background:"#f3f7fd", color:"#2a4a7a", fontWeight:700, fontSize:14, cursor:"pointer", marginBottom:10 }}>
           📄 Upload PO / allocation
         </button>
