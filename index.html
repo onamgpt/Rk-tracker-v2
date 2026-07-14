@@ -3085,6 +3085,300 @@ function RulesEngine({ entries, onSaveEntry, onClose }) {
 }
 
 
+function CSD({ onClose, onSaveEntry }) {
+  // Four CSD-exclusive products (COGS to be filled after price revision)
+  const CSD_PRODUCTS = [
+    { index: "13094", suffix: "L", name: 'ONAM Agarbatti Sandal 7.5" (100 Sticks)', casePack: 240, rate: 7490.40, cogs: 0 },
+    { index: "13095", suffix: "P", name: 'ONAM A/Batti 15 Sticks',                  casePack: 720, rate: 4651.20, cogs: 0 },
+    { index: "13130", suffix: "I", name: 'ONAM Agarbatti Rose 7.5" (100 Sticks)',   casePack: 240, rate: 7999.20, cogs: 0 },
+    { index: "13132", suffix: "T", name: 'ONAM Agarbatti 3 Fragrance 7.5" (100 Sticks)', casePack: 240, rate: 8316.00, cogs: 0 },
+  ];
+  const AGENT1_RATE = 0.145;                 // 14.5% commission, payable on realisation
+  const UP_DEPOTS = ["AGRA","BAREILLY","LUCKNOW","MEERUT"];   // Halal restriction depots
+
+  const [tab, setTab] = useState("board");   // board | upload | products | intel
+  const [orders, setOrders] = useState([]);  // [{id, poNo, poDate, deliveryFrom, deliveryTo, lines:[{index,name,casePack,rate,cases}], depots:[{depot, cases:{index:qty}, stage, invoiceNo, lr, transport, received}]}]
+  const [photo, setPhoto] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [openPO, setOpenPO] = useState(null);
+  const [intel, setIntel] = useState("");
+  const fileRef = useRef(null);
+
+  useEffect(() => { (async () => {
+    try { const r = await sheetsAPI("getPortfolio", { key: "csd" }); if (r && r.data && Array.isArray(r.data.orders)) setOrders(r.data.orders); } catch(e) {}
+  })(); }, []);
+  const persist = async (o) => { try { await sheetsAPI("savePortfolio", { key: "csd", data: { orders: o } }); } catch(e) {} };
+
+  const fmt = n => "₹" + Math.round(Number(n)||0).toLocaleString("en-IN");
+  const num = v => { const n = parseFloat(String(v??"").replace(/[^0-9.]/g,"")); return isNaN(n)?0:n; };
+
+  const onPick = ev => {
+    const f = ev.target.files && ev.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => setPhoto({ dataUrl: r.result, type: f.type || "image/jpeg" });
+    r.readAsDataURL(f);
+    setPending(null); setMsg("");
+  };
+
+  const scan = async () => {
+    if (!photo) return;
+    setBusy(true); setMsg("📄 Reading the CSD order / allocation…");
+    try {
+      const b64 = String(photo.dataUrl).split(",")[1];
+      const shape = '{"poNo":"","poDate":"","deliveryFrom":"","deliveryTo":"","lines":[{"index":"13130","name":"","casePack":240,"rate":7999.2,"cases":178}],"allocation":[{"depot":"CHENNAI","cases":{"13130":20,"13132":11}}]}';
+      const prompt =
+        "This is a Canteen Stores Department (CSD, Ministry of Defence) purchase order and/or its depot-wise allocation sheet. Extract everything.\n" +
+        "Return ONLY JSON in exactly this shape (this is an example, use the real values):\n" + shape + "\n" +
+        "The allocation table lists depot names down the left, and one column of case counts per index number. Map each depot to its cases for each index. A blank cell means zero - omit it.\n" +
+        "Dates as YYYY-MM-DD.";
+      const txt = await claudeAPI(prompt, "Return ONLY valid JSON. Read the depot allocation table carefully, column by column.", b64, photo.type, "");
+      const clean = String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
+      const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
+      const obj = JSON.parse(s>=0 ? clean.substring(s,e+1) : clean);
+      setPending(obj); setMsg("");
+    } catch(e) { setMsg("❌ Couldn't read it clearly — try a sharper image."); }
+    setBusy(false);
+  };
+
+  const confirmPO = async () => {
+    if (!pending) return;
+    const depots = (pending.allocation||[]).map(a => ({
+      depot: a.depot, cases: a.cases||{}, stage: "pending",
+      invoiceNo: "", lr: "", transport: 0, received: 0
+    }));
+    const o = {
+      id: "csd_" + Date.now(),
+      poNo: pending.poNo || "", poDate: pending.poDate || "",
+      deliveryFrom: pending.deliveryFrom || "", deliveryTo: pending.deliveryTo || "",
+      lines: pending.lines || [], depots
+    };
+    const no = [o, ...orders];
+    setOrders(no); setPending(null); setPhoto(null);
+    setMsg("✓ PO " + (o.poNo||"") + " saved with " + depots.length + " depots");
+    await persist(no);
+    setTimeout(()=>setMsg(""), 3000);
+  };
+
+  const updDepot = async (poId, depotName, patch) => {
+    const no = orders.map(o => o.id!==poId ? o : {
+      ...o, depots: o.depots.map(d => d.depot!==depotName ? d : { ...d, ...patch })
+    });
+    setOrders(no); await persist(no);
+  };
+  const delPO = async id => { const no = orders.filter(o=>o.id!==id); setOrders(no); await persist(no); };
+
+  // ---- rollups ----
+  function poValue(o) {
+    return (o.depots||[]).reduce((sum,d) => sum + depotValue(o,d), 0);
+  }
+  function depotValue(o, d) {
+    let v = 0;
+    (o.lines||[]).forEach(l => {
+      const c = num((d.cases||{})[l.index]);
+      if (c > 0) v += c * num(l.rate);
+    });
+    return v;
+  }
+  function depotCases(o, d) {
+    return (o.lines||[]).reduce((s,l) => s + num((d.cases||{})[l.index]), 0);
+  }
+  function daysLeft(o) {
+    if (!o.deliveryTo) return null;
+    const t = Date.parse(o.deliveryTo);
+    if (isNaN(t)) return null;
+    return Math.ceil((t - Date.now()) / 86400000);
+  }
+
+  const askIntel = async () => {
+    setBusy(true); setIntel(""); setMsg("");
+    try {
+      const snap = orders.map(o => ({
+        poNo: o.poNo, deliveryTo: o.deliveryTo, daysLeft: daysLeft(o),
+        totalValue: Math.round(poValue(o)),
+        depots: (o.depots||[]).map(d => ({
+          depot: d.depot, cases: depotCases(o,d), value: Math.round(depotValue(o,d)),
+          stage: d.stage, transport: num(d.transport), received: num(d.received)
+        }))
+      }));
+      const prompt =
+"You are analysing Canteen Stores Department (CSD, Ministry of Defence) supply performance for an incense manufacturer.\\n\\n" +
+"DATA:\\n" + JSON.stringify(snap, null, 2) + "\\n\\n" +
+"Commission to the agent is 14.5% of invoice value, payable only once payment is received.\\n" +
+"Delivery windows are strict — CSD accepts NO extension.\\n\\n" +
+"Give a short, direct briefing for the owner:\\n" +
+"1. DISPATCH RISK — which depots are still not dispatched, and how many days remain. Name them.\\n" +
+"2. MONEY — total invoiced, total received, total outstanding, commission accruing.\\n" +
+"3. TRANSPORT — anything unusual in freight cost per depot.\\n" +
+"4. WHAT TO DO TODAY — 3 concrete actions.\\n\\n" +
+"Be blunt. Use ₹. If data is thin, say so rather than inventing.";
+      const txt = await claudeAPI(prompt, "You are a sharp operations analyst. Be concise and specific.", "", "", "");
+      setIntel(txt || "No briefing generated.");
+    } catch(e) { setMsg("Couldn't generate: " + (e.message||e)); }
+    setBusy(false);
+  };
+
+  const inp = { padding:"6px 8px", borderRadius:6, border:"1px solid #ccd", fontSize:12 };
+  const STAGES = ["pending","invoiced","dispatched","delivered","paid"];
+
+  return (
+    <div style={{ padding: 4 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+        <span style={{ fontSize:26 }}>🛡️</span>
+        <div><h2 style={{ margin:0, fontSize:18, color:"#2a4a7a" }}>CSD</h2>
+        <div style={{ fontSize:11, color:"#6a7a9a" }}>Canteen Stores Department · depot-wise dispatch & payment</div></div>
+      </div>
+
+      <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+        {[["board","📋 Board"],["upload","📤 Upload PO"],["products","📦 Products"],["intel","🧠 Intelligence"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setTab(k)} style={{ flex:1, padding:"8px 4px", borderRadius:8, border: tab===k?"2px solid #2a4a7a":"1px solid #ccc", background: tab===k?"#e8eefa":"#fff", color:"#2a4a7a", fontWeight:700, cursor:"pointer", fontSize:11.5 }}>{l}</button>
+        ))}
+      </div>
+
+      {msg && <div style={{ fontSize:12, color: msg[0]==="✓"?"#1a7a3a":"#a33", marginBottom:8 }}>{msg}</div>}
+
+      {/* ---------- BOARD ---------- */}
+      {tab==="board" && <div>
+        {orders.length===0 && <div style={{ fontSize:12, color:"#999", fontStyle:"italic" }}>No CSD orders yet. Upload a purchase order and its allocation sheet.</div>}
+        {orders.map(o => {
+          const dl = daysLeft(o);
+          const dispatched = (o.depots||[]).filter(d=>["dispatched","delivered","paid"].indexOf(d.stage)>-1).length;
+          const totalDepots = (o.depots||[]).length;
+          const val = poValue(o);
+          const recd = (o.depots||[]).reduce((s,d)=>s+num(d.received),0);
+          const transport = (o.depots||[]).reduce((s,d)=>s+num(d.transport),0);
+          const commission = val * AGENT1_RATE;
+          const isOpen = openPO===o.id;
+          return (
+            <div key={o.id} style={{ border:"1px solid #d8e0f0", borderRadius:10, marginBottom:10, overflow:"hidden" }}>
+              <div onClick={()=>setOpenPO(isOpen?null:o.id)} style={{ background:"#f2f6fc", padding:"10px 12px", cursor:"pointer" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <span style={{ fontWeight:800, color:"#2a4a7a", fontSize:14 }}>PO {o.poNo||"—"}</span>
+                  <span style={{ fontSize:11, color:"#666" }}>{isOpen?"▾":"▸"} {totalDepots} depots</span>
+                </div>
+                <div style={{ fontSize:11.5, color:"#555", marginTop:3 }}>
+                  {fmt(val)} · dispatched {dispatched}/{totalDepots}
+                  {dl!==null && <span style={{ color: dl<7 ? "#c33" : dl<15 ? "#8a5a1a" : "#1a7a3a", fontWeight:700 }}>
+                    {" · "}{dl<0 ? ("OVERDUE by "+Math.abs(dl)+"d") : (dl+" days left")}
+                  </span>}
+                </div>
+                <div style={{ fontSize:10.5, color:"#777", marginTop:2 }}>
+                  Received {fmt(recd)} · outstanding {fmt(val-recd)} · transport {fmt(transport)} · agent 14.5% = {fmt(commission)}
+                </div>
+              </div>
+
+              {isOpen && <div style={{ padding:"6px 8px" }}>
+                {(o.depots||[]).map(d => {
+                  const dv = depotValue(o,d);
+                  const dc = depotCases(o,d);
+                  const isUP = UP_DEPOTS.indexOf(String(d.depot).toUpperCase())>-1;
+                  return (
+                    <div key={d.depot} style={{ borderBottom:"1px solid #eee", padding:"7px 4px" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                        <span style={{ fontWeight:700, fontSize:12.5, color:"#233" }}>
+                          {d.depot} {isUP && <span title="Halal-certified products must NOT be supplied to UP depots" style={{ fontSize:9, background:"#fff0e0", color:"#8a4a00", border:"1px solid #d0a060", borderRadius:8, padding:"1px 5px", marginLeft:4 }}>⚠ UP · Halal check</span>}
+                        </span>
+                        <span style={{ fontSize:11, color:"#555" }}>{dc} cases · {fmt(dv)}</span>
+                      </div>
+                      <div style={{ display:"flex", gap:3, marginTop:5 }}>
+                        {STAGES.map(s=>{
+                          const done = STAGES.indexOf(d.stage||"pending") >= STAGES.indexOf(s);
+                          return <button key={s} onClick={()=>updDepot(o.id,d.depot,{stage:s})}
+                            style={{ flex:1, padding:"4px 1px", borderRadius:5, fontSize:8.5, fontWeight:700, cursor:"pointer",
+                              border:"1px solid "+(done?"#2a4a7a":"#ddd"), background:done?"#2a4a7a":"#fff", color:done?"#fff":"#aaa" }}>
+                            {s==="pending"?"⏳":s==="invoiced"?"📄":s==="dispatched"?"🚚":s==="delivered"?"📦":"💰"} {s}
+                          </button>;
+                        })}
+                      </div>
+                      <div style={{ display:"flex", gap:5, marginTop:5, flexWrap:"wrap", alignItems:"center" }}>
+                        <input value={d.invoiceNo||""} onChange={e=>updDepot(o.id,d.depot,{invoiceNo:e.target.value})} placeholder="invoice no" style={{...inp, width:95}}/>
+                        <input value={d.lr||""} onChange={e=>updDepot(o.id,d.depot,{lr:e.target.value})} placeholder="LR no" style={{...inp, width:85}}/>
+                        <input type="number" value={d.transport||""} onChange={e=>updDepot(o.id,d.depot,{transport:Number(e.target.value)||0})} placeholder="freight ₹" style={{...inp, width:80}}/>
+                        <input type="number" value={d.received||""} onChange={e=>updDepot(o.id,d.depot,{received:Number(e.target.value)||0})} placeholder="received ₹" style={{...inp, width:90}}/>
+                        <button onClick={()=>updDepot(o.id,d.depot,{received:Math.round(dv), stage:"paid"})} style={{ fontSize:10, padding:"4px 8px", borderRadius:12, border:"1px solid #1a7a4a", background:"#fff", color:"#1a7a4a", cursor:"pointer" }}>Paid in full</button>
+                      </div>
+                    </div>
+                  );
+                })}
+                <button onClick={()=>delPO(o.id)} style={{ marginTop:8, fontSize:11, border:"none", background:"none", color:"#c33", cursor:"pointer" }}>Delete this PO</button>
+              </div>}
+            </div>
+          );
+        })}
+      </div>}
+
+      {/* ---------- UPLOAD ---------- */}
+      {tab==="upload" && <div>
+        <div style={{ background:"#eef3fb", border:"1px solid #c8d8f0", borderRadius:8, padding:10, marginBottom:10, fontSize:11.5, color:"#2a4a7a" }}>
+          Upload the CSD purchase order <b>and</b> its depot-wise allocation sheet. The allocation creates one dispatch row per depot.
+        </div>
+        <input ref={fileRef} type="file" accept="image/*,application/pdf" capture="environment" onChange={onPick} style={{ display:"none" }}/>
+        <button onClick={()=>fileRef.current && fileRef.current.click()} style={{ width:"100%", padding:"11px", borderRadius:10, border:"1.5px dashed #2a4a7a", background:"#f3f7fd", color:"#2a4a7a", fontWeight:700, fontSize:14, cursor:"pointer", marginBottom:10 }}>
+          📄 Upload PO / allocation
+        </button>
+        {photo && <div style={{ textAlign:"center", marginBottom:10 }}>
+          <img src={photo.dataUrl} alt="po" style={{ maxWidth:"100%", maxHeight:170, borderRadius:8, border:"1px solid #ddd" }}/>
+          <button onClick={scan} disabled={busy} style={{ width:"100%", marginTop:8, padding:"11px", borderRadius:10, border:"none", background:"#2a4a7a", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>
+            {busy ? "⏳ Reading…" : "🔍 Read the order"}
+          </button>
+        </div>}
+
+        {pending && <div style={{ background:"#f7faff", border:"1px solid #c8d8f0", borderRadius:10, padding:12 }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#2a4a7a" }}>PO {pending.poNo||"—"} · {pending.poDate||""}</div>
+          <div style={{ fontSize:11, color:"#666", marginBottom:6 }}>Delivery {pending.deliveryFrom||"?"} to {pending.deliveryTo||"?"}</div>
+          {(pending.lines||[]).map((l,i)=>(
+            <div key={i} style={{ fontSize:11.5, color:"#334", padding:"2px 0" }}>
+              • {l.index} — {l.name} — {l.cases} cases @ {fmt(l.rate)}/case
+            </div>
+          ))}
+          <div style={{ fontSize:11.5, color:"#2a4a7a", fontWeight:700, marginTop:6 }}>
+            {(pending.allocation||[]).length} depots in the allocation
+          </div>
+          <button onClick={confirmPO} style={{ width:"100%", marginTop:10, padding:"11px", borderRadius:10, border:"none", background:"#1a7a4a", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>
+            ✓ Save PO &amp; create depot board
+          </button>
+        </div>}
+      </div>}
+
+      {/* ---------- PRODUCTS ---------- */}
+      {tab==="products" && <div>
+        <div style={{ fontSize:11.5, color:"#777", marginBottom:8 }}>The four CSD-exclusive products. COGS to be filled after the price revision.</div>
+        {CSD_PRODUCTS.map(p=>(
+          <div key={p.index} style={{ border:"1px solid #e0e6f0", borderRadius:8, padding:9, marginBottom:6 }}>
+            <div style={{ fontSize:12.5, fontWeight:700, color:"#2a4a7a" }}>{p.index}{p.suffix} — {p.name}</div>
+            <div style={{ fontSize:11, color:"#666", marginTop:2 }}>
+              {p.casePack} per case · {fmt(p.rate)} per case
+              {p.cogs>0
+                ? <span style={{ color:"#1a7a3a", fontWeight:700 }}> · GP {fmt(p.rate-p.cogs)}</span>
+                : <span style={{ color:"#b07a2a" }}> · COGS pending</span>}
+            </div>
+          </div>
+        ))}
+      </div>}
+
+      {/* ---------- INTELLIGENCE ---------- */}
+      {tab==="intel" && <div>
+        <div style={{ fontSize:11.5, color:"#777", marginBottom:10 }}>
+          Ask the data what it knows — dispatch risk, money, freight, what to do today.
+        </div>
+        <button onClick={askIntel} disabled={busy || orders.length===0} style={{ width:"100%", padding:"12px", borderRadius:10, border:"none", background:"linear-gradient(135deg,#2a4a7a,#1a2a5a)", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer", marginBottom:12 }}>
+          {busy ? "⏳ Thinking…" : "🧠 Brief me on CSD"}
+        </button>
+        {orders.length===0 && <div style={{ fontSize:11.5, color:"#999", fontStyle:"italic" }}>Upload a PO first.</div>}
+        {intel && <div style={{ background:"#f7f9fc", border:"1px solid #cfd8e8", borderRadius:10, padding:14, whiteSpace:"pre-wrap", fontSize:13, lineHeight:1.6, color:"#233", maxHeight:"50vh", overflowY:"auto" }}>
+          {intel}
+        </div>}
+      </div>}
+
+      <div style={{ fontSize:10, color:"#999", marginTop:12, fontStyle:"italic" }}>
+        Agent commission 14.5% of invoice value, payable on realisation. Delivery windows are strict — CSD accepts no extension.
+      </div>
+    </div>
+  );
+}
+
+
 function Spectrum({ onClose, onSaveEntry }) {
   // Product master (per DOZEN economics) — SP, COGS, Gross Profit, GP%
   const DEFAULT_MASTER = [
@@ -4997,6 +5291,7 @@ function App(){
   const [navMenuOpen,setNavMenuOpen]=useState(false);
   const [showCFO,setShowCFO]=useState(false);
   const [showSpectrum,setShowSpectrum]=useState(false);
+  const [showCSD,setShowCSD]=useState(false);
   const [showRules,setShowRules]=useState(false);
   const [showTelegram,setShowTelegram]=useState(false);
   const [showGym,setShowGym]=useState(false);
@@ -5422,6 +5717,7 @@ function App(){
                 {l:"💰 Receivables",fn:()=>setShowRecv(true)},
                 {l:"📥 Receivables",fn:()=>setShowRecv(true)},
                 {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true)},
+                {l:"🛡️ CSD",fn:()=>setShowCSD(true)},
                 {l:"⚖️ Rules",fn:()=>setShowRules(true)},
                 {l:"✈️ Telegram",fn:()=>setShowTelegram(true)},
                 {l:"📝 Field Report",fn:()=>setShowFieldReport(true)},
@@ -5684,6 +5980,7 @@ function App(){
     <Modal open={showHealth} onClose={()=>setShowHealth(false)}><HealthFamilyQuick onClose={()=>setShowHealth(false)} onSaveEntry={saveEntry} mode="health" entries={entries}/></Modal>
     <Modal open={showCFO} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
     <Modal open={showSpectrum} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)} onSaveEntry={saveEntry}/></Modal>
+    <Modal open={showCSD} onClose={()=>setShowCSD(false)} wide><CSD onClose={()=>setShowCSD(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showRules} onClose={()=>setShowRules(false)} wide><RulesEngine entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRules(false)}/></Modal>
     
     <Modal open={showTelegram} onClose={()=>setShowTelegram(false)}><TelegramTeam onClose={()=>setShowTelegram(false)}/></Modal>
