@@ -3096,7 +3096,9 @@ function CSD({ onClose, onSaveEntry }) {
   const AGENT1_RATE = 0.145;                 // 14.5% commission, payable on realisation
   const UP_DEPOTS = ["AGRA","BAREILLY","LUCKNOW","MEERUT"];   // Halal restriction depots
 
-  const [tab, setTab] = useState("board");   // board | upload | products | intel
+  const [tab, setTab] = useState("board");   // board | forecast | upload | products | intel
+  const [forecasts, setForecasts] = useState([]);   // tentative orders (not yet POs)
+  const [fcPending, setFcPending] = useState(null);
   const [orders, setOrders] = useState([]);  // [{id, poNo, poDate, deliveryFrom, deliveryTo, lines:[{index,name,casePack,rate,cases}], depots:[{depot, cases:{index:qty}, stage, invoiceNo, lr, transport, received}]}]
   const [photo, setPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -3107,9 +3109,17 @@ function CSD({ onClose, onSaveEntry }) {
   const fileRef = useRef(null);
 
   useEffect(() => { (async () => {
-    try { const r = await sheetsAPI("getPortfolio", { key: "csd" }); if (r && r.data && Array.isArray(r.data.orders)) setOrders(r.data.orders); } catch(e) {}
+    try {
+      const r = await sheetsAPI("getPortfolio", { key: "csd" });
+      if (r && r.data) {
+        if (Array.isArray(r.data.orders)) setOrders(r.data.orders);
+        if (Array.isArray(r.data.forecasts)) setForecasts(r.data.forecasts);
+      }
+    } catch(e) {}
   })(); }, []);
-  const persist = async (o) => { try { await sheetsAPI("savePortfolio", { key: "csd", data: { orders: o } }); } catch(e) {} };
+  const persist = async (o, f) => {
+    try { await sheetsAPI("savePortfolio", { key: "csd", data: { orders: o !== undefined ? o : orders, forecasts: f !== undefined ? f : forecasts } }); } catch(e) {}
+  };
 
   const fmt = n => "₹" + Math.round(Number(n)||0).toLocaleString("en-IN");
   const num = v => { const n = parseFloat(String(v??"").replace(/[^0-9.]/g,"")); return isNaN(n)?0:n; };
@@ -3161,6 +3171,52 @@ function CSD({ onClose, onSaveEntry }) {
     setTimeout(()=>setMsg(""), 3000);
   };
 
+  // ---- tentative / forecast allocation ----
+  const scanForecast = async () => {
+    if (!photo) return;
+    setBusy(true); setMsg("🔮 Reading the tentative allocation…");
+    try {
+      const b64 = String(photo.dataUrl).split(",")[1];
+      const fshape = '{"period":"Aug-26","rows":[{"depot":"CHENNAI","cases":{"13094":29,"13095":9,"13130":16,"13132":12}}]}';
+      const fprompt =
+        "This is a TENTATIVE order quantity sheet from the Canteen Stores Department (CSD) — depots down the left, product index numbers across the top (13094, 13095, 13130, 13132), case counts in the cells.\n" +
+        "Return ONLY JSON in exactly this shape (example values):\n" + fshape + "\n" +
+        "Include every depot row. Zeros are fine. Ignore the Grand Total row. 'period' is the month it is for.";
+      const txt = await claudeAPI(fprompt, "Return ONLY valid JSON. Read the table cell by cell, carefully.", b64, photo.type, "");
+      const clean = String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
+      const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
+      const obj = JSON.parse(s>=0 ? clean.substring(s,e+1) : clean);
+      setFcPending(obj); setMsg("");
+    } catch(e) { setMsg("❌ Couldn't read the sheet clearly."); }
+    setBusy(false);
+  };
+
+  const confirmForecast = async () => {
+    if (!fcPending) return;
+    const f = {
+      id: "fc_" + Date.now(),
+      period: fcPending.period || "",
+      uploaded: new Date().toISOString().slice(0,10),
+      rows: fcPending.rows || []
+    };
+    const nf = [f, ...forecasts];
+    setForecasts(nf); setFcPending(null); setPhoto(null);
+    setMsg("✓ Forecast for " + (f.period||"") + " saved — " + f.rows.length + " depots");
+    await persist(undefined, nf);
+    setTimeout(()=>setMsg(""), 3000);
+  };
+  const delForecast = async id => { const nf = forecasts.filter(f=>f.id!==id); setForecasts(nf); await persist(undefined, nf); };
+
+  function forecastTotals(f) {
+    const t = {};
+    (f.rows||[]).forEach(r => Object.entries(r.cases||{}).forEach(([k,v]) => { t[k] = (t[k]||0) + (Number(v)||0); }));
+    return t;
+  }
+  function forecastValue(f) {
+    const t = forecastTotals(f);
+    return CSD_PRODUCTS.reduce((s,p) => s + (t[p.index]||0) * p.rate, 0);
+  }
+
   const updDepot = async (poId, depotName, patch) => {
     const no = orders.map(o => o.id!==poId ? o : {
       ...o, depots: o.depots.map(d => d.depot!==depotName ? d : { ...d, ...patch })
@@ -3202,9 +3258,10 @@ function CSD({ onClose, onSaveEntry }) {
           stage: d.stage, transport: num(d.transport), received: num(d.received)
         }))
       }));
+      const fsnap = forecasts.map(f => ({ period: f.period, totals: forecastTotals(f), depots: (f.rows||[]).length }));
       const prompt =
 "You are analysing Canteen Stores Department (CSD, Ministry of Defence) supply performance for an incense manufacturer.\\n\\n" +
-"DATA:\\n" + JSON.stringify(snap, null, 2) + "\\n\\n" +
+"DATA:\\n" + JSON.stringify(snap, null, 2) + "\n\nTENTATIVE FORECASTS (not yet committed):\n" + JSON.stringify(fsnap, null, 2) + "\\n\\n" +
 "Commission to the agent is 14.5% of invoice value, payable only once payment is received.\\n" +
 "Delivery windows are strict — CSD accepts NO extension.\\n\\n" +
 "Give a short, direct briefing for the owner:\\n" +
@@ -3231,7 +3288,7 @@ function CSD({ onClose, onSaveEntry }) {
       </div>
 
       <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-        {[["board","📋 Board"],["upload","📤 Upload PO"],["products","📦 Products"],["intel","🧠 Intelligence"]].map(([k,l])=>(
+        {[["board","📋 Board"],["forecast","🔮 Forecast"],["upload","📤 Upload"],["products","📦 Products"],["intel","🧠 Intel"]].map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)} style={{ flex:1, padding:"8px 4px", borderRadius:8, border: tab===k?"2px solid #2a4a7a":"1px solid #ccc", background: tab===k?"#e8eefa":"#fff", color:"#2a4a7a", fontWeight:700, cursor:"pointer", fontSize:11.5 }}>{l}</button>
         ))}
       </div>
@@ -3308,6 +3365,60 @@ function CSD({ onClose, onSaveEntry }) {
         })}
       </div>}
 
+      {/* ---------- FORECAST ---------- */}
+      {tab==="forecast" && <div>
+        <div style={{ background:"#f5f0fc", border:"1px solid #d8c8f0", borderRadius:8, padding:10, marginBottom:10, fontSize:11.5, color:"#4a2a8a" }}>
+          Tentative quantities CSD sends ahead of the formal PO. Use it to plan production — but it is <b>not committed business</b> until the PO arrives.
+        </div>
+        {forecasts.length===0 && <div style={{ fontSize:12, color:"#999", fontStyle:"italic" }}>No forecasts yet. Upload a tentative order sheet from the Upload tab.</div>}
+        {forecasts.map(f => {
+          const t = forecastTotals(f);
+          const val = forecastValue(f);
+          const totalCases = Object.values(t).reduce((s,v)=>s+v,0);
+          // did a real PO land for this period?
+          const matched = orders.filter(o => {
+            const tot = {};
+            (o.depots||[]).forEach(d => Object.entries(d.cases||{}).forEach(([k,v]) => { tot[k]=(tot[k]||0)+(Number(v)||0); }));
+            return Object.keys(tot).length>0;
+          });
+          return (
+            <div key={f.id} style={{ border:"1px solid #ddd", borderRadius:10, padding:11, marginBottom:9, background:"#fdfcff" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span style={{ fontWeight:800, color:"#4a2a8a", fontSize:14 }}>🔮 {f.period || "Tentative"}</span>
+                <span style={{ fontSize:11, color:"#777" }}>{(f.rows||[]).length} depots</span>
+              </div>
+              <div style={{ fontSize:12, color:"#555", marginTop:4 }}>
+                <b>{totalCases} cases</b> · approx {fmt(val)} at current rates
+              </div>
+              <div style={{ marginTop:7 }}>
+                {CSD_PRODUCTS.map(p => (
+                  <div key={p.index} style={{ display:"flex", justifyContent:"space-between", fontSize:11.5, padding:"2px 0", color:"#334" }}>
+                    <span>{p.index} — {p.name.replace('ONAM ','').replace(' (100 Sticks)','')}</span>
+                    <span style={{ fontWeight:700 }}>{t[p.index]||0} cases</span>
+                  </div>
+                ))}
+              </div>
+              <details style={{ marginTop:7 }}>
+                <summary style={{ fontSize:11, color:"#4a2a8a", cursor:"pointer" }}>Depot breakdown</summary>
+                <div style={{ marginTop:5, maxHeight:180, overflowY:"auto" }}>
+                  {(f.rows||[]).map((r,i)=>{
+                    const rc = Object.values(r.cases||{}).reduce((s,v)=>s+(Number(v)||0),0);
+                    const zero = rc===0;
+                    return (
+                      <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"3px 2px", borderBottom:"1px solid #f0f0f0", color: zero?"#bbb":"#334" }}>
+                        <span>{r.depot}{zero && <span style={{ fontSize:9, marginLeft:5, color:"#c88" }}>— nothing ordered</span>}</span>
+                        <span>{CSD_PRODUCTS.map(p=>(r.cases||{})[p.index]||0).join(" · ")}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </details>
+              <button onClick={()=>delForecast(f.id)} style={{ marginTop:7, fontSize:10.5, border:"none", background:"none", color:"#c33", cursor:"pointer", padding:0 }}>Delete</button>
+            </div>
+          );
+        })}
+      </div>}
+
       {/* ---------- UPLOAD ---------- */}
       {tab==="upload" && <div>
         <div style={{ background:"#eef3fb", border:"1px solid #c8d8f0", borderRadius:8, padding:10, marginBottom:10, fontSize:11.5, color:"#2a4a7a" }}>
@@ -3319,8 +3430,24 @@ function CSD({ onClose, onSaveEntry }) {
         </button>
         {photo && <div style={{ textAlign:"center", marginBottom:10 }}>
           <img src={photo.dataUrl} alt="po" style={{ maxWidth:"100%", maxHeight:170, borderRadius:8, border:"1px solid #ddd" }}/>
-          <button onClick={scan} disabled={busy} style={{ width:"100%", marginTop:8, padding:"11px", borderRadius:10, border:"none", background:"#2a4a7a", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>
-            {busy ? "⏳ Reading…" : "🔍 Read the order"}
+          <div style={{ display:"flex", gap:8, marginTop:8 }}>
+            <button onClick={scan} disabled={busy} style={{ flex:1, padding:"11px 6px", borderRadius:10, border:"none", background:"#2a4a7a", color:"#fff", fontWeight:700, fontSize:12.5, cursor:"pointer" }}>
+              {busy ? "⏳…" : "📄 Read as PO"}
+            </button>
+            <button onClick={scanForecast} disabled={busy} style={{ flex:1, padding:"11px 6px", borderRadius:10, border:"none", background:"#5a3a9a", color:"#fff", fontWeight:700, fontSize:12.5, cursor:"pointer" }}>
+              {busy ? "⏳…" : "🔮 Read as forecast"}
+            </button>
+          </div>
+          <div style={{ fontSize:10, color:"#999", marginTop:5, fontStyle:"italic" }}>
+            A formal purchase order creates the dispatch board. A tentative sheet is saved as a forecast only.
+          </div>
+        </div>}
+
+        {fcPending && <div style={{ background:"#faf7ff", border:"1px solid #d8c8f0", borderRadius:10, padding:12, marginTop:10 }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#4a2a8a" }}>🔮 Tentative — {fcPending.period || "period?"}</div>
+          <div style={{ fontSize:11.5, color:"#555", marginTop:3 }}>{(fcPending.rows||[]).length} depots read</div>
+          <button onClick={confirmForecast} style={{ width:"100%", marginTop:10, padding:"11px", borderRadius:10, border:"none", background:"#5a3a9a", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>
+            ✓ Save as forecast
           </button>
         </div>}
 
