@@ -3261,6 +3261,176 @@ function Kerala({ onClose, onSaveEntry }) {
 }
 
 
+function CSDPayments({ orders, onUpdateDepot, onClose }) {
+  const [photo, setPhoto] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(null);   // parsed statement lines awaiting confirm
+  const [msg, setMsg] = useState("");
+  const [statements, setStatements] = useState([]);
+  const fileRef = useRef(null);
+
+  useEffect(() => { (async () => {
+    try { const r = await sheetsAPI("getPortfolio", { key: "csd_payments" }); if (r && r.data && Array.isArray(r.data.statements)) setStatements(r.data.statements); } catch(e) {}
+  })(); }, []);
+  const persist = async (s) => { try { await sheetsAPI("savePortfolio", { key: "csd_payments", data: { statements: s } }); } catch(e) {} };
+
+  const fmt = n => "₹" + Math.round(Number(n)||0).toLocaleString("en-IN");
+
+  const onPick = ev => {
+    const f = ev.target.files && ev.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => setPhoto({ dataUrl: r.result, type: f.type || "image/jpeg" });
+    r.readAsDataURL(f);
+    setPending(null); setMsg("");
+  };
+
+  const scan = async () => {
+    if (!photo) return;
+    setBusy(true); setMsg("📄 Reading the CSD payment statement…");
+    try {
+      const b64 = String(photo.dataUrl).split(",")[1];
+      const shape = '{"period":"Jan-Feb 2026","bills":[{"billNo":"2025-26/698","billDate":"2025-10-30","billAmt":28479,"crNoteAmt":0,"dbNoteAmt":0,"tdsAmt":-28,"depot":"BDB","docType":"BILL","utr":"PUNBN620260114545899","utrDate":"2026-01-14"}],"totals":{"billAmt":9361908,"crNoteAmt":0,"dbNoteAmt":-34081,"tdsAmt":-8965,"paidAmt":9318862}}';
+      const prompt =
+        "This is a CSD (Canteen Stores Department) official payment/realisation statement, listing bills grouped under UTR numbers, with bill amount, CR note, DB note (debit note), TDS, and depot code for each line, then a grand total at the end.\\n" +
+        "Return ONLY JSON in exactly this shape (example values):\\n" + shape + "\\n" +
+        "Include every bill/debit line across all UTR groups in one flat 'bills' array, each carrying its own utr and utrDate. Use the final grand-total block for 'totals'. Dates as YYYY-MM-DD.";
+      const txt = await claudeAPI(prompt, "Return ONLY valid JSON. Read every line of every UTR block, do not skip any.", b64, photo.type, "");
+      const clean = String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
+      const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
+      const obj = JSON.parse(s>=0 ? clean.substring(s,e+1) : clean);
+      setPending(obj); setMsg("");
+    } catch(e) { setMsg("❌ Couldn't read it clearly — try a sharper image, or split into fewer pages per upload."); }
+    setBusy(false);
+  };
+
+  // try to auto-match a debit/bill line to a depot row on an open PO, by depot code + rough amount
+  const tryAutoMatch = (line) => {
+    for (const o of (orders||[])) {
+      for (const d of (o.depots||[])) {
+        const depotCode = String(d.depot||"").slice(0,3).toUpperCase();
+        if (depotCode && line.depot && depotCode === String(line.depot).toUpperCase()) {
+          return { poId: o.id, depot: d.depot };
+        }
+      }
+    }
+    return null;
+  };
+
+  const confirmStatement = async () => {
+    if (!pending) return;
+    setBusy(true);
+    const bills = pending.bills || [];
+    let matched = 0, debitTotal = 0;
+    bills.forEach(b => {
+      if (Number(b.dbNoteAmt) < 0) debitTotal += Math.abs(Number(b.dbNoteAmt));
+      const m = tryAutoMatch(b);
+      if (m && onUpdateDepot) {
+        matched++;
+        // mark that depot as paid, add a note — doesn't overwrite received figure blindly
+        onUpdateDepot(m.poId, m.depot, {
+          stage: "paid",
+          reconciled: true,
+          reconcileNote: "CSD statement " + (pending.period||"") + " · bill " + (b.billNo||"") + (b.dbNoteAmt<0 ? (" · debit note " + fmt(Math.abs(b.dbNoteAmt))) : "")
+        });
+      }
+    });
+    const rec = {
+      id: "stmt_" + Date.now(),
+      period: pending.period || "",
+      uploaded: new Date().toISOString().slice(0,10),
+      billCount: bills.length,
+      totals: pending.totals || {},
+      matched, debitTotal,
+      bills
+    };
+    const ns = [rec, ...statements];
+    setStatements(ns); setPending(null); setPhoto(null);
+    setMsg("✓ Statement saved — " + bills.length + " lines, " + matched + " auto-matched to depots" + (debitTotal>0 ? (", " + fmt(debitTotal) + " in debit notes flagged") : ""));
+    await persist(ns);
+    setBusy(false);
+    setTimeout(()=>setMsg(""), 4000);
+  };
+
+  const delStatement = async id => { const ns = statements.filter(s=>s.id!==id); setStatements(ns); await persist(ns); };
+
+  const inp = { padding:"9px", borderRadius:8, border:"1px solid #ccd", fontSize:13 };
+
+  // rollup across all saved statements
+  const grand = statements.reduce((acc,s) => {
+    const t = s.totals||{};
+    acc.bill += Number(t.billAmt)||0;
+    acc.debit += Number(t.dbNoteAmt)||0;
+    acc.tds += Number(t.tdsAmt)||0;
+    acc.paid += Number(t.paidAmt)||0;
+    return acc;
+  }, { bill:0, debit:0, tds:0, paid:0 });
+
+  return (
+    <div style={{ padding: 4 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+        <span style={{ fontSize:24 }}>🧾</span>
+        <div><h2 style={{ margin:0, fontSize:17, color:"#2a4a7a" }}>CSD Payment Statements</h2>
+        <div style={{ fontSize:11, color:"#6a7a9a" }}>CSD's own realisation statement — proof of what actually landed</div></div>
+      </div>
+
+      {statements.length>0 && <div style={{ background:"#f2f6fc", border:"1px solid #d8e0f0", borderRadius:10, padding:"10px 14px", marginBottom:12 }}>
+        <div style={{ fontSize:11, color:"#777" }}>ACROSS {statements.length} STATEMENT{statements.length===1?"":"S"} UPLOADED</div>
+        <div style={{ fontSize:20, fontWeight:800, color:"#2a4a7a" }}>{fmt(grand.paid)} received</div>
+        <div style={{ fontSize:11, color:"#888", marginTop:2 }}>
+          billed {fmt(grand.bill)} · debit notes {fmt(Math.abs(grand.debit))} · TDS {fmt(Math.abs(grand.tds))}
+        </div>
+      </div>}
+
+      <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={onPick} style={{ display:"none" }}/>
+      <button onClick={()=>fileRef.current && fileRef.current.click()} style={{ width:"100%", padding:"11px", borderRadius:10, border:"1.5px dashed #2a4a7a", background:"#f3f7fd", color:"#2a4a7a", fontWeight:700, fontSize:14, cursor:"pointer", marginBottom:10 }}>
+        📄 Upload CSD payment statement
+      </button>
+
+      {photo && <div style={{ textAlign:"center", marginBottom:10 }}>
+        <img src={photo.dataUrl} alt="statement" style={{ maxWidth:"100%", maxHeight:160, borderRadius:8, border:"1px solid #ddd" }}/>
+        <button onClick={scan} disabled={busy} style={{ width:"100%", marginTop:8, padding:"11px", borderRadius:10, border:"none", background:"#2a4a7a", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>
+          {busy ? "⏳ Reading…" : "🔍 Read the statement"}
+        </button>
+      </div>}
+
+      {pending && <div style={{ background:"#f7faff", border:"1px solid #c8d8f0", borderRadius:10, padding:12, marginBottom:12 }}>
+        <div style={{ fontSize:13, fontWeight:700, color:"#2a4a7a" }}>{pending.period || "Statement"}</div>
+        <div style={{ fontSize:11.5, color:"#666", marginBottom:6 }}>{(pending.bills||[]).length} lines read</div>
+        {pending.totals && <div style={{ fontSize:11.5, color:"#334", marginBottom:8 }}>
+          Billed {fmt(pending.totals.billAmt)} · Debit notes {fmt(Math.abs(pending.totals.dbNoteAmt||0))} · TDS {fmt(Math.abs(pending.totals.tdsAmt||0))} · <b>Paid {fmt(pending.totals.paidAmt)}</b>
+        </div>}
+        <button onClick={confirmStatement} disabled={busy} style={{ width:"100%", padding:"11px", borderRadius:10, border:"none", background:"#1a7a4a", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>
+          ✓ Save &amp; reconcile against open depots
+        </button>
+      </div>}
+
+      {msg && <div style={{ fontSize:12, color: msg[0]==="✓"?"#1a7a3a":"#a33", marginBottom:10 }}>{msg}</div>}
+
+      <div style={{ fontSize:12, fontWeight:700, color:"#2a4a7a", marginBottom:6 }}>Statements on file ({statements.length})</div>
+      {statements.length===0 && <div style={{ fontSize:11.5, color:"#999", fontStyle:"italic" }}>None yet. Upload CSD's payment statement as they send it.</div>}
+      {statements.map(s => (
+        <div key={s.id} style={{ border:"1px solid #e0e6f0", borderRadius:8, padding:10, marginBottom:7 }}>
+          <div style={{ display:"flex", justifyContent:"space-between" }}>
+            <span style={{ fontWeight:700, fontSize:13, color:"#233" }}>{s.period || "Statement"}</span>
+            <span style={{ fontSize:10.5, color:"#999" }}>{s.uploaded}</span>
+          </div>
+          <div style={{ fontSize:11.5, color:"#555", marginTop:3 }}>
+            {s.billCount} lines · {s.matched||0} auto-matched to depots
+            {s.debitTotal>0 && <span style={{ color:"#c33" }}> · {fmt(s.debitTotal)} debit notes</span>}
+          </div>
+          {s.totals && <div style={{ fontSize:11, color:"#1a5a3a", fontWeight:700, marginTop:2 }}>Paid {fmt(s.totals.paidAmt)}</div>}
+          <button onClick={()=>delStatement(s.id)} style={{ marginTop:5, fontSize:10.5, border:"none", background:"none", color:"#c33", cursor:"pointer", padding:0 }}>Delete</button>
+        </div>
+      ))}
+
+      <div style={{ fontSize:10, color:"#999", marginTop:12, fontStyle:"italic" }}>
+        Auto-match works by depot code. Unmatched lines are still saved and counted in totals — nothing is lost, matching improves as more POs and statements accumulate.
+      </div>
+    </div>
+  );
+}
+
+
 function CSD({ onClose, onSaveEntry }) {
   // Four CSD-exclusive products (COGS to be filled after price revision)
   const CSD_PRODUCTS = [
@@ -3464,7 +3634,7 @@ function CSD({ onClose, onSaveEntry }) {
       </div>
 
       <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-        {[["board","📋 Board"],["forecast","🔮 Forecast"],["upload","📤 Upload"],["products","📦 Products"],["intel","🧠 Intel"]].map(([k,l])=>(
+        {[["board","📋 Board"],["forecast","🔮 Forecast"],["upload","📤 Upload"],["payments","🧾 Payments"],["products","📦 Products"],["intel","🧠 Intel"]].map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)} style={{ flex:1, padding:"8px 4px", borderRadius:8, border: tab===k?"2px solid #2a4a7a":"1px solid #ccc", background: tab===k?"#e8eefa":"#fff", color:"#2a4a7a", fontWeight:700, cursor:"pointer", fontSize:11.5 }}>{l}</button>
         ))}
       </div>
@@ -3643,6 +3813,9 @@ function CSD({ onClose, onSaveEntry }) {
           </button>
         </div>}
       </div>}
+
+      {/* ---------- PAYMENTS ---------- */}
+      {tab==="payments" && <CSDPayments orders={orders} onUpdateDepot={updDepot} onClose={()=>{}}/>}
 
       {/* ---------- PRODUCTS ---------- */}
       {tab==="products" && <div>
