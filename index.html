@@ -6017,28 +6017,27 @@ function App(){
             <button onClick={()=>setNavMenuOpen(o=>!o)} style={{fontSize:12,padding:"7px 14px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#5a3a1a,#3a2a0a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>☰ Menu ▾</button>
             {navMenuOpen&&<div style={{position:"absolute",top:"112%",left:0,zIndex:950,background:"#2a2318",border:"1px solid #c8a060",borderRadius:10,padding:5,minWidth:180,boxShadow:"0 8px 22px rgba(0,0,0,.5)"}}>
               {[
-                {l:"📈 CFO Brief",fn:()=>setShowCFO(true)},
-                {l:"💰 Receivables",fn:()=>setShowRecv(true)},
-                {l:"📥 Receivables",fn:()=>setShowRecv(true)},
-                {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true)},
-                {l:"🛡️ CSD",fn:()=>setShowCSD(true)},
-                {l:"🪔 Kerala",fn:()=>setShowKerala(true)},
-                {l:"⚖️ Rules",fn:()=>setShowRules(true)},
-                {l:"✈️ Telegram",fn:()=>setShowTelegram(true)},
+                {l:"📈 CFO Brief",fn:()=>setShowCFO(true), ownerOnly:true},
+                {l:"💰 Receivables",fn:()=>setShowRecv(true), ownerOnly:true},
+                {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true), ownerOnly:true},
+                {l:"🛡️ CSD",fn:()=>setShowCSD(true), ownerOnly:true},
+                {l:"🪔 Kerala",fn:()=>setShowKerala(true), ownerOnly:true},
+                {l:"⚖️ Rules",fn:()=>setShowRules(true), ownerOnly:true},
+                {l:"✈️ Telegram",fn:()=>setShowTelegram(true), ownerOnly:true},
                 {l:"📝 Field Report",fn:()=>setShowFieldReport(true)},
-                {l:"🔒 PIN Access",fn:()=>setShowPins(true)},
-                {l:"📊 Tally",fn:()=>setShowTally(true)},
-                {l:"📍 Location",fn:()=>setShowLocation(true)},
+                {l:"🔒 PIN Access",fn:()=>setShowPins(true), ownerOnly:true},
+                {l:"📊 Tally",fn:()=>setShowTally(true), ownerOnly:true},
+                {l:"📍 Location",fn:()=>setShowLocation(true), ownerOnly:true},
                 {l:"📒 Day Book",fn:()=>setShowDayBook(true)},
                 {l:"🏥 Health",fn:()=>setShowHealth(true)},
                 {l:"🏋️ Gym",fn:()=>setShowGym(true)},
                 {l:"👨‍👩‍👧 Family",fn:()=>setShowFamily(true)},
-                {l:"💬 Remind",fn:()=>setShowPaymentReminders(true)},
-                {l:"🚚 Logistics",fn:()=>setShowLogistics(true)},
-                {l:"📧 Email Scan",fn:()=>setShowEmailScan(true)},
+                {l:"💬 Remind",fn:()=>setShowPaymentReminders(true), ownerOnly:true},
+                {l:"🚚 Logistics",fn:()=>setShowLogistics(true), ownerOnly:true},
+                {l:"📧 Email Scan",fn:()=>setShowEmailScan(true), ownerOnly:true},
                 {l:"🔗 Share",fn:()=>setShowShare(true)},
                 {l:"⚙️ Settings",fn:()=>setShowDD(true)}
-              ].map(it=><button key={it.l} onClick={()=>{setNavMenuOpen(false);it.fn();}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:6,border:"none",background:"transparent",color:"#f0dcae",cursor:"pointer",fontSize:13,fontWeight:600}}>{it.l}</button>)}
+              ].filter(item => !item.ownerOnly || IS_OWNER).map(it=><button key={it.l} onClick={()=>{setNavMenuOpen(false);it.fn();}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:6,border:"none",background:"transparent",color:"#f0dcae",cursor:"pointer",fontSize:13,fontWeight:600}}>{it.l}</button>)}
             </div>}
           </div>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
@@ -6278,28 +6277,28 @@ function App(){
     <Modal open={showAI} onClose={()=>setShowAI(false)} wide><AIPanel entries={entries} onClose={()=>setShowAI(false)} onShowAgeing={()=>setShowAgeing(true)} onShowMatcher={()=>setShowMatcher(true)} onShowLogistics={()=>setShowLogistics(true)} onShowLedger={()=>setShowLedger(true)}/></Modal>
     <Modal open={showAgeing} onClose={()=>setShowAgeing(false)} wide><AgeingReport entries={entries} onClose={()=>setShowAgeing(false)} onMarkPaid={markPaid}/></Modal>
     <Modal open={showMatcher} onClose={()=>setShowMatcher(false)} wide><PaymentMatcher entries={entries} onClose={()=>setShowMatcher(false)} onMarkPaid={markPaid}/></Modal>
-    <Modal open={showLogistics} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={(e)=>saveEntry(e,{silent:true})} onNewSalesOrder={()=>{setEditE({category:"Sales - Order",paymentStatus:"Payment Pending"});setShowForm(true);}}/></Modal>
+    <Modal open={showLogistics && IS_OWNER} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={(e)=>saveEntry(e,{silent:true})} onNewSalesOrder={()=>{setEditE({category:"Sales - Order",paymentStatus:"Payment Pending"});setShowForm(true);}}/></Modal>
     <Modal open={showLedger} onClose={()=>setShowLedger(false)} wide><LedgerUpload entries={entries} onClose={()=>setShowLedger(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
-    <Modal open={showLocation} onClose={()=>setShowLocation(false)} wide><LocationTracker onClose={()=>setShowLocation(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
+    <Modal open={showLocation && IS_OWNER} onClose={()=>setShowLocation(false)} wide><LocationTracker onClose={()=>setShowLocation(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showDayBook} onClose={()=>setShowDayBook(false)} wide><DayBook onClose={()=>setShowDayBook(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showHealth} onClose={()=>setShowHealth(false)}><HealthFamilyQuick onClose={()=>setShowHealth(false)} onSaveEntry={saveEntry} mode="health" entries={entries}/></Modal>
-    <Modal open={showCFO} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
-    <Modal open={showSpectrum} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)} onSaveEntry={saveEntry}/></Modal>
-    <Modal open={showCSD} onClose={()=>setShowCSD(false)} wide><CSD onClose={()=>setShowCSD(false)} onSaveEntry={saveEntry}/></Modal>
-    <Modal open={showKerala} onClose={()=>setShowKerala(false)} wide><Kerala onClose={()=>setShowKerala(false)} onSaveEntry={saveEntry}/></Modal>
-    <Modal open={showRules} onClose={()=>setShowRules(false)} wide><RulesEngine entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRules(false)}/></Modal>
+    <Modal open={showCFO && IS_OWNER} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
+    <Modal open={showSpectrum && IS_OWNER} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)} onSaveEntry={saveEntry}/></Modal>
+    <Modal open={showCSD && IS_OWNER} onClose={()=>setShowCSD(false)} wide><CSD onClose={()=>setShowCSD(false)} onSaveEntry={saveEntry}/></Modal>
+    <Modal open={showKerala && IS_OWNER} onClose={()=>setShowKerala(false)} wide><Kerala onClose={()=>setShowKerala(false)} onSaveEntry={saveEntry}/></Modal>
+    <Modal open={showRules && IS_OWNER} onClose={()=>setShowRules(false)} wide><RulesEngine entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRules(false)}/></Modal>
     
-    <Modal open={showTelegram} onClose={()=>setShowTelegram(false)}><TelegramTeam onClose={()=>setShowTelegram(false)}/></Modal>
+    <Modal open={showTelegram && IS_OWNER} onClose={()=>setShowTelegram(false)}><TelegramTeam onClose={()=>setShowTelegram(false)}/></Modal>
     <Modal open={showGym} onClose={()=>setShowGym(false)}><GymLog entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowGym(false)}/></Modal>
-    <Modal open={showRecv} onClose={()=>setShowRecv(false)}><Receivables entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRecv(false)}/></Modal>
+    <Modal open={showRecv && IS_OWNER} onClose={()=>setShowRecv(false)}><Receivables entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRecv(false)}/></Modal>
     <Modal open={!!tgShareEntry} onClose={()=>setTgShareEntry(null)}><TelegramShare entry={tgShareEntry} onClose={()=>setTgShareEntry(null)}/></Modal>
     <Modal open={!!capMode} onClose={()=>setCapMode(null)}><PurchaseSalesCapture mode={capMode} onSaveEntry={saveEntry} onClose={()=>setCapMode(null)}/></Modal>
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
-    <Modal open={showPins} onClose={()=>setShowPins(false)}><PinManager onClose={()=>setShowPins(false)}/></Modal>
+    <Modal open={showPins && IS_OWNER} onClose={()=>setShowPins(false)}><PinManager onClose={()=>setShowPins(false)}/></Modal>
     <Modal open={showFamily} onClose={()=>setShowFamily(false)}><HealthFamilyQuick onClose={()=>setShowFamily(false)} onSaveEntry={saveEntry} mode="family"/></Modal>
-    <Modal open={showPaymentReminders} onClose={()=>setShowPaymentReminders(false)} wide><PaymentReminders onClose={()=>setShowPaymentReminders(false)} entries={entries} onSaveEntry={saveEntry} onFocusDealer={(nm)=>{ setSearch(nm); setShowPaymentReminders(false); setTimeout(()=>{ try{ window.scrollTo({top:0,behavior:"smooth"}); }catch(e){} }, 100); }}/></Modal>
-    <Modal open={showTally} onClose={()=>setShowTally(false)} wide><TallyUpload onClose={()=>setShowTally(false)}/></Modal>
-    <Modal open={showEmailScan} onClose={()=>setShowEmailScan(false)} wide><EmailScan entries={entries} onClose={()=>setShowEmailScan(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})} onRefresh={refresh}/></Modal>
+    <Modal open={showPaymentReminders && IS_OWNER} onClose={()=>setShowPaymentReminders(false)} wide><PaymentReminders onClose={()=>setShowPaymentReminders(false)} entries={entries} onSaveEntry={saveEntry} onFocusDealer={(nm)=>{ setSearch(nm); setShowPaymentReminders(false); setTimeout(()=>{ try{ window.scrollTo({top:0,behavior:"smooth"}); }catch(e){} }, 100); }}/></Modal>
+    <Modal open={showTally && IS_OWNER} onClose={()=>setShowTally(false)} wide><TallyUpload onClose={()=>setShowTally(false)}/></Modal>
+    <Modal open={showEmailScan && IS_OWNER} onClose={()=>setShowEmailScan(false)} wide><EmailScan entries={entries} onClose={()=>setShowEmailScan(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})} onRefresh={refresh}/></Modal>
     <Modal open={showDD} onClose={()=>setShowDD(false)} wide><DropdownManager dropdowns={dropdowns} onSave={saveDropdowns} onClose={()=>setShowDD(false)}/></Modal>
     <Modal open={showShare} onClose={()=>setShowShare(false)} wide><SharePanel/></Modal>
   </div>;
