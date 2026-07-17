@@ -3900,7 +3900,7 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [ordOfficer,setOrdOfficer]=useState("");
   const [repPeriod,setRepPeriod]=useState("all"); // all | YYYY-MM
   const [beTransport,setBeTransport]=useState(0); // ₹/doz transport+other assumption for break-even (until master set)
-  const [costItems,setCostItems]=useState([{name:"An3f — All New 3 Fragrance 10 Sticks",sku:"",vol:95097,real:56.25,rm:47.5,freight:2.41,rent:11.30,sd:21.90,admin:4.64}]);
+  const [costItems,setCostItems]=useState([{name:"An3f — All New 3 Fragrance 10 Sticks",sku:"",vol:95097,real:56.25,rm:47.5,freight:2.41,rent:11.30,sd:16.99,admin:4.64}]);
   useEffect(()=>{(async()=>{
     try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses(r.data.expenses||{}); } }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
