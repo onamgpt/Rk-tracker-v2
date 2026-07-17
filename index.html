@@ -4777,7 +4777,7 @@ function Spectrum({ onClose, onSaveEntry }) {
 
 
 function AvailableFunds() {
-  const [data, setData] = useState({ bankBalance:"", asOf:"", cheques:[], payments:[] });
+  const [data, setData] = useState({ bankBalance:"", asOf:"", cheques:[], payments:[], deposits:[] });
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
@@ -4786,7 +4786,7 @@ function AvailableFunds() {
     (async () => {
       try {
         const r = await sheetsAPI("getPortfolio", { key: "available_funds" });
-        if (r && r.data) setData(Object.assign({ bankBalance:"", asOf:"", cheques:[], payments:[] }, r.data));
+        if (r && r.data) setData(Object.assign({ bankBalance:"", asOf:"", cheques:[], payments:[], deposits:[] }, r.data));
       } catch(e) {}
       setLoaded(true);
     })();
@@ -4796,7 +4796,9 @@ function AvailableFunds() {
   const bank = num(data.bankBalance);
   const unclearedTotal = (data.cheques||[]).reduce((s,c)=> s + (c.cleared?0:num(c.amount)), 0);
   const paymentsTotal = (data.payments||[]).reduce((s,p)=> s + num(p.amount), 0);
+  const depositsTotal = (data.deposits||[]).reduce((s,d)=> s + (d.credited?0:num(d.amount)), 0);
   const available = bank - unclearedTotal - paymentsTotal;
+  const projected = available + depositsTotal;
 
   const save = async () => {
     setSaving(true); setSavedMsg("");
@@ -4808,6 +4810,9 @@ function AvailableFunds() {
 
   const addCheque = () => setData(d => ({...d, cheques:[...(d.cheques||[]), {no:"",payee:"",amount:"",date:"",cleared:false}]}));
   const addPayment = () => setData(d => ({...d, payments:[...(d.payments||[]), {what:"",amount:""}]}));
+  const addDeposit = () => setData(d => ({...d, deposits:[...(d.deposits||[]), {from:"",amount:"",credited:false}]}));
+  const upDeposit = (i,k,v) => setData(d => { const x=[...(d.deposits||[])]; x[i]={...x[i],[k]:v}; return {...d,deposits:x}; });
+  const delDeposit = i => setData(d => ({...d, deposits:d.deposits.filter((_,x)=>x!==i)}));
   const upCheque = (i,k,v) => setData(d => { const c=[...d.cheques]; c[i]={...c[i],[k]:v}; return {...d,cheques:c}; });
   const upPayment = (i,k,v) => setData(d => { const p=[...d.payments]; p[i]={...p[i],[k]:v}; return {...d,payments:p}; });
   const delCheque = i => setData(d => ({...d, cheques:d.cheques.filter((_,x)=>x!==i)}));
@@ -4827,6 +4832,10 @@ function AvailableFunds() {
         <div style={{ fontSize:10.5, opacity:.85, marginTop:3 }}>
           Bank {fmt(bank)} − Uncleared cheques {fmt(unclearedTotal)} − Payments due {fmt(paymentsTotal)}
         </div>
+        {depositsTotal>0 && <div style={{ fontSize:11, marginTop:6, paddingTop:6, borderTop:"1px solid rgba(255,255,255,.25)" }}>
+          <span style={{ opacity:.9 }}>+ Incoming deposits {fmt(depositsTotal)} → </span>
+          <b>Projected once credited {fmt(projected)}</b>
+        </div>}
       </div>
 
       {/* Bank balance input */}
@@ -4868,6 +4877,25 @@ function AvailableFunds() {
             <button onClick={()=>delPayment(i)} style={{ border:"none", background:"none", color:"#c33", cursor:"pointer", fontSize:14 }}>×</button>
           </div>
         ))}
+      </div>
+
+      {/* Deposits received */}
+      <div style={{ marginBottom:12 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
+          <span style={{ fontSize:12.5, fontWeight:700, color:"#1a5a3a" }}>Deposits in (tick when credited)</span>
+          <button onClick={addDeposit} style={{ fontSize:11, padding:"3px 10px", borderRadius:6, border:"1px solid #1a7a4a", background:"#eafaf0", color:"#1a5a3a", cursor:"pointer" }}>+ Deposit</button>
+        </div>
+        {(data.deposits||[]).map((c,i)=>(
+          <div key={i} style={{ display:"flex", gap:5, marginBottom:5, alignItems:"center" }}>
+            <input value={c.from} onChange={e=>upDeposit(i,"from",e.target.value)} placeholder="from (party / cheque no.)" style={{...inp,flex:2}}/>
+            <input value={c.amount} onChange={e=>upDeposit(i,"amount",e.target.value)} placeholder="₹" style={{...inp,flex:1}}/>
+            <label style={{ fontSize:10.5, display:"flex", alignItems:"center", gap:3, color: c.credited?"#1a7a3a":"#c8860a", whiteSpace:"nowrap" }}>
+              <input type="checkbox" checked={!!c.credited} onChange={e=>upDeposit(i,"credited",e.target.checked)}/>{c.credited?"credited":"in transit"}
+            </label>
+            <button onClick={()=>delDeposit(i)} style={{ border:"none", background:"none", color:"#c33", cursor:"pointer", fontSize:14 }}>×</button>
+          </div>
+        ))}
+        {(!data.deposits||!data.deposits.length) && <div style={{fontSize:11,color:"#8a9a8a",fontStyle:"italic"}}>Cheques/cash you've deposited but not yet credited. Tick when the bank credits it, then update the bank balance.</div>}
       </div>
 
       <div style={{ display:"flex", gap:8, alignItems:"center" }}>
