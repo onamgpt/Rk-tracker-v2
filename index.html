@@ -3901,11 +3901,13 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [repPeriod,setRepPeriod]=useState("all"); // all | YYYY-MM
   const [beTransport,setBeTransport]=useState(0); // ₹/doz transport+other assumption for break-even (until master set)
   const [costItems,setCostItems]=useState([{name:"An3f — All New 3 Fragrance 10 Sticks",sku:"",vol:95097,real:56.25,rm:47.5,freight:2.41,rent:11.30,sd:16.99,admin:4.64}]);
+  const [alertFloor,setAlertFloor]=useState(30); // contribution % floor for month-level watch alert
   useEffect(()=>{(async()=>{
     try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses(r.data.expenses||{}); } }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
     try{ const pm=await sheetsAPI("getPortfolio",{key:"spectrum_master",user:"main"}); if(pm&&pm.data&&Array.isArray(pm.data)&&pm.data.length) setMaster(pm.data); }catch(e){}
     try{ const c=await sheetsAPI("getPortfolio",{key:"spectrum_costing",user:"main"}); if(c&&c.data&&Array.isArray(c.data)&&c.data.length) setCostItems(c.data); }catch(e){}
+    try{ const af=await sheetsAPI("getPortfolio",{key:"spectrum_alertcfg",user:"main"}); if(af&&af.data&&typeof af.data.floor==="number") setAlertFloor(af.data.floor); }catch(e){}
   })()},[]);
   const persistMaster = async (m) => { setMaster(m); try{ await sheetsAPI("savePortfolio",{key:"spectrum_master",user:"main",data:m}); }catch(e){} };
   const addProduct = () => persistMaster([...master, {sku:"",name:"New product",sp:0,cogs:0,gp:0,gpp:0}]);
@@ -4025,6 +4027,39 @@ function Spectrum({ onClose, onSaveEntry }) {
     const net=gp-exp;
     return { orders:os.length, sales, gp, exp, net };
   }
+  const persistAlertFloor = async (f) => { setAlertFloor(f); try{ await sheetsAPI("savePortfolio",{key:"spectrum_alertcfg",user:"main",data:{floor:f}}); }catch(e){} };
+
+  // ===== WATCHDOG: recomputes on every load; flags anything sliding into loss =====
+  function computeWatch(){
+    const brand=[], invoice=[]; let channel=null;
+    // brand-level: any costed brand whose net/doz < 0
+    costItems.forEach(it=>{
+      const net=(it.real||0)-(it.rm||0)-(it.freight||0)-(it.rent||0)-(it.sd||0)-(it.admin||0);
+      if(net<0) brand.push({name:it.name, net:Math.round(net*100)/100, annual:Math.round(net*(it.vol||0))});
+    });
+    // master brands flagged loss (gp<0) — catches pushed net brands
+    master.forEach(m=>{ if((m.gp||0)<0 && !costItems.some(c=>c.sku===m.sku)) brand.push({name:m.name, net:m.gp, annual:null}); });
+    // invoice-level: orders (last 60) that net below zero using master gp
+    const now=Date.now();
+    orders.forEach(o=>{
+      const dt=new Date(o.date); if(isNaN(dt)||(now-dt.getTime())>60*86400000) return;
+      const net=(o.lines||[]).reduce((s,l)=>{ const m=master.find(x=>x.sku===l.sku); return s+(m?m.gp*(l.doz||0):0); },0);
+      if(net<0) invoice.push({cust:o.customer||"—", off:o.officer, date:o.date, net:Math.round(net)});
+    });
+    invoice.sort((a,b)=>a.net-b.net);
+    // channel-level: current-month spectrum contribution %
+    const mk=d=>{const x=new Date(d);return isNaN(x)?null:(x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0"));};
+    const cm=mk(new Date().toISOString());
+    const mo=orders.filter(o=>mk(o.date)===cm);
+    if(mo.length){
+      const sales=mo.reduce((s,o)=>s+(Number(o.total)||0),0);
+      const gp=mo.reduce((s,o)=>s+(Number(o.gpTotal)||0),0);
+      const pct=sales?Math.round(gp/sales*1000)/10:0;
+      if(pct<alertFloor) channel={pct, floor:alertFloor, sales:Math.round(sales), gp:Math.round(gp)};
+    }
+    return {brand, invoice:invoice.slice(0,8), channel, count:brand.length+invoice.length+(channel?1:0)};
+  }
+
   // product rollups
   function productStats(){
     const map={};
@@ -4041,6 +4076,19 @@ function Spectrum({ onClose, onSaveEntry }) {
         <div><h2 style={{margin:0,fontSize:18,color:"#3a2a6a"}}>Spectrum</h2>
         <div style={{fontSize:11,color:"#7a6a9a"}}>Salesperson profitability &mdash; tag orders, track who earns their keep</div></div>
       </div>
+
+      {IS_OWNER && (()=>{
+        const w=computeWatch();
+        if(!w.count) return <div style={{background:"#eef7ef",border:"1px solid #bfe0c5",borderRadius:8,padding:"8px 11px",marginBottom:10,fontSize:11.5,color:"#2a6a3a",fontWeight:600}}>✓ Watchdog active — nothing in loss right now. I'll flag any brand, invoice, or month that slips.</div>;
+        return <div onClick={()=>setTab("reports")} style={{background:"#fdeeee",border:"2px solid #e0a0a0",borderRadius:8,padding:"9px 11px",marginBottom:10,cursor:"pointer"}}>
+          <div style={{fontSize:12.5,fontWeight:800,color:"#c33"}}>⚠ Watchdog: {w.count} thing{w.count>1?"s":""} in loss — tap for detail</div>
+          <div style={{fontSize:10.5,color:"#a55",marginTop:2}}>
+            {w.brand.length>0 && <span>{w.brand.length} brand{w.brand.length>1?"s":""} below zero ({w.brand.slice(0,2).map(b=>b.name.split("—")[0].trim()).join(", ")}{w.brand.length>2?"…":""}). </span>}
+            {w.invoice.length>0 && <span>{w.invoice.length} recent invoice{w.invoice.length>1?"s":""} net-negative. </span>}
+            {w.channel && <span>This month {w.channel.pct}% &lt; {w.channel.floor}% floor.</span>}
+          </div>
+        </div>;
+      })()}
 
       <div style={{display:"flex",gap:6,marginBottom:12}}>
         {[["upload","📤 Upload"],["orders","📋 Orders"],["officers","👥 Officers"],["products","📦 Products"],["reports","📊 Reports"],["costing","💠 Costing"]].map(([k,l])=>(
@@ -4477,6 +4525,34 @@ function Spectrum({ onClose, onSaveEntry }) {
               </div>
             ))}
           </div>
+
+          {/* Watchdog detail */}
+          {(()=>{
+            const w=computeWatch();
+            return <div style={{marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <span style={{fontSize:12.5,fontWeight:800,color:w.count?"#c33":"#2a6a3a"}}>{w.count?"⚠ Watchdog — "+w.count+" in loss":"✓ Watchdog — all clear"}</span>
+                <span style={{fontSize:10.5,color:"#888"}}>alert if month &lt; <input type="number" value={alertFloor} onChange={e=>persistAlertFloor(Number(e.target.value)||0)} style={{width:44,padding:"3px",borderRadius:5,border:"1px solid #ccd",fontSize:11,textAlign:"center"}}/>%</span>
+              </div>
+              {w.channel && <div style={{background:"#fdeeee",border:"1px solid #e8c8c8",borderRadius:8,padding:"7px 9px",marginBottom:6,fontSize:11.5,color:"#c33"}}>
+                📉 This month running at <b>{w.channel.pct}%</b> contribution ({fmt(w.channel.gp)} on {fmt(w.channel.sales)}) — below your {w.channel.floor}% floor.
+              </div>}
+              {w.brand.map((b,i)=>(
+                <div key={"b"+i} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"5px 9px",background:"#fff6f0",border:"1px solid #eddac8",borderRadius:7,marginBottom:5}}>
+                  <span style={{color:"#a34a00"}}>🔻 <b>{b.name}</b> net {b.net}/doz</span>
+                  {b.annual!=null && <b style={{color:"#c33"}}>{fmt(b.annual)}/yr</b>}
+                </div>
+              ))}
+              {w.invoice.length>0 && <div style={{fontSize:10,color:"#a5804a",fontWeight:800,margin:"4px 0 3px"}}>Recent invoices netting below zero:</div>}
+              {w.invoice.map((v,i)=>(
+                <div key={"i"+i} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"4px 9px",borderBottom:"1px solid #f3ece4"}}>
+                  <span style={{color:"#555"}}>{v.cust} · <span style={{color:"#5a3a9a"}}>{v.off}</span> · {v.date}</span>
+                  <b style={{color:"#c33"}}>{fmt(v.net)}</b>
+                </div>
+              ))}
+              {!w.count && <div style={{fontSize:11,color:"#2a6a3a",background:"#eef7ef",border:"1px solid #bfe0c5",borderRadius:8,padding:"8px 10px"}}>Every costed brand, recent invoice, and this month are profitable. The watchdog re-checks each time the app opens.</div>}
+            </div>;
+          })()}
 
           {/* Loss-item Watch */}
           {liInv>0 && <div>
