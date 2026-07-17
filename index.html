@@ -3898,6 +3898,7 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [fieldReports,setFieldReports]=useState([]);
   const [ordSearch,setOrdSearch]=useState("");
   const [ordOfficer,setOrdOfficer]=useState("");
+  const [repPeriod,setRepPeriod]=useState("all"); // all | YYYY-MM
   useEffect(()=>{(async()=>{
     try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses(r.data.expenses||{}); } }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
@@ -3936,6 +3937,32 @@ function Spectrum({ onClose, onSaveEntry }) {
       setMsg("");
     }catch(e){ setMsg("❌ Couldn't read the order clearly. Try a clearer image."); }
     setBusy(false);
+  };
+
+  // ---- QUANTITY REVIEW HELPERS (edit before profit is committed) ----
+  const recalcPending = (lines) => {
+    let gpTotal=0;
+    const nl = lines.map(l=>{
+      const m = master.find(x=>x.sku===l.sku);
+      const gp = m ? Math.round(m.gp*(l.doz||0)) : 0;
+      gpTotal += gp;
+      return {...l, gp, matched:!!m, gpp:m?m.gpp:null};
+    });
+    return {lines:nl, gpTotal};
+  };
+  const updPendingDoz = (i,val) => {
+    const doz = parseFloat(val); const v = isNaN(doz)?0:doz;
+    const r = recalcPending(pending.lines.map((l,idx)=>idx===i?{...l,doz:v}:l));
+    setPending({...pending, lines:r.lines, gpTotal:r.gpTotal});
+  };
+  const rematchPendingLine = (i,sku) => {
+    const m = master.find(x=>x.sku===sku); if(!m) return;
+    const r = recalcPending(pending.lines.map((l,idx)=>idx===i?{...l,sku:m.sku,name:m.name}:l));
+    setPending({...pending, lines:r.lines, gpTotal:r.gpTotal});
+  };
+  const delPendingLine = (i) => {
+    const r = recalcPending(pending.lines.filter((_,idx)=>idx!==i));
+    setPending({...pending, lines:r.lines, gpTotal:r.gpTotal});
   };
 
   const confirmOrder = async () => {
@@ -4000,7 +4027,7 @@ function Spectrum({ onClose, onSaveEntry }) {
       </div>
 
       <div style={{display:"flex",gap:6,marginBottom:12}}>
-        {[["upload","📤 Upload"],["orders","📋 Orders"],["officers","👥 Officers"],["products","📦 Products"]].map(([k,l])=>(
+        {[["upload","📤 Upload"],["orders","📋 Orders"],["officers","👥 Officers"],["products","📦 Products"],["reports","📊 Reports"]].map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"8px",borderRadius:8,border:tab===k?"2px solid #5a3a9a":"1px solid #ccc",background:tab===k?"#f0eafa":"#fff",color:"#3a2a6a",fontWeight:700,cursor:"pointer",fontSize:12}}>{l}</button>
         ))}
       </div>
@@ -4025,23 +4052,52 @@ function Spectrum({ onClose, onSaveEntry }) {
           <button onClick={scanOrder} disabled={busy} className="bg" style={{width:"100%",marginTop:8}}>{busy?"⏳ Reading…":"🔍 Scan & match products"}</button>
         </div>}
 
-        {pending && <div style={{background:"#faf8ff",border:"1px solid #d8c8f0",borderRadius:10,padding:12,marginBottom:10}}>
+        {pending && <div style={{background:"#faf8ff",border:"2px solid #7a5aba",borderRadius:10,padding:12,marginBottom:10}}>
+          <div style={{background:"#f0eafa",border:"1px solid #c8b0e8",borderRadius:8,padding:"8px 10px",marginBottom:10}}>
+            <div style={{fontSize:12,fontWeight:800,color:"#4a2a8a"}}>✋ STEP 1 · Confirm quantities before profit is calculated</div>
+            <div style={{fontSize:10.5,color:"#6a5a8a",marginTop:2}}>OCR can misread (e.g. 810 instead of 81). Edit any dozen count below — profit recalculates live. Nothing is saved until you tag & save.</div>
+          </div>
           <div style={{fontSize:13,fontWeight:700,color:"#3a2a6a"}}>{pending.customer||"Order"} {pending.orderNo?("· "+pending.orderNo):""}</div>
-          <div style={{fontSize:11,color:"#777",marginBottom:8}}>{pending.date} · Order value {fmt(pending.total)} · Gross profit {fmt(pending.gpTotal)}</div>
-          {pending.lines.map((l,i)=>(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0",color:l.matched?"#233":"#a33"}}>
-              <span>{l.matched?"✓":"⚠"} {l.name} {l.doz?("· "+l.doz+" doz"):""}</span>
-              <span style={{fontWeight:700}}>{l.matched?fmt(l.gp):"unmatched"}</span>
-            </div>
-          ))}
-          <div style={{marginTop:10,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <div style={{fontSize:11,color:"#777",marginBottom:8,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+            <span>{pending.date} ·</span>
+            <span>Order value ₹</span>
+            <input type="number" value={pending.grandTotal||""} onChange={e=>setPending({...pending,grandTotal:Number(e.target.value)||0})} placeholder="0" style={{width:90,padding:"4px 6px",borderRadius:6,border:"1.5px solid #b8a0d8",fontSize:11.5,fontWeight:700,color:"#3a2a6a"}}/>
+            <span>· Gross profit <b style={{color:"#1a7a3a"}}>{fmt(pending.gpTotal)}</b></span>
+          </div>
+          {pending.lines.map((l,i)=>{
+            const big = (l.doz||0)>500;
+            return (
+            <div key={i} style={{border:"1px solid "+(big?"#e0a0a0":l.matched?"#e0d8f0":"#e8c8c8"),background:big?"#fdf3f3":"#fff",borderRadius:8,padding:"7px 8px",marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
+                <span style={{fontSize:12,color:l.matched?"#233":"#a33",flex:1}}>{l.matched?"✓":"⚠"} {l.name}</span>
+                <button onClick={()=>delPendingLine(i)} style={{border:"none",background:"none",color:"#c33",cursor:"pointer",fontSize:15,padding:"0 2px"}}>×</button>
+              </div>
+              <div style={{display:"flex",gap:6,alignItems:"center",marginTop:5,flexWrap:"wrap"}}>
+                <label style={{fontSize:10,color:"#666",fontWeight:700}}>QTY</label>
+                <input type="number" step="0.5" value={l.doz||""} onChange={e=>updPendingDoz(i,e.target.value)}
+                  style={{width:75,padding:"6px",borderRadius:6,border:"2px solid #c8a020",background:"#fffdf2",fontSize:13,fontWeight:800,textAlign:"center",color:"#2a1a00"}}/>
+                <span style={{fontSize:10.5,color:"#888"}}>doz</span>
+                <span style={{marginLeft:"auto",fontWeight:800,fontSize:12.5,color:l.matched?"#1a7a3a":"#a33"}}>{l.matched?fmt(l.gp)+" GP":"unmatched"}</span>
+              </div>
+              {big && <div style={{fontSize:10,color:"#c33",fontWeight:700,marginTop:4}}>⚠ {l.doz} dozen looks unusually large — double-check against the paper invoice.</div>}
+              {!l.matched && <select defaultValue="" onChange={e=>rematchPendingLine(i,e.target.value)} style={{width:"100%",marginTop:5,padding:"6px",borderRadius:6,border:"1px solid #d0a0a0",fontSize:11,color:"#3a2a6a",background:"#fff8f8"}}>
+                <option value="">🔗 Match to a product…</option>
+                {master.map(m=><option key={m.sku} value={m.sku}>{m.name} — GP {fmt(m.gp)}/doz</option>)}
+              </select>}
+            </div>);
+          })}
+          <div style={{background:"#f0eafa",border:"1px solid #c8b0e8",borderRadius:8,padding:"8px 10px",margin:"10px 0 8px"}}>
+            <div style={{fontSize:12,fontWeight:800,color:"#4a2a8a"}}>✋ STEP 2 · Quantities correct? Tag the salesperson & save</div>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
             <select value={tagOfficer} onChange={e=>setTagOfficer(e.target.value)} style={inp}>
               <option value="">Tag salesperson…</option>
               {OFFICERS.map(o=><option key={o} value={o}>{o}</option>)}
             </select>
-            <button onClick={confirmOrder} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#5a3a9a",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:13}}>✓ Save & tag</button>
+            <button onClick={confirmOrder} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#5a3a9a",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:13}}>✓ Confirm quantities · Save & tag</button>
+            <button onClick={()=>{setPending(null);setMsg("");}} style={{padding:"8px 12px",borderRadius:8,border:"1px solid #ccc",background:"#fff",color:"#777",cursor:"pointer",fontSize:12}}>✕ Discard</button>
           </div>
-          <div style={{fontSize:10,color:"#999",marginTop:6,fontStyle:"italic"}}>Unmatched (⚠) items usually mean a SKU still marked UPDATE_LATER, or a new product. You can still save; matched lines count toward profit.</div>
+          <div style={{fontSize:10,color:"#999",marginTop:6,fontStyle:"italic"}}>Unmatched (⚠) items: use the "Match to a product" dropdown above, or add the product in the Products tab. Matched lines count toward profit.</div>
         </div>}
 
         <div style={{fontSize:12,fontWeight:700,color:"#3a2a6a",marginTop:8,marginBottom:4}}>Recent tagged orders</div>
@@ -4215,6 +4271,217 @@ function Spectrum({ onClose, onSaveEntry }) {
           </div>}
         </div>}
       </div>}
+
+      {tab==="reports" && !IS_OWNER && <div style={{fontSize:12,color:"#777",background:"#f6f6f9",borderRadius:8,padding:14,textAlign:"center"}}>Sales intelligence reports are visible to management only.</div>}
+      {tab==="reports" && IS_OWNER && (()=>{
+        // ============ SAP-STYLE SALES INTELLIGENCE ============
+        const mKey = d => { const dt=new Date(d); return isNaN(dt)?null:(dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")); };
+        const mLabel = k => { if(!k) return "?"; const [y,m]=k.split("-"); return ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+m-1]+" "+y.slice(2); };
+        const months = Array.from(new Set(orders.map(o=>mKey(o.date)).filter(Boolean))).sort().reverse();
+        const inPeriod = o => repPeriod==="all" || mKey(o.date)===repPeriod;
+        const F = orders.filter(inPeriod);
+
+        // KPIs
+        const kSales=F.reduce((s,o)=>s+(Number(o.total)||0),0);
+        const kGP=F.reduce((s,o)=>s+(Number(o.gpTotal)||0),0);
+        const kTrans=F.reduce((s,o)=>s+(Number(o.transport)||0),0);
+        const kComm=F.reduce((s,o)=>s+((o.officer===AGENT2)?(Number(o.total)||0)*AGENT2_RATE:0),0);
+        const kOut=F.reduce((s,o)=>s+Math.max(0,(Number(o.total)||0)-(Number(o.received)||0)),0);
+        const kNet=kGP-kTrans-kComm;
+        const kPct=kSales?Math.round(kGP/kSales*10000)/100:0;
+        const kAvg=F.length?kSales/F.length:0;
+
+        // Salesman-wise (SAP: Sales Analysis by Employee)
+        const byOff = OFFICERS.map(off=>{
+          const os=F.filter(o=>o.officer===off);
+          const sales=os.reduce((s,o)=>s+(Number(o.total)||0),0);
+          const gp=os.reduce((s,o)=>s+(Number(o.gpTotal)||0),0);
+          const out=os.reduce((s,o)=>s+Math.max(0,(Number(o.total)||0)-(Number(o.received)||0)),0);
+          const exp=parseFloat(String(expenses[off]||"").replace(/[^0-9.]/g,""))||0;
+          return {off,orders:os.length,sales,gp,pct:sales?Math.round(gp/sales*10000)/100:0,exp,net:gp-exp,out};
+        }).filter(r=>r.orders>0).sort((a,b)=>b.gp-a.gp);
+
+        // Product-wise (SAP: Material Analysis) — fast & slow movers
+        const pMap={};
+        F.forEach(o=>(o.lines||[]).forEach(l=>{
+          const key=l.name||"?";
+          if(!pMap[key])pMap[key]={name:key,sku:l.sku,doz:0,gp:0};
+          pMap[key].doz+=Number(l.doz)||0; pMap[key].gp+=Number(l.gp)||0;
+        }));
+        const prods=Object.values(pMap).map(p=>{
+          const m=master.find(x=>x.sku===p.sku)||master.find(x=>x.name===p.name);
+          const rev=m?m.sp*p.doz:0;
+          return {...p, rev, pct:rev?Math.round(p.gp/rev*10000)/100:0};
+        }).sort((a,b)=>b.gp-a.gp);
+
+        // Customer-wise (SAP: Customer Analysis)
+        const cMap={};
+        F.forEach(o=>{
+          const key=o.customer||"—";
+          if(!cMap[key])cMap[key]={cust:key,orders:0,sales:0,gp:0,out:0};
+          cMap[key].orders++; cMap[key].sales+=Number(o.total)||0; cMap[key].gp+=Number(o.gpTotal)||0;
+          cMap[key].out+=Math.max(0,(Number(o.total)||0)-(Number(o.received)||0));
+        });
+        const custs=Object.values(cMap).sort((a,b)=>b.sales-a.sales);
+
+        // Monthly trend — last 6 months (always from ALL orders)
+        const tMap={};
+        orders.forEach(o=>{ const k=mKey(o.date); if(!k)return; if(!tMap[k])tMap[k]={sales:0,gp:0}; tMap[k].sales+=Number(o.total)||0; tMap[k].gp+=Number(o.gpTotal)||0; });
+        const trend=Object.entries(tMap).sort((a,b)=>a[0]<b[0]?1:-1).slice(0,6).reverse();
+        const tMax=Math.max(1,...trend.map(([,v])=>v.sales));
+
+        // Receivables aging (SAP: FBL5N ageing)
+        const now=Date.now();
+        const aging={a30:0,a60:0,a90:0};
+        const agingRows=[];
+        F.forEach(o=>{
+          const due=Math.max(0,(Number(o.total)||0)-(Number(o.received)||0));
+          if(due<=0.5)return;
+          const dt=new Date(o.date); const days=isNaN(dt)?0:Math.floor((now-dt.getTime())/86400000);
+          if(days<=30)aging.a30+=due; else if(days<=60)aging.a60+=due; else aging.a90+=due;
+          agingRows.push({cust:o.customer||"—",off:o.officer,date:o.date,days,due});
+        });
+        agingRows.sort((a,b)=>b.days-a.days);
+
+        // Discount / margin leakage check — orders whose realised GP% falls below master expectation
+        const leaks=F.map(o=>{
+          const expGP=(o.lines||[]).reduce((s,l)=>{const m=master.find(x=>x.sku===l.sku);return s+(m?m.gp*(l.doz||0):0);},0);
+          const actGP=Number(o.gpTotal)||0;
+          return {o, expGP, diff:expGP-actGP};
+        }).filter(x=>x.diff>1).sort((a,b)=>b.diff-a.diff).slice(0,5);
+
+        const exportCSV=()=>{
+          let csv="SPECTRUM SALES INTELLIGENCE — "+(repPeriod==="all"?"All time":mLabel(repPeriod))+"\n\n";
+          csv+="KPI,Value\nSales,"+kSales+"\nGross Profit,"+kGP+"\nGP %,"+kPct+"\nOrders,"+F.length+"\nAvg Order,"+Math.round(kAvg)+"\nTransport,"+kTrans+"\nCommission,"+kComm+"\nNet Profit,"+kNet+"\nOutstanding,"+kOut+"\n\n";
+          csv+="SALESMAN,ORDERS,SALES,GROSS PROFIT,GP %,MONTHLY COST,NET,OUTSTANDING\n";
+          byOff.forEach(r=>{csv+=[r.off,r.orders,r.sales,r.gp,r.pct+"%",r.exp,r.net,r.out].join(",")+"\n";});
+          csv+="\nPRODUCT,DOZENS,REVENUE,GROSS PROFIT,GP %\n";
+          prods.forEach(p=>{csv+=['"'+p.name+'"',Math.round(p.doz*100)/100,Math.round(p.rev),p.gp,p.pct+"%"].join(",")+"\n";});
+          csv+="\nCUSTOMER,ORDERS,SALES,GROSS PROFIT,OUTSTANDING\n";
+          custs.forEach(c=>{csv+=['"'+c.cust+'"',c.orders,c.sales,c.gp,c.out].join(",")+"\n";});
+          csv+="\nRECEIVABLES AGING\n0-30 days,"+aging.a30+"\n31-60 days,"+aging.a60+"\n60+ days,"+aging.a90+"\n";
+          const blob=new Blob([csv],{type:"text/csv"});
+          const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+          a.download="spectrum-report-"+(repPeriod==="all"?"all":repPeriod)+".csv"; a.click();
+        };
+
+        const th={textAlign:"left",padding:"5px 6px",fontSize:10,color:"#7a6a9a",fontWeight:800,textTransform:"uppercase",letterSpacing:".04em",borderBottom:"2px solid #d8c8f0"};
+        const td={padding:"6px",fontSize:11.5,borderBottom:"1px solid #efeaf8",color:"#333"};
+        const sec={fontSize:12.5,fontWeight:800,color:"#3a2a6a",margin:"16px 0 6px",display:"flex",justifyContent:"space-between",alignItems:"center"};
+
+        return <div>
+          {/* Period + export */}
+          <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center"}}>
+            <select value={repPeriod} onChange={e=>setRepPeriod(e.target.value)} style={{flex:1,padding:"7px",borderRadius:6,border:"1px solid #ccd",fontSize:12,fontWeight:700,color:"#3a2a6a"}}>
+              <option value="all">📅 All time</option>
+              {months.map(m=><option key={m} value={m}>{mLabel(m)}</option>)}
+            </select>
+            <button onClick={exportCSV} style={{padding:"7px 14px",borderRadius:6,border:"none",background:"#5a3a9a",color:"#fff",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>⬇ Export CSV</button>
+          </div>
+
+          {/* KPI strip */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:4}}>
+            {[["Sales",fmt(kSales),"#3a2a6a"],["Gross Profit",fmt(kGP),"#1a7a3a"],["GP %",kPct+"%","#1a7a3a"],
+              ["Orders",F.length,"#3a2a6a"],["Avg Order",fmt(kAvg),"#3a2a6a"],["Outstanding",fmt(kOut),kOut>0?"#c33":"#1a7a3a"],
+              ["Transport",fmt(kTrans),"#8a5a1a"],["Commission",fmt(kComm),"#8a5a1a"],["NET PROFIT",fmt(kNet),kNet>=0?"#1a7a3a":"#c33"]].map(([l,v,c],i)=>(
+              <div key={i} style={{background:"#faf8ff",border:"1px solid #e5e0f0",borderRadius:8,padding:"8px 6px",textAlign:"center"}}>
+                <div style={{fontSize:8.5,color:"#8a7aaa",fontWeight:800,letterSpacing:".05em"}}>{l.toUpperCase()}</div>
+                <div style={{fontSize:14,fontWeight:800,color:c,marginTop:2}}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Salesman-wise */}
+          <div style={sec}><span>👥 Salesman-wise Sales Analysis</span></div>
+          <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:430}}>
+            <thead><tr><th style={th}>Salesman</th><th style={th}>Ord</th><th style={th}>Sales</th><th style={th}>GP</th><th style={th}>GP%</th><th style={th}>Net</th><th style={th}>O/S</th></tr></thead>
+            <tbody>{byOff.map((r,i)=>(
+              <tr key={i} style={{background:i===0?"#f5fbf5":"#fff"}}>
+                <td style={{...td,fontWeight:700,color:"#5a3a9a"}}>{i===0?"🏆 ":""}{r.off}</td>
+                <td style={td}>{r.orders}</td><td style={td}>{fmt(r.sales)}</td>
+                <td style={{...td,fontWeight:700,color:"#1a7a3a"}}>{fmt(r.gp)}</td>
+                <td style={td}>{r.pct}%</td>
+                <td style={{...td,fontWeight:700,color:r.net>=0?"#1a7a3a":"#c33"}}>{fmt(r.net)}</td>
+                <td style={{...td,color:r.out>0?"#c33":"#999"}}>{r.out>0?fmt(r.out):"—"}</td>
+              </tr>))}
+              {!byOff.length && <tr><td colSpan="7" style={{...td,textAlign:"center",color:"#999",fontStyle:"italic"}}>No orders in this period.</td></tr>}
+            </tbody>
+          </table></div>
+
+          {/* Product-wise */}
+          <div style={sec}><span>📦 Product-wise Analysis (fast → slow movers)</span></div>
+          <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:430}}>
+            <thead><tr><th style={th}>Product</th><th style={th}>Doz</th><th style={th}>Revenue</th><th style={th}>GP</th><th style={th}>GP%</th></tr></thead>
+            <tbody>{prods.map((p,i)=>(
+              <tr key={i}>
+                <td style={{...td,maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i===0?"🔥 ":""}{p.name}</td>
+                <td style={td}>{Math.round(p.doz*10)/10}</td><td style={td}>{fmt(p.rev)}</td>
+                <td style={{...td,fontWeight:700,color:"#1a7a3a"}}>{fmt(p.gp)}</td>
+                <td style={{...td,color:p.pct<25?"#c33":"#333"}}>{p.pct}%{p.pct<25&&p.rev>0?" ⚠":""}</td>
+              </tr>))}
+              {!prods.length && <tr><td colSpan="5" style={{...td,textAlign:"center",color:"#999",fontStyle:"italic"}}>No product lines in this period.</td></tr>}
+            </tbody>
+          </table></div>
+
+          {/* Customer-wise */}
+          <div style={sec}><span>🏪 Customer-wise Analysis (top by value)</span></div>
+          <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:430}}>
+            <thead><tr><th style={th}>Customer</th><th style={th}>Ord</th><th style={th}>Sales</th><th style={th}>GP</th><th style={th}>O/S</th></tr></thead>
+            <tbody>{custs.slice(0,12).map((c,i)=>(
+              <tr key={i}>
+                <td style={{...td,fontWeight:600,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.cust}</td>
+                <td style={td}>{c.orders}</td><td style={td}>{fmt(c.sales)}</td>
+                <td style={{...td,color:"#1a7a3a",fontWeight:700}}>{fmt(c.gp)}</td>
+                <td style={{...td,color:c.out>0?"#c33":"#999"}}>{c.out>0?fmt(c.out):"✓"}</td>
+              </tr>))}
+              {!custs.length && <tr><td colSpan="5" style={{...td,textAlign:"center",color:"#999",fontStyle:"italic"}}>No customers in this period.</td></tr>}
+            </tbody>
+          </table></div>
+
+          {/* Monthly trend */}
+          <div style={sec}><span>📈 Monthly Trend (sales vs gross profit)</span></div>
+          {trend.map(([k,v])=>(
+            <div key={k} style={{marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:10.5,color:"#666",marginBottom:2}}>
+                <b>{mLabel(k)}</b><span>{fmt(v.sales)} · GP {fmt(v.gp)}</span>
+              </div>
+              <div style={{background:"#efeaf8",borderRadius:4,height:14,position:"relative",overflow:"hidden"}}>
+                <div style={{position:"absolute",left:0,top:0,bottom:0,width:(v.sales/tMax*100)+"%",background:"linear-gradient(90deg,#8a6aca,#5a3a9a)",borderRadius:4}}></div>
+                <div style={{position:"absolute",left:0,top:0,bottom:0,width:(v.gp/tMax*100)+"%",background:"#1a7a3a",borderRadius:4,opacity:.85}}></div>
+              </div>
+            </div>
+          ))}
+          {!trend.length && <div style={{fontSize:11,color:"#999",fontStyle:"italic"}}>No dated orders yet.</div>}
+
+          {/* Receivables aging */}
+          <div style={sec}><span>⏰ Receivables Aging</span></div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:8}}>
+            {[["0–30 days",aging.a30,"#1a7a3a"],["31–60 days",aging.a60,"#c8860a"],["60+ days",aging.a90,"#c33"]].map(([l,v,c],i)=>(
+              <div key={i} style={{background:"#faf8ff",border:"1px solid #e5e0f0",borderRadius:8,padding:"8px 6px",textAlign:"center"}}>
+                <div style={{fontSize:9,color:"#8a7aaa",fontWeight:800}}>{l}</div>
+                <div style={{fontSize:13.5,fontWeight:800,color:c}}>{fmt(v)}</div>
+              </div>
+            ))}
+          </div>
+          {agingRows.slice(0,8).map((r,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"4px 2px",borderBottom:"1px solid #f0ecf8"}}>
+              <span style={{color:r.days>60?"#c33":"#555"}}>{r.cust} · <span style={{color:"#5a3a9a"}}>{r.off}</span> · {r.days}d</span>
+              <b style={{color:r.days>60?"#c33":"#8a5a1a"}}>{fmt(r.due)}</b>
+            </div>
+          ))}
+
+          {/* Margin leakage */}
+          {leaks.length>0 && <div>
+            <div style={sec}><span>🚨 Margin Leakage (GP below master expectation)</span></div>
+            {leaks.map((x,i)=>(
+              <div key={i} style={{background:"#fdf3f3",border:"1px solid #e8c8c8",borderRadius:8,padding:"7px 9px",marginBottom:6,fontSize:11}}>
+                <b>{x.o.customer||"Order"}</b> · {x.o.officer} · {x.o.date}
+                <div style={{color:"#c33",fontWeight:700,marginTop:2}}>Expected GP {fmt(x.expGP)} → recorded {fmt(x.o.gpTotal)} · leak {fmt(x.diff)}</div>
+              </div>
+            ))}
+          </div>}
+        </div>;
+      })()}
 
       <div style={{fontSize:10,color:"#999",marginTop:12,fontStyle:"italic"}}>
         Data stays in your own database. Profit = (SP − COGS) per dozen × dozens ordered. Update the 5 pending SKUs to improve auto-matching.
