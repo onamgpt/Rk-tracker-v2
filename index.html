@@ -3900,7 +3900,7 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [ordOfficer,setOrdOfficer]=useState("");
   const [repPeriod,setRepPeriod]=useState("all"); // all | YYYY-MM
   const [beTransport,setBeTransport]=useState(0); // ₹/doz transport+other assumption for break-even (until master set)
-  const [costItems,setCostItems]=useState([{name:"An3f — All New 3 Fragrance 10 Sticks",vol:95097,real:56.25,rm:47.5,freight:2.41,rent:11.30,sd:16.99,admin:0}]);
+  const [costItems,setCostItems]=useState([{name:"An3f — All New 3 Fragrance 10 Sticks",sku:"",vol:95097,real:56.25,rm:47.5,freight:2.41,rent:11.30,sd:16.99,admin:0}]);
   useEffect(()=>{(async()=>{
     try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses(r.data.expenses||{}); } }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
@@ -3915,6 +3915,15 @@ function Spectrum({ onClose, onSaveEntry }) {
   const updCost = (i,f,v) => persistCost(costItems.map((it,idx)=>idx===i?{...it,[f]: f==="name"?v:(parseFloat(v)||0)}:it));
   const addCost = () => persistCost([...costItems,{name:"New brand",vol:0,real:0,rm:0,freight:0,rent:0,sd:0,admin:0}]);
   const delCost = (i) => persistCost(costItems.filter((_,idx)=>idx!==i));
+  const pushNet = (it) => {
+    const net = Math.round((it.real-it.rm-it.freight-it.rent-it.sd-it.admin)*100)/100;
+    if(!it.sku){ alert("First link this brand to a product using the dropdown below."); return; }
+    const idx = master.findIndex(m=>m.sku===it.sku);
+    if(idx<0){ alert("Linked product not found in Products tab."); return; }
+    const p = master[idx]; const cogs=Math.round((p.sp-net)*100)/100;
+    persistMaster(master.map((m,k)=>k===idx?{...m,cogs,gp:net,gpp:p.sp?Math.round(net/p.sp*10000)/100:0}:m));
+    alert("✓ Net "+net.toFixed(2)+"/doz pushed to "+p.name+".\nReports, break-even & profit now use this net margin for the brand.");
+  };
   const persist = async (o=orders, e=expenses) => { try{ await sheetsAPI("savePortfolio",{key:"spectrum",data:{orders:o,expenses:e}}); }catch(err){} };
 
   const fmt = n => "₹"+Math.round(n).toLocaleString("en-IN");
@@ -4645,6 +4654,13 @@ function Spectrum({ onClose, onSaveEntry }) {
             </div>
             <div style={{fontSize:9.5,color:"#999",marginTop:6,fontStyle:"italic"}}>
               Gross contribution {fmt(Math.round(gross*it.vol))}/yr · after rent {fmt(Math.round(afterRent*it.vol))}/yr · uses {it.vol?Math.round(it.vol/849):0} plant-days @ ~849 doz/day
+            </div>
+            <div style={{display:"flex",gap:6,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
+              <select value={it.sku||""} onChange={e=>updCost(i,"sku",e.target.value)} style={{flex:1,minWidth:150,padding:"6px",borderRadius:6,border:"1px solid #ccd",fontSize:11,color:"#3a2a6a"}}>
+                <option value="">🔗 Link to a product…</option>
+                {master.map(m=><option key={m.sku} value={m.sku}>{m.name}</option>)}
+              </select>
+              <button onClick={()=>pushNet(it)} style={{padding:"7px 12px",borderRadius:6,border:"none",background:net>=0?"#1a7a3a":"#c33",color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>↧ Push net to Reports</button>
             </div>
           </div>;
         })}
