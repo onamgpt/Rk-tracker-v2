@@ -3900,15 +3900,21 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [ordOfficer,setOrdOfficer]=useState("");
   const [repPeriod,setRepPeriod]=useState("all"); // all | YYYY-MM
   const [beTransport,setBeTransport]=useState(0); // ₹/doz transport+other assumption for break-even (until master set)
+  const [costItems,setCostItems]=useState([{name:"An3f — All New 3 Fragrance 10 Sticks",vol:95097,real:56.25,rm:47.5,freight:2.41,rent:11.30,sd:16.99,admin:0}]);
   useEffect(()=>{(async()=>{
     try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses(r.data.expenses||{}); } }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
     try{ const pm=await sheetsAPI("getPortfolio",{key:"spectrum_master",user:"main"}); if(pm&&pm.data&&Array.isArray(pm.data)&&pm.data.length) setMaster(pm.data); }catch(e){}
+    try{ const c=await sheetsAPI("getPortfolio",{key:"spectrum_costing",user:"main"}); if(c&&c.data&&Array.isArray(c.data)&&c.data.length) setCostItems(c.data); }catch(e){}
   })()},[]);
   const persistMaster = async (m) => { setMaster(m); try{ await sheetsAPI("savePortfolio",{key:"spectrum_master",user:"main",data:m}); }catch(e){} };
   const addProduct = () => persistMaster([...master, {sku:"",name:"New product",sp:0,cogs:0,gp:0,gpp:0}]);
   const updProduct = (idx,field,val) => { const m=master.map((p,i)=>{ if(i!==idx) return p; const np={...p,[field]: (field==="name"||field==="sku")? val : (parseFloat(val)||0)}; np.gp=Math.round((np.sp-np.cogs)*100)/100; np.gpp=np.sp? Math.round(np.gp/np.sp*10000)/100 : 0; return np; }); persistMaster(m); };
   const delProduct = (idx) => persistMaster(master.filter((_,i)=>i!==idx));
+  const persistCost = async (c) => { setCostItems(c); try{ await sheetsAPI("savePortfolio",{key:"spectrum_costing",user:"main",data:c}); }catch(e){} };
+  const updCost = (i,f,v) => persistCost(costItems.map((it,idx)=>idx===i?{...it,[f]: f==="name"?v:(parseFloat(v)||0)}:it));
+  const addCost = () => persistCost([...costItems,{name:"New brand",vol:0,real:0,rm:0,freight:0,rent:0,sd:0,admin:0}]);
+  const delCost = (i) => persistCost(costItems.filter((_,idx)=>idx!==i));
   const persist = async (o=orders, e=expenses) => { try{ await sheetsAPI("savePortfolio",{key:"spectrum",data:{orders:o,expenses:e}}); }catch(err){} };
 
   const fmt = n => "₹"+Math.round(n).toLocaleString("en-IN");
@@ -4028,7 +4034,7 @@ function Spectrum({ onClose, onSaveEntry }) {
       </div>
 
       <div style={{display:"flex",gap:6,marginBottom:12}}>
-        {[["upload","📤 Upload"],["orders","📋 Orders"],["officers","👥 Officers"],["products","📦 Products"],["reports","📊 Reports"]].map(([k,l])=>(
+        {[["upload","📤 Upload"],["orders","📋 Orders"],["officers","👥 Officers"],["products","📦 Products"],["reports","📊 Reports"],["costing","💠 Costing"]].map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"8px",borderRadius:8,border:tab===k?"2px solid #5a3a9a":"1px solid #ccc",background:tab===k?"#f0eafa":"#fff",color:"#3a2a6a",fontWeight:700,cursor:"pointer",fontSize:12}}>{l}</button>
         ))}
       </div>
@@ -4586,6 +4592,64 @@ function Spectrum({ onClose, onSaveEntry }) {
           </div>}
         </div>;
       })()}
+
+      {tab==="costing" && !IS_OWNER && <div style={{fontSize:12,color:"#777",background:"#f6f6f9",borderRadius:8,padding:14,textAlign:"center"}}>Costing is visible to management only.</div>}
+      {tab==="costing" && IS_OWNER && <div>
+        <div style={{background:"#eef7ef",border:"1px solid #bfe0c5",borderRadius:8,padding:"9px 11px",marginBottom:10,fontSize:11,color:"#2a6a3a"}}>
+          Full-cost build-up per brand → true net margin/dozen. <b>Green = your hard figures</b> (realisation, RM, freight, rent). <b>Amber = overhead allocations</b> still being confirmed (S&D, admin). Spectrum freight pool = Kerala Roadways ≈ ₹7.0L/yr; CSD (TCI/Sri Ramadas), CPC (Safexpress) & export (Seaking) are excluded.
+        </div>
+        {costItems.map((it,i)=>{
+          const gross=it.real-it.rm;                 // gross contribution (SP − RM)
+          const afterFr=gross-it.freight;
+          const afterRent=afterFr-it.rent;
+          const net=afterRent-it.sd-it.admin;
+          const ci={width:"100%",padding:"6px",borderRadius:6,border:"1px solid #cdd",fontSize:12.5,textAlign:"right",fontWeight:700};
+          const ciA={...ci,border:"1.5px solid #e0b060",background:"#fffdf5"};
+          const ciG={...ci,border:"1.5px solid #a8d0b0",background:"#fbfffb"};
+          const lab={fontSize:9,color:"#889",fontWeight:800,display:"block",marginBottom:2,textTransform:"uppercase",letterSpacing:".03em"};
+          const wf=(l,v,strong)=>(<div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",fontSize:strong?13:12,borderBottom:"1px solid #f0eef6"}}>
+            <span style={{color:strong?"#3a2a6a":"#667",fontWeight:strong?800:600}}>{l}</span>
+            <b style={{color:v>=0?"#1a7a3a":"#c33"}}>{v>=0?"+":""}{v.toFixed(2)}</b>
+          </div>);
+          return <div key={i} style={{border:"1px solid #e0dcec",borderRadius:10,padding:12,marginBottom:12,background:"#fff"}}>
+            <div style={{display:"flex",gap:6,marginBottom:8}}>
+              <input value={it.name} onChange={e=>updCost(i,"name",e.target.value)} style={{flex:1,padding:"7px",borderRadius:6,border:"1px solid #ccd",fontSize:13,fontWeight:800,color:"#3a2a6a"}}/>
+              <button onClick={()=>delCost(i)} style={{border:"none",background:"#f6eef0",color:"#c33",borderRadius:6,padding:"0 10px",cursor:"pointer",fontSize:16}}>×</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:10}}>
+              <div><label style={lab}>Volume doz/yr</label><input type="number" value={it.vol||""} onChange={e=>updCost(i,"vol",e.target.value)} style={ci}/></div>
+              <div><label style={lab}>Realisation ₹/doz ✅</label><input type="number" value={it.real||""} onChange={e=>updCost(i,"real",e.target.value)} style={ciG}/></div>
+              <div><label style={lab}>Raw material ₹/doz ✅</label><input type="number" value={it.rm||""} onChange={e=>updCost(i,"rm",e.target.value)} style={ciG}/></div>
+              <div><label style={lab}>Freight ₹/doz ✅</label><input type="number" value={it.freight||""} onChange={e=>updCost(i,"freight",e.target.value)} style={ciG}/></div>
+              <div><label style={lab}>Rent ₹/doz ✅</label><input type="number" value={it.rent||""} onChange={e=>updCost(i,"rent",e.target.value)} style={ciG}/></div>
+              <div><label style={lab}>S&amp;D ₹/doz ⚠</label><input type="number" value={it.sd||""} onChange={e=>updCost(i,"sd",e.target.value)} style={ciA}/></div>
+              <div><label style={lab}>Admin ₹/doz ⚠</label><input type="number" value={it.admin||""} onChange={e=>updCost(i,"admin",e.target.value)} style={ciA}/></div>
+            </div>
+            <div style={{background:"#faf9fd",borderRadius:8,padding:"8px 10px"}}>
+              {wf("Realisation",it.real,false)}
+              {wf("− Raw material → gross contribution",gross,true)}
+              {wf("− Freight",afterFr,false)}
+              {wf("− Rent → after factory overhead",afterRent,true)}
+              {wf("− S&D",afterRent-it.sd,false)}
+              {wf(it.admin?"− Admin → NET margin":"− Admin (0 — pending total turnover) → NET (before admin)",net,true)}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginTop:8}}>
+              <div style={{background:net>=0?"#eef7ef":"#fdeeee",borderRadius:8,padding:"7px 9px",textAlign:"center"}}>
+                <div style={{fontSize:8.5,color:"#889",fontWeight:800}}>NET ₹/DOZ</div>
+                <div style={{fontSize:16,fontWeight:800,color:net>=0?"#1a7a3a":"#c33"}}>{net>=0?"+":""}{net.toFixed(2)}</div>
+              </div>
+              <div style={{background:(net*it.vol)>=0?"#eef7ef":"#fdeeee",borderRadius:8,padding:"7px 9px",textAlign:"center"}}>
+                <div style={{fontSize:8.5,color:"#889",fontWeight:800}}>ANNUAL NET</div>
+                <div style={{fontSize:16,fontWeight:800,color:(net*it.vol)>=0?"#1a7a3a":"#c33"}}>{fmt(Math.round(net*it.vol))}</div>
+              </div>
+            </div>
+            <div style={{fontSize:9.5,color:"#999",marginTop:6,fontStyle:"italic"}}>
+              Gross contribution {fmt(Math.round(gross*it.vol))}/yr · after rent {fmt(Math.round(afterRent*it.vol))}/yr · uses {it.vol?Math.round(it.vol/849):0} plant-days @ ~849 doz/day
+            </div>
+          </div>;
+        })}
+        <button onClick={addCost} style={{padding:"9px 16px",borderRadius:8,border:"1px dashed #8a6aca",background:"#faf8ff",color:"#5a3a9a",fontWeight:700,cursor:"pointer",fontSize:12.5,width:"100%"}}>+ Add another brand to cost</button>
+      </div>}
 
       <div style={{fontSize:10,color:"#999",marginTop:12,fontStyle:"italic"}}>
         Data stays in your own database. Profit = (SP − COGS) per dozen × dozens ordered. Update the 5 pending SKUs to improve auto-matching.
