@@ -4399,6 +4399,27 @@ function Spectrum({ onClose, onSaveEntry }) {
           return {o, expGP, diff:expGP-actGP};
         }).filter(x=>x.diff>1).sort((a,b)=>b.diff-a.diff).slice(0,5);
 
+        // Loss-item watch (An3f etc) — money averted by same-invoice bundling
+        const tBE = Number(beTransport)||0;
+        const pdz = sku => { const m=master.find(x=>x.sku===sku); return m?m.gp:0; };
+        let liLoss=0, liAverted=0, liUncovered=0, liInv=0, liUncInv=0;
+        const liProd={}; const liWorst=[];
+        F.forEach(o=>{
+          let oLoss=0, oProfit=0, hasLoss=false;
+          (o.lines||[]).forEach(l=>{
+            const g=pdz(l.sku)-tBE; const val=(l.doz||0)*g;
+            if(g<0){ oLoss+=(-val); hasLoss=true; if(!liProd[l.name])liProd[l.name]={name:l.name,doz:0,loss:0}; liProd[l.name].doz+=l.doz||0; liProd[l.name].loss+=(-val); }
+            else if(g>0){ oProfit+=val; }
+          });
+          if(!hasLoss)return;
+          liInv++;
+          const av=Math.min(oProfit,oLoss), unc=Math.max(0,oLoss-oProfit);
+          liLoss+=oLoss; liAverted+=av; liUncovered+=unc;
+          if(unc>0){ liUncInv++; liWorst.push({cust:o.customer||"—",off:o.officer,date:o.date,loss:oLoss,unc}); }
+        });
+        liWorst.sort((a,b)=>b.unc-a.unc);
+        const liProdArr=Object.values(liProd).sort((a,b)=>b.loss-a.loss);
+
         const exportCSV=()=>{
           let csv="SPECTRUM SALES INTELLIGENCE — "+(repPeriod==="all"?"All time":mLabel(repPeriod))+"\n\n";
           csv+="KPI,Value\nSales,"+kSales+"\nGross Profit,"+kGP+"\nGP %,"+kPct+"\nOrders,"+F.length+"\nAvg Order,"+Math.round(kAvg)+"\nTransport,"+kTrans+"\nCommission,"+kComm+"\nNet Profit,"+kNet+"\nOutstanding,"+kOut+"\n\n";
@@ -4409,6 +4430,8 @@ function Spectrum({ onClose, onSaveEntry }) {
           csv+="\nCUSTOMER,ORDERS,SALES,GROSS PROFIT,OUTSTANDING\n";
           custs.forEach(c=>{csv+=['"'+c.cust+'"',c.orders,c.sales,c.gp,c.out].join(",")+"\n";});
           csv+="\nRECEIVABLES AGING\n0-30 days,"+aging.a30+"\n31-60 days,"+aging.a60+"\n60+ days,"+aging.a90+"\n";
+          csv+="\nLOSS-ITEM WATCH (transport assumed "+tBE+"/doz)\nLoss shipped,"+Math.round(liLoss)+"\nAverted by bundling,"+Math.round(liAverted)+"\nStill leaked,"+Math.round(liUncovered)+"\nInvoices with loss item,"+liInv+"\nUncovered invoices,"+liUncInv+"\n";
+          liProdArr.forEach(p=>{csv+=['"'+p.name+'"',Math.round(p.doz*10)/10+" doz",Math.round(p.loss)+" loss"].join(",")+"\n";});
           const blob=new Blob([csv],{type:"text/csv"});
           const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
           a.download="spectrum-report-"+(repPeriod==="all"?"all":repPeriod)+".csv"; a.click();
@@ -4439,6 +4462,38 @@ function Spectrum({ onClose, onSaveEntry }) {
               </div>
             ))}
           </div>
+
+          {/* Loss-item Watch */}
+          {liInv>0 && <div>
+            <div style={sec}><span>🎯 Loss-item Watch — money averted</span></div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:8}}>
+              {[["Loss shipped",fmt(liLoss),"#c33",liInv+" invoice"+(liInv===1?"":"s")],
+                ["Averted by bundling",fmt(liAverted),"#1a7a3a","same-invoice profit"],
+                ["Still leaked",fmt(liUncovered),liUncovered>0?"#c33":"#1a7a3a",liUncInv+" uncovered"]].map(([l,v,c,sub],i)=>(
+                <div key={i} style={{background:"#fff6ef",border:"1px solid #e8c8a8",borderRadius:8,padding:"8px 6px",textAlign:"center"}}>
+                  <div style={{fontSize:8.5,color:"#a5804a",fontWeight:800}}>{l.toUpperCase()}</div>
+                  <div style={{fontSize:13.5,fontWeight:800,color:c,marginTop:2}}>{v}</div>
+                  <div style={{fontSize:8,color:"#b89",marginTop:1}}>{sub}</div>
+                </div>
+              ))}
+            </div>
+            {liProdArr.map((p,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"4px 2px",borderBottom:"1px solid #f0e6da"}}>
+                <span style={{color:"#a34a00"}}>{p.name} <span style={{color:"#999"}}>({Math.round(p.doz*10)/10} doz)</span></span>
+                <b style={{color:"#c33"}}>−{fmt(p.loss)}</b>
+              </div>
+            ))}
+            {liWorst.length>0 && <div style={{marginTop:6}}>
+              <div style={{fontSize:10,color:"#a5804a",fontWeight:800,marginBottom:2}}>Invoices where the loss was NOT covered (real leak):</div>
+              {liWorst.slice(0,6).map((w,i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"3px 2px",borderBottom:"1px solid #f5eee4"}}>
+                  <span style={{color:"#555"}}>{w.cust} · <span style={{color:"#5a3a9a"}}>{w.off}</span> · {w.date}</span>
+                  <b style={{color:"#c33"}}>leak {fmt(w.unc)}</b>
+                </div>
+              ))}
+            </div>}
+            <div style={{fontSize:9.5,color:"#b89",marginTop:5,fontStyle:"italic"}}>Transport & other assumed ₹{tBE}/doz (from the Upload tab box; set from master tomorrow). "Averted" = loss cancelled out by profitable items on the same invoice. "Leaked" = loss that nothing on the invoice covered.</div>
+          </div>}
 
           {/* Salesman-wise */}
           <div style={sec}><span>👥 Salesman-wise Sales Analysis</span></div>
