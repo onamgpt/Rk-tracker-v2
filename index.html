@@ -3917,6 +3917,28 @@ function Spectrum({ onClose, onSaveEntry }) {
   const updCost = (i,f,v) => persistCost(costItems.map((it,idx)=>idx===i?{...it,[f]: f==="name"?v:(parseFloat(v)||0)}:it));
   const addCost = () => persistCost([...costItems,{name:"New brand",vol:0,real:0,rm:0,freight:0,rent:0,sd:0,admin:0}]);
   const delCost = (i) => persistCost(costItems.filter((_,idx)=>idx!==i));
+  const loadSpectrumSeed = () => {
+    // Top spectrum dozen-trade brands by combined KL+TN value. real = eff rate (booked);
+    // sd = 26.99% of value (S&D pool 40.71L / base 1.51Cr); admin = 8.25% (71.79L / 8.7Cr turnover).
+    // rm left 0 for you to fill; freight bulk default 2.41; rent 0 until production days assigned.
+    const R=(v)=>Math.round(v*100)/100;
+    const seedRaw=[
+      ["Vamana Tube 30 Sticks",4315,84.25],["Lavender 100 Grams",995,343.76],
+      ["Onam Big 8 Sticks",9112,36.0],["Sandal Hexagoan 10 Sticks",4058,72.0],
+      ["Lavender 90 Grams",787,343.76],["Niramala Tube 30 Sticks",2820,84.25],
+      ["Onam Small 6 Sticks",8032,25.0],["Onam Pineapple 12 Sticks",2158,78.0],
+      ["Day & Night 60 Grams",1120,127.8],["Vismaya Rose 12 Sticks",1800,78.72],
+      ["Onam Box 12 Sticks",1846,72.0],["Onam Rose 100 Incense Sticks",151,868.0],
+      ["Golden Budda 10 Grams",1496,83.0],["Surbahar Hexgoan 15 Sticks",1428,77.0],
+      ["Assorted 100 Sticks",296,296.0]
+    ];
+    const SEED=seedRaw.map(([name,vol,real])=>({name,sku:"",vol,real,rm:0,freight:2.41,rent:0,sd:R(real*0.2699),admin:R(real*0.0825)}));
+    const have=new Set(costItems.map(c=>c.name));
+    const add=SEED.filter(s=>!have.has(s.name));
+    if(!add.length){ alert("Top spectrum brands are already loaded."); return; }
+    persistCost([...costItems,...add]);
+    alert("✓ Added "+add.length+" spectrum brands. Enter RM/doz on each — net completes automatically and the watchdog starts guarding them.");
+  };
   const pushNet = (it) => {
     const net = Math.round((it.real-it.rm-it.freight-it.rent-it.sd-it.admin)*100)/100;
     if(!it.sku){ alert("First link this brand to a product using the dropdown below."); return; }
@@ -4034,6 +4056,7 @@ function Spectrum({ onClose, onSaveEntry }) {
     const brand=[], invoice=[]; let channel=null;
     // brand-level: any costed brand whose net/doz < 0
     costItems.forEach(it=>{
+      if(!it.rm) return; // RM not yet entered — not judged
       const net=(it.real||0)-(it.rm||0)-(it.freight||0)-(it.rent||0)-(it.sd||0)-(it.admin||0);
       if(net<0) brand.push({name:it.name, net:Math.round(net*100)/100, annual:Math.round(net*(it.vol||0))});
     });
@@ -4697,8 +4720,9 @@ function Spectrum({ onClose, onSaveEntry }) {
             <b style={{color:v>=0?"#1a7a3a":"#c33"}}>{v>=0?"+":""}{v.toFixed(2)}</b>
           </div>);
           return <div key={i} style={{border:"1px solid #e0dcec",borderRadius:10,padding:12,marginBottom:12,background:"#fff"}}>
-            <div style={{display:"flex",gap:6,marginBottom:8}}>
+            <div style={{display:"flex",gap:6,marginBottom:8,alignItems:"center"}}>
               <input value={it.name} onChange={e=>updCost(i,"name",e.target.value)} style={{flex:1,padding:"7px",borderRadius:6,border:"1px solid #ccd",fontSize:13,fontWeight:800,color:"#3a2a6a"}}/>
+              {!it.rm && <span style={{fontSize:9.5,fontWeight:800,color:"#a34a00",background:"#fff2e0",border:"1px solid #e8c8a0",borderRadius:5,padding:"3px 6px",whiteSpace:"nowrap"}}>RM pending</span>}
               <button onClick={()=>delCost(i)} style={{border:"none",background:"#f6eef0",color:"#c33",borderRadius:6,padding:"0 10px",cursor:"pointer",fontSize:16}}>×</button>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:10}}>
@@ -4741,6 +4765,7 @@ function Spectrum({ onClose, onSaveEntry }) {
           </div>;
         })}
         <button onClick={addCost} style={{padding:"9px 16px",borderRadius:8,border:"1px dashed #8a6aca",background:"#faf8ff",color:"#5a3a9a",fontWeight:700,cursor:"pointer",fontSize:12.5,width:"100%"}}>+ Add another brand to cost</button>
+        <button onClick={loadSpectrumSeed} style={{padding:"9px 16px",borderRadius:8,border:"none",background:"#5a3a9a",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:12.5,width:"100%",marginTop:8}}>↧ Load top 15 spectrum brands (RM pending)</button>
       </div>}
 
       <div style={{fontSize:10,color:"#999",marginTop:12,fontStyle:"italic"}}>
