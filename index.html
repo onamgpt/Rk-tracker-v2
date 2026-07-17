@@ -3899,6 +3899,7 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [ordSearch,setOrdSearch]=useState("");
   const [ordOfficer,setOrdOfficer]=useState("");
   const [repPeriod,setRepPeriod]=useState("all"); // all | YYYY-MM
+  const [beTransport,setBeTransport]=useState(0); // ₹/doz transport+other assumption for break-even (until master set)
   useEffect(()=>{(async()=>{
     try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses(r.data.expenses||{}); } }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
@@ -4086,6 +4087,54 @@ function Spectrum({ onClose, onSaveEntry }) {
               </select>}
             </div>);
           })}
+          {(()=>{
+            const t = Number(beTransport)||0;
+            const perDoz = l => { const m=master.find(x=>x.sku===l.sku); return m?m.gp:0; };
+            const lossLines = pending.lines.filter(l=>l.matched && (l.doz||0)>0 && (perDoz(l)-t)<0);
+            const profitLines = pending.lines.filter(l=>l.matched && (l.doz||0)>0 && (perDoz(l)-t)>0)
+                                  .sort((a,b)=>(perDoz(b)-t)-(perDoz(a)-t));
+            if(!lossLines.length) return null;
+            const hole = lossLines.reduce((s,l)=>s+(l.doz||0)*(perDoz(l)-t),0); // negative
+            const holeAbs = Math.abs(hole);
+            const netInvoice = pending.lines.reduce((s,l)=> l.matched ? s+(l.doz||0)*(perDoz(l)-t) : s, 0);
+            const covered = netInvoice>=0;
+            const be={fontSize:11.5,padding:"4px 0",borderBottom:"1px solid #f0dcc8",display:"flex",justifyContent:"space-between",gap:8};
+            return <div style={{background:"#fff6ef",border:"2px solid #e0a060",borderRadius:10,padding:"10px 11px",margin:"10px 0"}}>
+              <div style={{fontSize:12.5,fontWeight:800,color:"#a34a00"}}>🎯 Loss-cover / break-even on this invoice</div>
+              <div style={{fontSize:10.5,color:"#8a5a2a",marginTop:3,marginBottom:8}}>
+                Loss item{lossLines.length>1?"s":""}: <b>{lossLines.map(l=>l.name+" ("+l.doz+"dz)").join(", ")}</b>. How much profitable product must sell to wipe this loss ↓
+              </div>
+              <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}>
+                <label style={{fontSize:10,color:"#8a5a2a",fontWeight:800}}>Transport & other ₹/doz</label>
+                <input type="number" value={beTransport||""} onChange={e=>setBeTransport(Number(e.target.value)||0)} placeholder="0" style={{width:66,padding:"5px",borderRadius:6,border:"1.5px solid #e0a060",background:"#fffdf8",fontSize:12.5,fontWeight:800,textAlign:"center",color:"#a34a00"}}/>
+                <span style={{fontSize:9.5,color:"#b89",fontStyle:"italic"}}>set from master tomorrow · applied to every dozen</span>
+              </div>
+              <div style={{background:"#fff",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5}}>
+                  <span style={{color:"#a34a00",fontWeight:700}}>Loss to cover</span>
+                  <b style={{color:"#c33"}}>{fmt(holeAbs)}</b>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,marginTop:4,paddingTop:4,borderTop:"1px dashed #eee"}}>
+                  <span style={{fontWeight:700,color:covered?"#1a7a3a":"#c33"}}>{covered?"✓ This invoice already covers it":"✗ This invoice is still short"}</span>
+                  <b style={{color:covered?"#1a7a3a":"#c33"}}>{covered?"net +"+fmt(netInvoice):"−"+fmt(Math.abs(netInvoice))}</b>
+                </div>
+                <div style={{fontSize:9.5,color:"#999",marginTop:3}}>net = every line's (GP/doz − transport) × dozens, after transport ₹{t}/doz</div>
+              </div>
+              {profitLines.length>0 ? <div>
+                <div style={{fontSize:10.5,color:"#8a5a2a",fontWeight:800,marginBottom:2}}>Dozens of each profit item needed to cover the whole {fmt(holeAbs)} loss on its own:</div>
+                {profitLines.map((l,i)=>{
+                  const g=perDoz(l)-t; const need=g>0?holeAbs/g:0; const have=l.doz||0; const ok=have>=need;
+                  return <div key={i} style={be}>
+                    <span>{ok?"✅":"➕"} {l.name} <span style={{color:"#999"}}>(₹{Math.round(g)}/doz net)</span></span>
+                    <span style={{whiteSpace:"nowrap"}}><b>{need.toFixed(1)} dz</b> <span style={{color:ok?"#1a7a3a":"#c33"}}>· have {have}{ok?" ✓":" (add "+(need-have).toFixed(1)+")"}</span></span>
+                  </div>;
+                })}
+              </div> : <div style={{fontSize:11.5,color:"#c33",fontWeight:700,background:"#fdeaea",borderRadius:8,padding:"8px 10px"}}>
+                ⚠ No profitable item on this invoice to offset the loss. Don't ship {lossLines.map(l=>l.name).join(", ")} standalone — this invoice loses {fmt(holeAbs)}.
+              </div>}
+            </div>;
+          })()}
+
           <div style={{background:"#f0eafa",border:"1px solid #c8b0e8",borderRadius:8,padding:"8px 10px",margin:"10px 0 8px"}}>
             <div style={{fontSize:12,fontWeight:800,color:"#4a2a8a"}}>✋ STEP 2 · Quantities correct? Tag the salesperson & save</div>
           </div>
