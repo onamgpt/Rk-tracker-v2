@@ -4469,6 +4469,27 @@ function Spectrum({ onClose, onSaveEntry }) {
         });
         const custs=Object.values(cMap).sort((a,b)=>b.sales-a.sales);
 
+        // Door-opener analysis: do An3f-carrying customers buy more profitable (non-An3f) business?
+        const A3RE=/all new 3 fragrance|an3f|3 fragrance 10 stick|3 fragrances 10/i;
+        const dmap={};
+        F.forEach(o=>{
+          const key=o.customer||"—";
+          if(!dmap[key])dmap[key]={cust:key,an3fDoz:0,otherGP:0,otherDoz:0,orders:0,total:0};
+          dmap[key].orders++; dmap[key].total+=Number(o.total)||0;
+          (o.lines||[]).forEach(l=>{
+            if(A3RE.test(l.name||"")) dmap[key].an3fDoz+=Number(l.doz)||0;
+            else { dmap[key].otherGP+=Number(l.gp)||0; dmap[key].otherDoz+=Number(l.doz)||0; }
+          });
+        });
+        const dArr=Object.values(dmap);
+        const buyers=dArr.filter(d=>d.an3fDoz>0);
+        const nonb=dArr.filter(d=>d.an3fDoz<=0);
+        const avgF=(arr,f)=>arr.length?arr.reduce((s,d)=>s+f(d),0)/arr.length:0;
+        const buyersAvgOther=avgF(buyers,d=>d.otherGP);
+        const nonbAvgOther=avgF(nonb,d=>d.otherGP);
+        const doorRatio=nonbAvgOther?buyersAvgOther/nonbAvgOther:0;
+        buyers.sort((a,b)=>b.otherGP-a.otherGP);
+
         // Monthly trend — last 6 months (always from ALL orders)
         const tMap={};
         orders.forEach(o=>{ const k=mKey(o.date); if(!k)return; if(!tMap[k])tMap[k]={sales:0,gp:0}; tMap[k].sales+=Number(o.total)||0; tMap[k].gp+=Number(o.gpTotal)||0; });
@@ -4665,6 +4686,43 @@ function Spectrum({ onClose, onSaveEntry }) {
               {!custs.length && <tr><td colSpan="5" style={{...td,textAlign:"center",color:"#999",fontStyle:"italic"}}>No customers in this period.</td></tr>}
             </tbody>
           </table></div>
+
+          {/* Door-opener analysis */}
+          {buyers.length>0 && <div>
+            <div style={sec}><span>🚪 An3f Door-opener Analysis</span></div>
+            <div style={{fontSize:10.5,color:"#778",marginBottom:6}}>Do customers who carry An3f buy more profitable (non-An3f) business than those who don't? "Other GP" = gross profit from everything except An3f.</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
+              <div style={{background:"#eef4fb",border:"1px solid #c8d8ee",borderRadius:8,padding:"8px 9px",textAlign:"center"}}>
+                <div style={{fontSize:8.5,color:"#5a6a8a",fontWeight:800}}>CARRY An3f · {buyers.length}</div>
+                <div style={{fontSize:15,fontWeight:800,color:"#1a5a9a"}}>{fmt(buyersAvgOther)}</div>
+                <div style={{fontSize:8.5,color:"#889"}}>avg other-GP / customer</div>
+              </div>
+              <div style={{background:"#f6f6f9",border:"1px solid #ddd",borderRadius:8,padding:"8px 9px",textAlign:"center"}}>
+                <div style={{fontSize:8.5,color:"#889",fontWeight:800}}>NO An3f · {nonb.length}</div>
+                <div style={{fontSize:15,fontWeight:800,color:"#555"}}>{fmt(nonbAvgOther)}</div>
+                <div style={{fontSize:8.5,color:"#889"}}>avg GP / customer</div>
+              </div>
+            </div>
+            <div style={{background:doorRatio>=1.15?"#eef7ef":(doorRatio>0&&doorRatio<0.9?"#fdeeee":"#fff8ef"),border:"1px solid "+(doorRatio>=1.15?"#bfe0c5":(doorRatio>0&&doorRatio<0.9?"#e8c8c8":"#e8d8b8")),borderRadius:8,padding:"8px 10px",marginBottom:8,fontSize:11.5}}>
+              {nonb.length===0 ? <span style={{color:"#8a5a1a"}}>Every customer here carries An3f — no comparison group yet. Need some non-An3f customers to measure the door effect.</span>
+               : doorRatio>=1.15 ? <span style={{color:"#1a7a3a",fontWeight:700}}>✓ Door-opener effect: An3f customers buy {doorRatio.toFixed(1)}× the profitable business of non-An3f customers. The volume is earning its keep.</span>
+               : doorRatio>0&&doorRatio<0.9 ? <span style={{color:"#c33",fontWeight:700}}>⚠ No door effect: An3f customers buy {doorRatio.toFixed(1)}× — actually less premium than non-An3f customers. The cheap volume isn't pulling the good stuff.</span>
+               : <span style={{color:"#8a5a1a",fontWeight:700}}>≈ Neutral: An3f customers buy about the same ({doorRatio.toFixed(1)}×) — An3f isn't clearly pulling extra premium.</span>}
+            </div>
+            <div style={{fontSize:9.5,color:"#889",fontWeight:800,marginBottom:2}}>An3f customers — who pulls premium (🚪) vs who just takes the cheap line (⚠):</div>
+            <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:420}}>
+              <thead><tr><th style={th}>Customer</th><th style={th}>An3f doz</th><th style={th}>Other GP</th><th style={th}>Read</th></tr></thead>
+              <tbody>{buyers.slice(0,14).map((d,i)=>{
+                const strong=d.otherGP>=buyersAvgOther*1.0;
+                return <tr key={i} style={{background:strong?"#f5fbf5":(d.otherGP<=0?"#fdf3f3":"#fff")}}>
+                  <td style={{...td,maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.cust}</td>
+                  <td style={td}>{Math.round(d.an3fDoz)}</td>
+                  <td style={{...td,fontWeight:700,color:d.otherGP>0?"#1a7a3a":"#c33"}}>{fmt(d.otherGP)}</td>
+                  <td style={{...td,fontWeight:700,color:strong?"#1a7a3a":"#c33"}}>{strong?"🚪 door-opener":(d.otherGP<=0?"⚠ pure freeload":"low pull")}</td>
+                </tr>;
+              })}</tbody>
+            </table></div>
+          </div>}
 
           {/* Monthly trend */}
           <div style={sec}><span>📈 Monthly Trend (sales vs gross profit)</span></div>
