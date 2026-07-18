@@ -4919,12 +4919,14 @@ function AvailableFunds() {
 
   const num = v => { const n = parseFloat(String(v).replace(/[^0-9.-]/g,"")); return isNaN(n)?0:n; };
   const bank = num(data.bankBalance);
-  const unclearedTotal = (data.cheques||[]).reduce((s,c)=> s + (c.cleared?0:num(c.amount)), 0);
-  const paymentsTotal = (data.payments||[]).reduce((s,p)=> s + num(p.amount), 0);
-  const creditedDeposits = (data.deposits||[]).reduce((s,d)=> s + (d.credited?num(d.amount):0), 0);
-  const inTransitDeposits = (data.deposits||[]).reduce((s,d)=> s + (d.credited?0:num(d.amount)), 0);
-  const available = bank - unclearedTotal - paymentsTotal + creditedDeposits;
-  const projected = available + inTransitDeposits;
+  const pos = v => Math.max(0, num(v)); // amounts can never be negative
+  const clearedCheques = (data.cheques||[]).reduce((s,c)=> s + (c.cleared?pos(c.amount):0), 0);
+  const pendingCheques = (data.cheques||[]).reduce((s,c)=> s + (c.cleared?0:pos(c.amount)), 0);
+  const paymentsTotal = (data.payments||[]).reduce((s,p)=> s + pos(p.amount), 0);
+  const creditedDeposits = (data.deposits||[]).reduce((s,d)=> s + (d.credited?pos(d.amount):0), 0);
+  const inTransitDeposits = (data.deposits||[]).reduce((s,d)=> s + (d.credited?0:pos(d.amount)), 0);
+  const available = bank - clearedCheques - paymentsTotal + creditedDeposits;
+  const projected = available - pendingCheques + inTransitDeposits;
 
   const save = async () => {
     setSaving(true); setSavedMsg("");
@@ -4956,11 +4958,11 @@ function AvailableFunds() {
         <div style={{ fontSize:11, opacity:.9, letterSpacing:".05em" }}>TRUE AVAILABLE FUNDS</div>
         <div style={{ fontSize:28, fontWeight:800, lineHeight:1.1 }}>{fmt(available)}</div>
         <div style={{ fontSize:10.5, opacity:.85, marginTop:3 }}>
-          Bank {fmt(bank)} − Uncleared cheques {fmt(unclearedTotal)} − Payments due {fmt(paymentsTotal)}{creditedDeposits>0?" + Credited deposits "+fmt(creditedDeposits):""}
+          Bank {fmt(bank)} − Cleared cheques {fmt(clearedCheques)} − Payments due {fmt(paymentsTotal)}{creditedDeposits>0?" + Credited deposits "+fmt(creditedDeposits):""}
         </div>
-        {inTransitDeposits>0 && <div style={{ fontSize:11, marginTop:6, paddingTop:6, borderTop:"1px solid rgba(255,255,255,.25)" }}>
-          <span style={{ opacity:.9 }}>+ In transit {fmt(inTransitDeposits)} → </span>
-          <b>Projected once credited {fmt(projected)}</b>
+        {(pendingCheques>0||inTransitDeposits>0) && <div style={{ fontSize:11, marginTop:6, paddingTop:6, borderTop:"1px solid rgba(255,255,255,.25)" }}>
+          <span style={{ opacity:.9 }}>{pendingCheques>0?"− Pending cheques "+fmt(pendingCheques)+" ":""}{inTransitDeposits>0?"+ In transit "+fmt(inTransitDeposits)+" ":""}→ </span>
+          <b>Projected once settled {fmt(projected)}</b>
         </div>}
       </div>
 
@@ -5029,7 +5031,7 @@ function AvailableFunds() {
         {savedMsg && <span style={{ fontSize:12, color:"#1a7a3a", fontWeight:600 }}>{savedMsg}</span>}
       </div>
       <div style={{ fontSize:10, color:"#8a9a8a", marginTop:8, fontStyle:"italic" }}>
-        Update the bank balance weekly, tick cheques as they clear. "True available" = what you can actually spend. Your data stays in your own database.
+        Type your bank balance once — the app never changes it. Cheques subtract when you tick "cleared"; deposits add when you tick "credited". Pending/in-transit items show only in "Projected". "True available" = what you can actually spend right now. Your data stays in your own database.
       </div>
       <div style={{ borderBottom:"1px solid #dde", margin:"14px 0" }}/>
     </div>
