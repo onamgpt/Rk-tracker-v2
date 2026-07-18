@@ -3900,13 +3900,15 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [ordOfficer,setOrdOfficer]=useState("");
   const [repPeriod,setRepPeriod]=useState("all"); // all | YYYY-MM
   const [beTransport,setBeTransport]=useState(0); // ₹/doz transport+other assumption for break-even (until master set)
-  const [costItems,setCostItems]=useState([{name:"An3f — All New 3 Fragrance 10 Sticks",sku:"",vol:95097,real:56.25,rm:47.5,freight:2.41,rent:11.30,sd:16.99,admin:4.64}]);
+  const [costItems,setCostItems]=useState([{name:"An3f — All New 3 Fragrance 10 Sticks",sku:"",vol:95097,real:56.25,rawIncense:22,perfume:15,packaging:7,labour:3.5,freight:2.41,rent:11.30}]);
+  const [pools,setPools]=useState({rent:3000000, sd:4071862, admin:7178874, base:15086742, turnover:87000000, sdBasis:"value"});
   const [alertFloor,setAlertFloor]=useState(30); // contribution % floor for month-level watch alert
   useEffect(()=>{(async()=>{
     try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses(r.data.expenses||{}); } }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
     try{ const pm=await sheetsAPI("getPortfolio",{key:"spectrum_master",user:"main"}); if(pm&&pm.data&&Array.isArray(pm.data)&&pm.data.length) setMaster(pm.data); }catch(e){}
     try{ const c=await sheetsAPI("getPortfolio",{key:"spectrum_costing",user:"main"}); if(c&&c.data&&Array.isArray(c.data)&&c.data.length) setCostItems(c.data); }catch(e){}
+    try{ const pl=await sheetsAPI("getPortfolio",{key:"spectrum_pools",user:"main"}); if(pl&&pl.data&&typeof pl.data==="object") setPools(p=>({...p,...pl.data})); }catch(e){}
     try{ const af=await sheetsAPI("getPortfolio",{key:"spectrum_alertcfg",user:"main"}); if(af&&af.data&&typeof af.data.floor==="number") setAlertFloor(af.data.floor); }catch(e){}
   })()},[]);
   const persistMaster = async (m) => { setMaster(m); try{ await sheetsAPI("savePortfolio",{key:"spectrum_master",user:"main",data:m}); }catch(e){} };
@@ -3914,14 +3916,21 @@ function Spectrum({ onClose, onSaveEntry }) {
   const updProduct = (idx,field,val) => { const m=master.map((p,i)=>{ if(i!==idx) return p; const np={...p,[field]: (field==="name"||field==="sku")? val : (parseFloat(val)||0)}; np.gp=Math.round((np.sp-np.cogs)*100)/100; np.gpp=np.sp? Math.round(np.gp/np.sp*10000)/100 : 0; return np; }); persistMaster(m); };
   const delProduct = (idx) => persistMaster(master.filter((_,i)=>i!==idx));
   const persistCost = async (c) => { setCostItems(c); try{ await sheetsAPI("savePortfolio",{key:"spectrum_costing",user:"main",data:c}); }catch(e){} };
+  const persistPools = async (p) => { setPools(p); try{ await sheetsAPI("savePortfolio",{key:"spectrum_pools",user:"main",data:p}); }catch(e){} };
+  const updPool = (f,v) => persistPools({...pools,[f]: f==="sdBasis"?v:(parseFloat(v)||0)});
   const updCost = (i,f,v) => persistCost(costItems.map((it,idx)=>idx===i?{...it,[f]: f==="name"?v:(parseFloat(v)||0)}:it));
-  const addCost = () => persistCost([...costItems,{name:"New brand",vol:0,real:0,rm:0,freight:0,rent:0,sd:0,admin:0}]);
+  const addCost = () => persistCost([...costItems,{name:"New brand",sku:"",vol:0,real:0,rawIncense:0,perfume:0,packaging:0,labour:0,freight:0,rent:0}]);
   const delCost = (i) => persistCost(costItems.filter((_,idx)=>idx!==i));
+  // cost helpers (two-layer model)
+  const rmOf = it => (it.rawIncense||0)+(it.perfume||0)+(it.packaging||0)+(it.labour||0);
+  const contribOf = it => (it.real||0) - rmOf(it) - (it.freight||0);          // decision-grade, causal
+  // fixed-pool allocation for the DIRECTIONAL sidecar only
+  const totalContribAnnual = () => costItems.reduce((s,it)=>s+contribOf(it)*(it.vol||0),0);
+  const totalVol = () => costItems.reduce((s,it)=>s+(it.vol||0),0);
+  const sdPerDoz = it => { if(pools.sdBasis==="volume"){ const tv=totalVol(); return tv?pools.sd/tv:0; } return pools.base?((it.real||0)*(it.vol||0)/pools.base*pools.sd)/((it.vol||0)||1):0; };
+  const adminPerDoz = it => pools.turnover?((it.real||0)*(it.vol||0)/pools.turnover*pools.admin)/((it.vol||0)||1):0;
+  const loadedNetOf = it => contribOf(it) - (it.rent||0) - sdPerDoz(it) - adminPerDoz(it);
   const loadSpectrumSeed = () => {
-    // Top spectrum dozen-trade brands by combined KL+TN value. real = eff rate (booked);
-    // sd = 26.99% of value (S&D pool 40.71L / base 1.51Cr); admin = 8.25% (71.79L / 8.7Cr turnover).
-    // rm left 0 for you to fill; freight bulk default 2.41; rent 0 until production days assigned.
-    const R=(v)=>Math.round(v*100)/100;
     const seedRaw=[
       ["Vamana Tube 30 Sticks",4315,84.25],["Lavender 100 Grams",995,343.76],
       ["Onam Big 8 Sticks",9112,36.0],["Sandal Hexagoan 10 Sticks",4058,72.0],
@@ -3932,21 +3941,21 @@ function Spectrum({ onClose, onSaveEntry }) {
       ["Golden Budda 10 Grams",1496,83.0],["Surbahar Hexgoan 15 Sticks",1428,77.0],
       ["Assorted 100 Sticks",296,296.0]
     ];
-    const SEED=seedRaw.map(([name,vol,real])=>({name,sku:"",vol,real,rm:0,freight:2.41,rent:0,sd:R(real*0.2699),admin:R(real*0.0825)}));
+    const SEED=seedRaw.map(([name,vol,real])=>({name,sku:"",vol,real,rawIncense:0,perfume:0,packaging:0,labour:0,freight:2.41,rent:0}));
     const have=new Set(costItems.map(c=>c.name));
     const add=SEED.filter(s=>!have.has(s.name));
     if(!add.length){ alert("Top spectrum brands are already loaded."); return; }
     persistCost([...costItems,...add]);
-    alert("✓ Added "+add.length+" spectrum brands. Enter RM/doz on each — net completes automatically and the watchdog starts guarding them.");
+    alert("✓ Added "+add.length+" spectrum brands. Fill the RM components (raw incense, perfume, packaging, labour) on each — contribution completes automatically.");
   };
   const pushNet = (it) => {
-    const net = Math.round((it.real-it.rm-it.freight-it.rent-it.sd-it.admin)*100)/100;
+    const c = Math.round(contribOf(it)*100)/100;
     if(!it.sku){ alert("First link this brand to a product using the dropdown below."); return; }
     const idx = master.findIndex(m=>m.sku===it.sku);
     if(idx<0){ alert("Linked product not found in Products tab."); return; }
-    const p = master[idx]; const cogs=Math.round((p.sp-net)*100)/100;
-    persistMaster(master.map((m,k)=>k===idx?{...m,cogs,gp:net,gpp:p.sp?Math.round(net/p.sp*10000)/100:0}:m));
-    alert("✓ Net "+net.toFixed(2)+"/doz pushed to "+p.name+".\nReports, break-even & profit now use this net margin for the brand.");
+    const p = master[idx]; const cogs=Math.round((p.sp-c)*100)/100;
+    persistMaster(master.map((m,k)=>k===idx?{...m,cogs,gp:c,gpp:p.sp?Math.round(c/p.sp*10000)/100:0}:m));
+    alert("✓ Contribution "+c.toFixed(2)+"/doz pushed to "+p.name+".\nReports & per-salesman profit now use this contribution margin.");
   };
   const persist = async (o=orders, e=expenses) => { try{ await sheetsAPI("savePortfolio",{key:"spectrum",data:{orders:o,expenses:e}}); }catch(err){} };
 
@@ -4056,9 +4065,10 @@ function Spectrum({ onClose, onSaveEntry }) {
     const brand=[], invoice=[]; let channel=null;
     // brand-level: any costed brand whose net/doz < 0
     costItems.forEach(it=>{
-      if(!it.rm) return; // RM not yet entered — not judged
-      const net=(it.real||0)-(it.rm||0)-(it.freight||0)-(it.rent||0)-(it.sd||0)-(it.admin||0);
-      if(net<0) brand.push({name:it.name, net:Math.round(net*100)/100, annual:Math.round(net*(it.vol||0))});
+      const rm=(it.rawIncense||0)+(it.perfume||0)+(it.packaging||0)+(it.labour||0);
+      if(!rm) return; // RM not yet entered — not judged
+      const c=(it.real||0)-rm-(it.freight||0);
+      if(c<0) brand.push({name:it.name, net:Math.round(c*100)/100, annual:Math.round(c*(it.vol||0))});
     });
     // master brands flagged loss (gp<0) — catches pushed net brands
     master.forEach(m=>{ if((m.gp||0)<0 && !costItems.some(c=>c.sku===m.sku)) brand.push({name:m.name, net:m.gp, annual:null}); });
@@ -4702,71 +4712,128 @@ function Spectrum({ onClose, onSaveEntry }) {
       })()}
 
       {tab==="costing" && !IS_OWNER && <div style={{fontSize:12,color:"#777",background:"#f6f6f9",borderRadius:8,padding:14,textAlign:"center"}}>Costing is visible to management only.</div>}
-      {tab==="costing" && IS_OWNER && <div>
+      {tab==="costing" && IS_OWNER && (()=>{
+        const ci={width:"100%",padding:"6px",borderRadius:6,border:"1px solid #cdd",fontSize:12.5,textAlign:"right",fontWeight:700};
+        const ciG={...ci,border:"1.5px solid #a8d0b0",background:"#fbfffb"};
+        const lab={fontSize:8.5,color:"#889",fontWeight:800,display:"block",marginBottom:2,textTransform:"uppercase",letterSpacing:".02em"};
+        const totContrib=totalContribAnnual();
+        const poolTotal=(pools.rent||0)+(pools.sd||0)+(pools.admin||0);
+        const opProfit=totContrib-poolTotal;
+        return <div>
         <div style={{background:"#eef7ef",border:"1px solid #bfe0c5",borderRadius:8,padding:"9px 11px",marginBottom:10,fontSize:11,color:"#2a6a3a"}}>
-          Full-cost build-up per brand → true net margin/dozen. <b>Green = your hard figures</b> (realisation, RM, freight, rent). <b>Amber = overhead allocations</b> still being confirmed (S&D, admin). Spectrum freight pool = Kerala Roadways ≈ ₹7.0L/yr; CSD (TCI/Sri Ramadas), CPC (Safexpress) & export (Seaking) are excluded.
+          <b>Two-layer costing.</b> Per brand you enter only the real per-dozen costs (raw incense, perfume, packaging, labour, transport) → <b>Contribution</b> = the decision number. Fixed pools (rent, S&D, admin) sit below as one channel P&L — never sliced per dozen. Absorption is an optional directional sidecar.
         </div>
+
         {costItems.map((it,i)=>{
-          const gross=it.real-it.rm;                 // gross contribution (SP − RM)
-          const afterFr=gross-it.freight;
-          const afterRent=afterFr-it.rent;
-          const net=afterRent-it.sd-it.admin;
-          const ci={width:"100%",padding:"6px",borderRadius:6,border:"1px solid #cdd",fontSize:12.5,textAlign:"right",fontWeight:700};
-          const ciA={...ci,border:"1.5px solid #e0b060",background:"#fffdf5"};
-          const ciG={...ci,border:"1.5px solid #a8d0b0",background:"#fbfffb"};
-          const lab={fontSize:9,color:"#889",fontWeight:800,display:"block",marginBottom:2,textTransform:"uppercase",letterSpacing:".03em"};
+          const rm=rmOf(it); const contrib=contribOf(it); const cPct=it.real?contrib/it.real*100:0;
+          const hasRM=rm>0;
           const wf=(l,v,strong)=>(<div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",fontSize:strong?13:12,borderBottom:"1px solid #f0eef6"}}>
             <span style={{color:strong?"#3a2a6a":"#667",fontWeight:strong?800:600}}>{l}</span>
-            <b style={{color:v>=0?"#1a7a3a":"#c33"}}>{v>=0?"+":""}{v.toFixed(2)}</b>
-          </div>);
+            <b style={{color:v>=0?"#1a7a3a":"#c33"}}>{v>=0?"+":""}{v.toFixed(2)}</b></div>);
+          const loadedNet=loadedNetOf(it);
           return <div key={i} style={{border:"1px solid #e0dcec",borderRadius:10,padding:12,marginBottom:12,background:"#fff"}}>
             <div style={{display:"flex",gap:6,marginBottom:8,alignItems:"center"}}>
               <input value={it.name} onChange={e=>updCost(i,"name",e.target.value)} style={{flex:1,padding:"7px",borderRadius:6,border:"1px solid #ccd",fontSize:13,fontWeight:800,color:"#3a2a6a"}}/>
-              {!it.rm && <span style={{fontSize:9.5,fontWeight:800,color:"#a34a00",background:"#fff2e0",border:"1px solid #e8c8a0",borderRadius:5,padding:"3px 6px",whiteSpace:"nowrap"}}>RM pending</span>}
+              {!hasRM && <span style={{fontSize:9.5,fontWeight:800,color:"#a34a00",background:"#fff2e0",border:"1px solid #e8c8a0",borderRadius:5,padding:"3px 6px",whiteSpace:"nowrap"}}>RM pending</span>}
               <button onClick={()=>delCost(i)} style={{border:"none",background:"#f6eef0",color:"#c33",borderRadius:6,padding:"0 10px",cursor:"pointer",fontSize:16}}>×</button>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:10}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:8}}>
               <div><label style={lab}>Volume doz/yr</label><input type="number" value={it.vol||""} onChange={e=>updCost(i,"vol",e.target.value)} style={ci}/></div>
-              <div><label style={lab}>Realisation ₹/doz ✅</label><input type="number" value={it.real||""} onChange={e=>updCost(i,"real",e.target.value)} style={ciG}/></div>
-              <div><label style={lab}>Raw material ₹/doz ✅</label><input type="number" value={it.rm||""} onChange={e=>updCost(i,"rm",e.target.value)} style={ciG}/></div>
-              <div><label style={lab}>Freight ₹/doz ✅</label><input type="number" value={it.freight||""} onChange={e=>updCost(i,"freight",e.target.value)} style={ciG}/></div>
-              <div><label style={lab}>Rent ₹/doz ✅</label><input type="number" value={it.rent||""} onChange={e=>updCost(i,"rent",e.target.value)} style={ciG}/></div>
-              <div><label style={lab}>S&amp;D ₹/doz ⚠</label><input type="number" value={it.sd||""} onChange={e=>updCost(i,"sd",e.target.value)} style={ciA}/></div>
-              <div><label style={lab}>Admin ₹/doz ⚠</label><input type="number" value={it.admin||""} onChange={e=>updCost(i,"admin",e.target.value)} style={ciA}/></div>
+              <div><label style={lab}>Realisation ₹/doz</label><input type="number" value={it.real||""} onChange={e=>updCost(i,"real",e.target.value)} style={ciG}/></div>
+            </div>
+            <div style={{fontSize:9,color:"#7a8a7a",fontWeight:800,margin:"2px 0 4px"}}>RAW MATERIAL COMPONENTS (₹/doz)</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:6}}>
+              <div><label style={lab}>Raw incense</label><input type="number" value={it.rawIncense||""} onChange={e=>updCost(i,"rawIncense",e.target.value)} style={ciG}/></div>
+              <div><label style={lab}>Perfume</label><input type="number" value={it.perfume||""} onChange={e=>updCost(i,"perfume",e.target.value)} style={ciG}/></div>
+              <div><label style={lab}>Packaging</label><input type="number" value={it.packaging||""} onChange={e=>updCost(i,"packaging",e.target.value)} style={ciG}/></div>
+              <div><label style={lab}>Labour</label><input type="number" value={it.labour||""} onChange={e=>updCost(i,"labour",e.target.value)} style={ciG}/></div>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#555",padding:"2px 2px 6px"}}><span>= Raw material total</span><b>₹{rm.toFixed(2)}/doz</b></div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr",gap:7,marginBottom:8}}>
+              <div><label style={lab}>Transport / freight ₹/doz</label><input type="number" value={it.freight||""} onChange={e=>updCost(i,"freight",e.target.value)} style={ciG}/></div>
             </div>
             <div style={{background:"#faf9fd",borderRadius:8,padding:"8px 10px"}}>
-              {wf("Realisation",it.real,false)}
-              {wf("− Raw material → gross contribution",gross,true)}
-              {wf("− Freight",afterFr,false)}
-              {wf("− Rent → after factory overhead",afterRent,true)}
-              {wf("− S&D",afterRent-it.sd,false)}
-              {wf(it.admin?"− Admin → NET margin":"− Admin (0 — pending total turnover) → NET (before admin)",net,true)}
+              {wf("Realisation",it.real||0,false)}
+              {wf("− Raw material",it.real-rm,false)}
+              {wf("− Transport → CONTRIBUTION",contrib,true)}
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginTop:8}}>
-              <div style={{background:net>=0?"#eef7ef":"#fdeeee",borderRadius:8,padding:"7px 9px",textAlign:"center"}}>
-                <div style={{fontSize:8.5,color:"#889",fontWeight:800}}>NET ₹/DOZ</div>
-                <div style={{fontSize:16,fontWeight:800,color:net>=0?"#1a7a3a":"#c33"}}>{net>=0?"+":""}{net.toFixed(2)}</div>
+              <div style={{background:contrib>=0?"#eef7ef":"#fdeeee",borderRadius:8,padding:"7px 9px",textAlign:"center"}}>
+                <div style={{fontSize:8.5,color:"#889",fontWeight:800}}>CONTRIBUTION ₹/DOZ</div>
+                <div style={{fontSize:16,fontWeight:800,color:contrib>=0?"#1a7a3a":"#c33"}}>{contrib>=0?"+":""}{contrib.toFixed(2)}</div>
+                <div style={{fontSize:8.5,color:"#889"}}>{cPct.toFixed(1)}% of sales</div>
               </div>
-              <div style={{background:(net*it.vol)>=0?"#eef7ef":"#fdeeee",borderRadius:8,padding:"7px 9px",textAlign:"center"}}>
-                <div style={{fontSize:8.5,color:"#889",fontWeight:800}}>ANNUAL NET</div>
-                <div style={{fontSize:16,fontWeight:800,color:(net*it.vol)>=0?"#1a7a3a":"#c33"}}>{fmt(Math.round(net*it.vol))}</div>
+              <div style={{background:(contrib*it.vol)>=0?"#eef7ef":"#fdeeee",borderRadius:8,padding:"7px 9px",textAlign:"center"}}>
+                <div style={{fontSize:8.5,color:"#889",fontWeight:800}}>ANNUAL CONTRIBUTION</div>
+                <div style={{fontSize:16,fontWeight:800,color:(contrib*it.vol)>=0?"#1a7a3a":"#c33"}}>{fmt(Math.round(contrib*it.vol))}</div>
               </div>
             </div>
-            <div style={{fontSize:9.5,color:"#999",marginTop:6,fontStyle:"italic"}}>
-              Gross contribution {fmt(Math.round(gross*it.vol))}/yr · after rent {fmt(Math.round(afterRent*it.vol))}/yr · uses {it.vol?Math.round(it.vol/849):0} plant-days @ ~849 doz/day
+
+            {/* Reverse target */}
+            <div style={{marginTop:8,background:"#f5f0fb",border:"1px solid #d8c8f0",borderRadius:8,padding:"8px 10px"}}>
+              <div style={{fontSize:10,fontWeight:800,color:"#5a3a9a",marginBottom:5}}>🎯 REVERSE TARGET — to hit a contribution %:</div>
+              <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                <label style={{fontSize:11,color:"#666"}}>Target %</label>
+                <input type="number" value={it.tgt!=null?it.tgt:""} onChange={e=>updCost(i,"tgt",e.target.value)} placeholder="0" style={{width:56,padding:"5px",borderRadius:6,border:"1.5px solid #8a6aca",fontSize:12,fontWeight:700,textAlign:"center"}}/>
+                {(()=>{ const t=(it.tgt||0)/100; const needRM=it.real*(1-t)-(it.freight||0); const needPrice=(rm+(it.freight||0))/(1-t||1);
+                  return <span style={{fontSize:11,color:"#3a2a6a"}}>→ RM ≤ <b style={{color:needRM>=rm?"#1a7a3a":"#c33"}}>₹{needRM.toFixed(2)}</b> at today's price, <b>or</b> price ≥ <b>₹{needPrice.toFixed(2)}</b> at today's RM</span>;
+                })()}
+              </div>
             </div>
+
+            {/* Directional absorption sidecar */}
+            <details style={{marginTop:8}}>
+              <summary style={{fontSize:10.5,color:"#8a5a1a",cursor:"pointer",fontWeight:700}}>▸ Fully-loaded view (directional only — rent + S&D + admin)</summary>
+              <div style={{background:"#fff9f0",border:"1px solid #e8d8b8",borderRadius:8,padding:"8px 10px",marginTop:6,fontSize:11.5}}>
+                <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}><span>Contribution</span><b style={{color:contrib>=0?"#1a7a3a":"#c33"}}>{contrib.toFixed(2)}</b></div>
+                <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}><span>− Rent (your figure)</span><span>{(it.rent||0).toFixed(2)}</span></div>
+                <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}><span>− S&D (pool, {pools.sdBasis})</span><span>{sdPerDoz(it).toFixed(2)}</span></div>
+                <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}><span>− Admin (pool, value)</span><span>{adminPerDoz(it).toFixed(2)}</span></div>
+                <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderTop:"1px solid #e8d8b8",fontWeight:800}}><span>Loaded net/doz</span><b style={{color:loadedNet>=0?"#1a7a3a":"#c33"}}>{loadedNet.toFixed(2)}</b></div>
+                <input type="number" value={it.rent||""} onChange={e=>updCost(i,"rent",e.target.value)} placeholder="rent ₹/doz" style={{width:110,padding:"4px",borderRadius:5,border:"1px solid #d8c090",fontSize:11,marginTop:5}}/>
+                <div style={{fontSize:9,color:"#a58",fontStyle:"italic",marginTop:4}}>Allocation — for a rough price floor only. Never use to judge a brand or salesman.</div>
+              </div>
+            </details>
+
             <div style={{display:"flex",gap:6,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
               <select value={it.sku||""} onChange={e=>updCost(i,"sku",e.target.value)} style={{flex:1,minWidth:150,padding:"6px",borderRadius:6,border:"1px solid #ccd",fontSize:11,color:"#3a2a6a"}}>
                 <option value="">🔗 Link to a product…</option>
                 {master.map(m=><option key={m.sku} value={m.sku}>{m.name}</option>)}
               </select>
-              <button onClick={()=>pushNet(it)} style={{padding:"7px 12px",borderRadius:6,border:"none",background:net>=0?"#1a7a3a":"#c33",color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>↧ Push net to Reports</button>
+              <button onClick={()=>pushNet(it)} style={{padding:"7px 12px",borderRadius:6,border:"none",background:contrib>=0?"#1a7a3a":"#c33",color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>↧ Push contribution to Reports</button>
             </div>
           </div>;
         })}
-        <button onClick={addCost} style={{padding:"9px 16px",borderRadius:8,border:"1px dashed #8a6aca",background:"#faf8ff",color:"#5a3a9a",fontWeight:700,cursor:"pointer",fontSize:12.5,width:"100%"}}>+ Add another brand to cost</button>
-        <button onClick={loadSpectrumSeed} style={{padding:"9px 16px",borderRadius:8,border:"none",background:"#5a3a9a",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:12.5,width:"100%",marginTop:8}}>↧ Load top 15 spectrum brands (RM pending)</button>
-      </div>}
+
+        <button onClick={addCost} style={{padding:"9px 16px",borderRadius:8,border:"1px dashed #8a6aca",background:"#faf8ff",color:"#5a3a9a",fontWeight:700,cursor:"pointer",fontSize:12.5,width:"100%"}}>+ Add another brand</button>
+        <button onClick={loadSpectrumSeed} style={{padding:"9px 16px",borderRadius:8,border:"none",background:"#5a3a9a",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:12.5,width:"100%",marginTop:8}}>↧ Load top 15 spectrum brands</button>
+
+        {/* Fixed pools + channel P&L */}
+        <div style={{marginTop:16,background:"#f7f9fc",border:"1px solid #d0d8e8",borderRadius:10,padding:12}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#2a3a6a",marginBottom:3}}>🏛️ Fixed pools & channel P&L</div>
+          <div style={{fontSize:10.5,color:"#778",marginBottom:8}}>Entered once for the whole channel — never sliced per dozen. This is the honest keep/close verdict.</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:8}}>
+            <div><label style={lab}>Rent pool ₹/yr</label><input type="number" value={pools.rent||""} onChange={e=>updPool("rent",e.target.value)} style={ci}/></div>
+            <div><label style={lab}>S&D pool ₹/yr</label><input type="number" value={pools.sd||""} onChange={e=>updPool("sd",e.target.value)} style={ci}/></div>
+            <div><label style={lab}>Admin pool ₹/yr</label><input type="number" value={pools.admin||""} onChange={e=>updPool("admin",e.target.value)} style={ci}/></div>
+            <div><label style={lab}>S&D base ₹ (value)</label><input type="number" value={pools.base||""} onChange={e=>updPool("base",e.target.value)} style={ci}/></div>
+            <div><label style={lab}>Total turnover ₹</label><input type="number" value={pools.turnover||""} onChange={e=>updPool("turnover",e.target.value)} style={ci}/></div>
+            <div><label style={lab}>S&D basis</label>
+              <select value={pools.sdBasis} onChange={e=>updPool("sdBasis",e.target.value)} style={{...ci,textAlign:"left",fontWeight:700}}>
+                <option value="value">By sales value</option>
+                <option value="volume">By volume (flat/doz)</option>
+              </select>
+            </div>
+          </div>
+          <div style={{background:"#fff",borderRadius:8,padding:"9px 11px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",padding:"3px 0",fontSize:12.5}}><span>Total contribution (all brands above)</span><b style={{color:"#1a7a3a"}}>{fmt(totContrib)}</b></div>
+            <div style={{display:"flex",justifyContent:"space-between",padding:"3px 0",fontSize:12.5}}><span>− Fixed pools (rent+S&D+admin)</span><b style={{color:"#c33"}}>{fmt(poolTotal)}</b></div>
+            <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderTop:"1px solid #e5e5ee",fontSize:14,fontWeight:800}}><span>= Operating profit</span><b style={{color:opProfit>=0?"#1a7a3a":"#c33"}}>{fmt(opProfit)}</b></div>
+            <div style={{fontSize:10,color:"#889",marginTop:5,fontStyle:"italic"}}>Only brands you've costed (RM entered) contribute here — add the rest to complete the verdict. Break-even needs total contribution ≥ {fmt(poolTotal)}.</div>
+          </div>
+        </div>
+        </div>;
+      })()}
 
       <div style={{fontSize:10,color:"#999",marginTop:12,fontStyle:"italic"}}>
         Data stays in your own database. Profit = (SP − COGS) per dozen × dozens ordered. Update the 5 pending SKUs to improve auto-matching.
