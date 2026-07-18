@@ -4367,15 +4367,16 @@ function Spectrum({ onClose, onSaveEntry }) {
       {tab==="officers" && !IS_OWNER && <div style={{fontSize:12,color:"#777",background:"#f6f6f9",borderRadius:8,padding:14,textAlign:"center"}}>Officer performance is visible to management only.</div>}
       {tab==="officers" && IS_OWNER && (()=>{
         const FIRM_OF={
-          "Satish":{firm:"B&R",owner:true},"Sugeesh":{firm:"B&R"},"Sunil":{firm:"B&R"},"Sebi":{firm:"B&R"},
-          "Sooraj":{firm:"Chandan Traders"},"Vinod":{firm:"Arjun Enterprises",owner:true},"Biju":{firm:"CBC"}
+          "Satish":{firm:"B&R",owner:true,role:"Runs CPC Kerala",critical:true},"Sugeesh":{firm:"B&R"},"Sunil":{firm:"B&R"},"Sebi":{firm:"B&R"},
+          "Sooraj":{firm:"Chandan Traders"},"Vinod":{firm:"Arjun Enterprises",owner:true},"Biju":{firm:"CBC"},
+          "Sadasivan":{firm:"Field",role:"Runs CPC Tamil Nadu",critical:true},"Murugan":{firm:"Field"}
         };
         const firmOf=o=>FIRM_OF[o]?FIRM_OF[o].firm:"Other / Unassigned";
         const isOwn=o=>!!(FIRM_OF[o]&&FIRM_OF[o].owner);
         const groups={};
         OFFICERS.forEach(off=>{ const f=firmOf(off); (groups[f]=groups[f]||[]).push(off); });
         const firmList=Object.keys(groups).map(f=>{
-          const st=groups[f].map(o=>({off:o,...officerStats(o),owner:isOwn(o)}));
+          const st=groups[f].map(o=>({off:o,...officerStats(o),owner:isOwn(o),role:(FIRM_OF[o]||{}).role,critical:(FIRM_OF[o]||{}).critical}));
           return {firm:f, rows:st.sort((a,b)=>b.sales-a.sales),
             sales:st.reduce((s,x)=>s+x.sales,0), out:st.reduce((s,x)=>s+x.outstanding,0),
             gp:st.reduce((s,x)=>s+x.gp,0), hasOwner:st.some(x=>x.owner)};
@@ -4444,7 +4445,8 @@ function Spectrum({ onClose, onSaveEntry }) {
                         <label style={{fontSize:10,color:"#888",marginLeft:4}}>Exit cost ₹</label>
                         <input value={meta.exitCost||""} onChange={e=>setOffMeta(r.off,"exitCost",e.target.value)} placeholder="gratuity+dues" style={{width:100,padding:"4px",borderRadius:6,border:"1px solid #ccd",fontSize:11}}/>
                       </div>
-                      {r.owner ? <div style={{fontSize:10.5,color:"#8a6a2a",background:"#fdf6e8",borderRadius:6,padding:"5px 8px"}}>Owner-operator — not a retirement case. This is a <b>distributor-contract</b> renegotiation, not an HR exit.</div>
+                      {r.owner ? <div style={{fontSize:10.5,color:"#8a6a2a",background:"#fdf6e8",borderRadius:6,padding:"5px 8px"}}>Owner-operator{r.role?" · "+r.role:""} — not a retirement case. Distributor-contract{r.critical?" + succession-critical channel holder":""}.</div>
+                       : r.critical ? <div style={{fontSize:10.5,color:"#b0006a",background:"#fdeef6",border:"1px solid #f0c8e0",borderRadius:6,padding:"5px 8px"}}>🔑 <b>Succession-critical: {r.role}.</b> Do NOT retire cold — his low spectrum number hides a profitable CPC channel he single-handedly holds. Plan a <b>handover</b> first; retirement is the end of that, not an event.</div>
                        : flagged ? (saveOnRetire>0
                           ? <div style={{fontSize:10.5,color:"#1a7a3a",background:"#eef7ef",borderRadius:6,padding:"5px 8px"}}>✓ <b>Retire-friendly:</b> salary ({fmt(annualSalary)}) exceeds contribution they drive ({fmt(r.gp)}) → saves ~<b>{fmt(saveOnRetire)}/yr</b>{exitCost>0?" · exit cost "+fmt(exitCost)+" → payback "+(saveOnRetire>0?(exitCost/saveOnRetire).toFixed(1)+" yrs":"—"):""}. <i>Only if their volume can be picked up elsewhere.</i></div>
                           : <div style={{fontSize:10.5,color:"#c33",background:"#fdeeee",borderRadius:6,padding:"5px 8px"}}>⚠ <b>Don't just cut:</b> they contribute {fmt(r.gp)} but cost only {fmt(annualSalary)} — retiring <b>loses ~{fmt(-saveOnRetire)}/yr</b> of net unless replaced. Transition, don't sweep.</div>)
@@ -4460,7 +4462,7 @@ function Spectrum({ onClose, onSaveEntry }) {
             // Retirement plan roll-up — salaried officers flagged >= retireAge (owner-operators excluded)
             const cand=OFFICERS.filter(off=>{
               const m=officerMeta[off]||{}; const age=Number(m.age)||0;
-              return age>=retireAge && !isOwn(off);
+              return age>=retireAge && !isOwn(off) && !((FIRM_OF[off]||{}).critical);
             });
             if(!cand.length) return null;
             let totExit=0, totSalarySave=0, totContribLost=0;
