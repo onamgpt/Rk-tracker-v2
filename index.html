@@ -3882,6 +3882,8 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [editingProducts, setEditingProducts] = useState(false);
   const OFFICERS = ["Sooraj","Sunil","Biju","Murugan","Sebi","Sugeesh","Satish","Sadasivan","Vinod","Rupesh (Agent 2)"];
   const AGENT2 = "Rupesh (Agent 2)";
+  // WES (working/travel expense) per officer, monthly avg from the MAKT-WES ledger FY25-26
+  const WES_LEDGER = {"Satish":"27542","Sooraj":"9904","Biju":"9808","Sunil":"10731","Sugeesh":"9678","Murugan":"9660","Vinod":"9602","Sebi":"9241","Sadasivan":"8499"};
   const AGENT2_RATE = 0.14;   // 14% commission, only on orders tagged to him, payable on realisation
 
   const [tab, setTab] = useState("upload"); // upload | officers | products
@@ -3910,7 +3912,7 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [pools,setPools]=useState({rent:3000000, sd:4071862, admin:7178874, base:15086742, turnover:110000000, sdBasis:"value"});
   const [alertFloor,setAlertFloor]=useState(30); // contribution % floor for month-level watch alert
   useEffect(()=>{(async()=>{
-    try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses(r.data.expenses||{}); } }catch(e){}
+    try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses({...WES_LEDGER, ...(r.data.expenses||{})}); } }catch(e){}
     try{ const om=await sheetsAPI("getPortfolio",{key:"spectrum_officermeta",user:"main"}); if(om&&om.data){ if(om.data.meta) setOfficerMeta(m=>({...m,...om.data.meta})); if(typeof om.data.retireAge==="number") setRetireAge(om.data.retireAge); } }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
     try{ const pm=await sheetsAPI("getPortfolio",{key:"spectrum_master",user:"main"}); if(pm&&pm.data&&Array.isArray(pm.data)&&pm.data.length) setMaster(pm.data); }catch(e){}
