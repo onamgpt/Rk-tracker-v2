@@ -4367,7 +4367,7 @@ function Spectrum({ onClose, onSaveEntry }) {
       {tab==="officers" && !IS_OWNER && <div style={{fontSize:12,color:"#777",background:"#f6f6f9",borderRadius:8,padding:14,textAlign:"center"}}>Officer performance is visible to management only.</div>}
       {tab==="officers" && IS_OWNER && (()=>{
         const FIRM_OF={
-          "Satish":{firm:"B&R",owner:true,role:"Zonal Sales Mgr · controls all payments · CPC Kerala",critical:true,spine:true},"Sugeesh":{firm:"B&R"},"Sunil":{firm:"B&R"},"Sebi":{firm:"B&R"},
+          "Satish":{firm:"B&R",owner:true,role:"Zonal Mgr KL+TN · payments at ZERO outstanding · CPC Kerala · small exports",critical:true,spine:true,star:true},"Sugeesh":{firm:"B&R"},"Sunil":{firm:"B&R"},"Sebi":{firm:"B&R"},
           "Sooraj":{firm:"Chandan Traders"},"Vinod":{firm:"Arjun Enterprises",owner:true},"Biju":{firm:"CBC"},
           "Sadasivan":{firm:"Field",role:"Runs CPC Tamil Nadu",critical:true},"Murugan":{firm:"Field"}
         };
@@ -4383,9 +4383,9 @@ function Spectrum({ onClose, onSaveEntry }) {
         }).sort((a,b)=>b.sales-a.sales);
         const osColor=p=>p>40?"#c33":p>20?"#c8860a":"#1a7a3a";
         return <div>
-          <div style={{background:"#fdeef2",border:"2px solid #e0a0c0",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
-            <div style={{fontSize:12.5,fontWeight:800,color:"#b0006a"}}>🔑 Key-person risk — Satish</div>
-            <div style={{fontSize:10.5,color:"#7a4a5a",marginTop:3,lineHeight:1.5}}>One person is your <b>Zonal Sales Manager</b>, controls <b>all payments/collections</b>, runs <b>CPC Kerala</b>, and <b>owns B&R</b> (a distributor you sell to) — at age 65. This is a single point of failure for the whole zone, and a governance conflict (he sets credit, benefits as distributor, and collects). Priority isn't retirement — it's <b>separating collections from him now</b>, building a deputy, and formalising B&R at arm's length.</div>
+          <div style={{background:"#f3eef9",border:"2px solid #b8a0d8",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
+            <div style={{fontSize:12.5,fontWeight:800,color:"#5a3a9a"}}>🔑 Key-person: Satish — your strongest operator, and therefore your biggest concentration</div>
+            <div style={{fontSize:10.5,color:"#5a4a7a",marginTop:3,lineHeight:1.5}}><b>Credit where due:</b> Zonal Manager for Kerala+TN running payments at <b>zero outstanding</b> — exceptional discipline — plus CPC Kerala and occasional export orders. <b>The risk isn't him, it's the dependence on him:</b> manager + collections + channel + B&R owner, all in one person at 65. De-risk because he's excellent and irreplaceable, not because he's doubted — build a system that survives your best man. Priority: second the collections & CPC relationships to younger officers, formalise B&R arm's-length. Not a retirement question.</div>
           </div>
           <div style={{fontSize:11,color:"#777",marginBottom:8}}>Officers grouped by distributor firm. Ranked lens: <b>① Receivables → ② Sales → ③ Contribution → ④ Margin</b>. 👑 = owner-operator (owns the firm they sell for) — judged separately.</div>
           <div style={{display:"flex",alignItems:"center",gap:8,background:"#f5f2fb",border:"1px solid #ddd0f0",borderRadius:8,padding:"7px 10px",marginBottom:10,flexWrap:"wrap"}}>
