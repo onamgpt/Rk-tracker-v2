@@ -3931,22 +3931,36 @@ function Spectrum({ onClose, onSaveEntry }) {
   const adminPerDoz = it => pools.turnover?((it.real||0)*(it.vol||0)/pools.turnover*pools.admin)/((it.vol||0)||1):0;
   const loadedNetOf = it => contribOf(it) - (it.rent||0) - sdPerDoz(it) - adminPerDoz(it);
   const loadSpectrumSeed = () => {
-    const seedRaw=[
-      ["Vamana Tube 30 Sticks",4315,84.25],["Lavender 100 Grams",995,343.76],
-      ["Onam Big 8 Sticks",9112,36.0],["Sandal Hexagoan 10 Sticks",4058,72.0],
-      ["Lavender 90 Grams",787,343.76],["Niramala Tube 30 Sticks",2820,84.25],
-      ["Onam Small 6 Sticks",8032,25.0],["Onam Pineapple 12 Sticks",2158,78.0],
-      ["Day & Night 60 Grams",1120,127.8],["Vismaya Rose 12 Sticks",1800,78.72],
-      ["Onam Box 12 Sticks",1846,72.0],["Onam Rose 100 Incense Sticks",151,868.0],
-      ["Golden Budda 10 Grams",1496,83.0],["Surbahar Hexgoan 15 Sticks",1428,77.0],
-      ["Assorted 100 Sticks",296,296.0]
+    // [name, vol, real, rawIncense, perfume, packaging(incl ₹4 carton), labour] — per-doz RM from Tally manufacturing vouchers; 0 = still pending
+    const seed=[
+      ["Vamana Tube 30 Sticks",4315,84.25,0,0,0,0],
+      ["Lavender 100 Grams",995,343.76,0,0,0,0],
+      ["Onam Big 8 Sticks",9112,36.0,7.56,9.40,20.04,3],
+      ["Sandal Hexagoan 10 Sticks",4058,72.0,9.84,11.79,35.16,3],
+      ["Lavender 90 Grams",787,343.76,0,0,0,0],
+      ["Niramala Tube 30 Sticks",2820,84.25,0,0,0,0],
+      ["Onam Small 6 Sticks",8032,25.0,0,0,0,0],
+      ["Onam Pineapple 12 Sticks",2158,78.0,14.98,17.67,35.38,3],
+      ["Day & Night 60 Grams",1120,127.8,0,0,0,0],
+      ["Vismaya Rose 12 Sticks",1800,78.72,0,0,0,0],
+      ["Onam Box 12 Sticks",1846,72.0,0,0,0,0],
+      ["Onam Rose 100 Incense Sticks",151,868.0,0,0,0,0],
+      ["Golden Budda 10 Grams",1496,83.0,0,0,0,0],
+      ["Surbahar Hexgoan 15 Sticks",1428,77.0,0,0,0,0],
+      ["Assorted 100 Sticks",296,296.0,0,0,0,0]
     ];
-    const SEED=seedRaw.map(([name,vol,real])=>({name,sku:"",vol,real,rawIncense:0,perfume:0,packaging:0,labour:0,freight:2.41,rent:0}));
-    const have=new Set(costItems.map(c=>c.name));
-    const add=SEED.filter(s=>!have.has(s.name));
-    if(!add.length){ alert("Top spectrum brands are already loaded."); return; }
-    persistCost([...costItems,...add]);
-    alert("✓ Added "+add.length+" spectrum brands. Fill the RM components (raw incense, perfume, packaging, labour) on each — contribution completes automatically.");
+    const idxByName={}; costItems.forEach((c,i)=>{idxByName[c.name]=i;});
+    let next=[...costItems]; let added=0, costed=0;
+    seed.forEach(([name,vol,real,ri,pf,pk,lb])=>{
+      if(idxByName[name]==null){ next.push({name,sku:"",vol,real,rawIncense:ri,perfume:pf,packaging:pk,labour:lb,freight:2.41,rent:0}); added++; }
+      else {
+        const ex=next[idxByName[name]]; const exRM=(ex.rawIncense||0)+(ex.perfume||0)+(ex.packaging||0)+(ex.labour||0);
+        if(exRM===0 && (ri+pf+pk+lb)>0){ next[idxByName[name]]={...ex,rawIncense:ri,perfume:pf,packaging:pk,labour:lb}; costed++; }
+      }
+    });
+    if(!added && !costed){ alert("Spectrum brands already loaded and costed where vouchers exist."); return; }
+    persistCost(next);
+    alert("✓ "+added+" brands added, "+costed+" costed from your Tally vouchers (Big 8, Sandal Hex 10, Pineapple 12). Fill RM on the rest.");
   };
   const pushNet = (it) => {
     const c = Math.round(contribOf(it)*100)/100;
