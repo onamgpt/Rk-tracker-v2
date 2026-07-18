@@ -3888,9 +3888,9 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [orders, setOrders] = useState([]);        // {id,date,customer,officer,total,lines:[{sku,name,doz,gp}], gpTotal}
   const [expenses, setExpenses] = useState({});     // officer -> monthly expense
   const [officerMeta, setOfficerMeta] = useState({  // officer -> {age, exitCost}
-    "Satish":{age:65,exitCost:""},"Sugeesh":{age:58,exitCost:""},"Sunil":{age:50,exitCost:""},"Sebi":{age:55,exitCost:""},
-    "Sooraj":{age:"",exitCost:""},"Vinod":{age:56,exitCost:""},"Biju":{age:"",exitCost:""},
-    "Murugan":{age:65,exitCost:""},"Sadasivan":{age:70,exitCost:""}
+    "Satish":{age:65,exitCost:"180000"},"Sugeesh":{age:58,exitCost:"180000"},"Sunil":{age:50,exitCost:"180000"},"Sebi":{age:55,exitCost:"180000"},
+    "Sooraj":{age:"",exitCost:"180000"},"Vinod":{age:56,exitCost:"180000"},"Biju":{age:"",exitCost:"180000"},
+    "Murugan":{age:65,exitCost:"180000"},"Sadasivan":{age:70,exitCost:"180000"}
   });
   const [retireAge, setRetireAge] = useState(58);
   const [photo, setPhoto] = useState(null);
@@ -4454,6 +4454,41 @@ function Spectrum({ onClose, onSaveEntry }) {
             </div>
           ))}
           <div style={{fontSize:9.5,color:"#999",fontStyle:"italic",marginTop:4}}>Receivables = sales − received on tagged orders. Owner-operators: monthly cost is usually n/a (they're a distributor, not salaried) — judge them on credit & margin, not net-of-salary.</div>
+          {(()=>{
+            // Retirement plan roll-up — salaried officers flagged >= retireAge (owner-operators excluded)
+            const cand=OFFICERS.filter(off=>{
+              const m=officerMeta[off]||{}; const age=Number(m.age)||0;
+              return age>=retireAge && !isOwn(off);
+            });
+            if(!cand.length) return null;
+            let totExit=0, totSalarySave=0, totContribLost=0;
+            const rows=cand.map(off=>{
+              const st=officerStats(off); const m=officerMeta[off]||{};
+              const annualSalary=(parseFloat(String(expenses[off]||"").replace(/[^0-9.]/g,""))||0)*12;
+              const exit=parseFloat(String(m.exitCost||"").replace(/[^0-9.]/g,""))||0;
+              totExit+=exit; totSalarySave+=annualSalary; totContribLost+=st.gp;
+              return {off,age:m.age,annualSalary,exit,gp:st.gp};
+            });
+            const netAnnual=totSalarySave-totContribLost; // if not redistributed
+            const payback=netAnnual>0?totExit/netAnnual:0;
+            return <div style={{marginTop:14,background:"#f5f2fb",border:"1px solid #d8c8f0",borderRadius:10,padding:12}}>
+              <div style={{fontSize:13,fontWeight:800,color:"#5a3a9a",marginBottom:3}}>📋 Retirement plan — {cand.length} officer{cand.length>1?"s":""} aged ≥{retireAge}</div>
+              <div style={{fontSize:10,color:"#889",marginBottom:8}}>Excludes owner-operators (distributor renegotiation, not exits). "Contribution lost" assumes their sales aren't picked up — worst case.</div>
+              {rows.map((r,i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"3px 2px",borderBottom:"1px solid #ece5f8"}}>
+                  <span>{r.off} ({r.age}) · salary/yr {r.annualSalary?fmt(r.annualSalary):"—"} · exit {fmt(r.exit)}</span>
+                  <span style={{color:"#666"}}>contrib {fmt(r.gp)}</span>
+                </div>
+              ))}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:8}}>
+                <div style={{background:"#fff",borderRadius:7,padding:"7px",textAlign:"center"}}><div style={{fontSize:8.5,color:"#889",fontWeight:800}}>ONE-TIME EXIT COST</div><div style={{fontSize:15,fontWeight:800,color:"#c33"}}>{fmt(totExit)}</div></div>
+                <div style={{background:"#fff",borderRadius:7,padding:"7px",textAlign:"center"}}><div style={{fontSize:8.5,color:"#889",fontWeight:800}}>SALARY SAVED/YR</div><div style={{fontSize:15,fontWeight:800,color:"#1a7a3a"}}>{totSalarySave?fmt(totSalarySave):"enter salaries"}</div></div>
+                <div style={{background:"#fff",borderRadius:7,padding:"7px",textAlign:"center"}}><div style={{fontSize:8.5,color:"#889",fontWeight:800}}>NET SAVING/YR*</div><div style={{fontSize:15,fontWeight:800,color:netAnnual>=0?"#1a7a3a":"#c33"}}>{totSalarySave?fmt(netAnnual):"—"}</div></div>
+                <div style={{background:"#fff",borderRadius:7,padding:"7px",textAlign:"center"}}><div style={{fontSize:8.5,color:"#889",fontWeight:800}}>PAYBACK</div><div style={{fontSize:15,fontWeight:800,color:"#5a3a9a"}}>{totSalarySave&&netAnnual>0?payback.toFixed(1)+" yrs":"—"}</div></div>
+              </div>
+              <div style={{fontSize:9,color:"#a58",fontStyle:"italic",marginTop:6}}>*Net = salary saved − contribution lost (if their volume vanishes). If the territory is reassigned, net saving is higher. Kerala labour-law clearance required before acting.</div>
+            </div>;
+          })()}
         </div>;
       })()}
 
