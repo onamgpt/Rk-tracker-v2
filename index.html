@@ -4796,9 +4796,10 @@ function AvailableFunds() {
   const bank = num(data.bankBalance);
   const unclearedTotal = (data.cheques||[]).reduce((s,c)=> s + (c.cleared?0:num(c.amount)), 0);
   const paymentsTotal = (data.payments||[]).reduce((s,p)=> s + num(p.amount), 0);
-  const depositsTotal = (data.deposits||[]).reduce((s,d)=> s + (d.credited?0:num(d.amount)), 0);
-  const available = bank - unclearedTotal - paymentsTotal;
-  const projected = available + depositsTotal;
+  const creditedDeposits = (data.deposits||[]).reduce((s,d)=> s + (d.credited?num(d.amount):0), 0);
+  const inTransitDeposits = (data.deposits||[]).reduce((s,d)=> s + (d.credited?0:num(d.amount)), 0);
+  const available = bank - unclearedTotal - paymentsTotal + creditedDeposits;
+  const projected = available + inTransitDeposits;
 
   const save = async () => {
     setSaving(true); setSavedMsg("");
@@ -4812,13 +4813,6 @@ function AvailableFunds() {
   const addPayment = () => setData(d => ({...d, payments:[...(d.payments||[]), {what:"",amount:""}]}));
   const addDeposit = () => setData(d => ({...d, deposits:[...(d.deposits||[]), {from:"",amount:"",credited:false}]}));
   const upDeposit = (i,k,v) => setData(d => { const x=[...(d.deposits||[])]; x[i]={...x[i],[k]:v}; return {...d,deposits:x}; });
-  const creditDeposit = (i,checked) => setData(d => {
-    const x=[...(d.deposits||[])];
-    const amt=num(x[i].amount);
-    x[i]={...x[i],credited:checked};
-    const newBank=num(d.bankBalance)+(checked?amt:-amt);
-    return {...d, deposits:x, bankBalance:String(Math.round(newBank*100)/100)};
-  });
   const delDeposit = i => setData(d => ({...d, deposits:d.deposits.filter((_,x)=>x!==i)}));
   const upCheque = (i,k,v) => setData(d => { const c=[...d.cheques]; c[i]={...c[i],[k]:v}; return {...d,cheques:c}; });
   const upPayment = (i,k,v) => setData(d => { const p=[...d.payments]; p[i]={...p[i],[k]:v}; return {...d,payments:p}; });
@@ -4837,10 +4831,10 @@ function AvailableFunds() {
         <div style={{ fontSize:11, opacity:.9, letterSpacing:".05em" }}>TRUE AVAILABLE FUNDS</div>
         <div style={{ fontSize:28, fontWeight:800, lineHeight:1.1 }}>{fmt(available)}</div>
         <div style={{ fontSize:10.5, opacity:.85, marginTop:3 }}>
-          Bank {fmt(bank)} − Uncleared cheques {fmt(unclearedTotal)} − Payments due {fmt(paymentsTotal)}
+          Bank {fmt(bank)} − Uncleared cheques {fmt(unclearedTotal)} − Payments due {fmt(paymentsTotal)}{creditedDeposits>0?" + Credited deposits "+fmt(creditedDeposits):""}
         </div>
-        {depositsTotal>0 && <div style={{ fontSize:11, marginTop:6, paddingTop:6, borderTop:"1px solid rgba(255,255,255,.25)" }}>
-          <span style={{ opacity:.9 }}>+ Incoming deposits {fmt(depositsTotal)} → </span>
+        {inTransitDeposits>0 && <div style={{ fontSize:11, marginTop:6, paddingTop:6, borderTop:"1px solid rgba(255,255,255,.25)" }}>
+          <span style={{ opacity:.9 }}>+ In transit {fmt(inTransitDeposits)} → </span>
           <b>Projected once credited {fmt(projected)}</b>
         </div>}
       </div>
@@ -4895,14 +4889,14 @@ function AvailableFunds() {
         {(data.deposits||[]).map((c,i)=>(
           <div key={i} style={{ display:"flex", gap:5, marginBottom:5, alignItems:"center" }}>
             <input value={c.from} onChange={e=>upDeposit(i,"from",e.target.value)} placeholder="from (party / cheque no.)" style={{...inp,flex:2}}/>
-            <input value={c.amount} onChange={e=>upDeposit(i,"amount",e.target.value)} readOnly={!!c.credited} placeholder="₹" style={{...inp,flex:1,background:c.credited?"#eef4ee":"#fff"}}/>
+            <input value={c.amount} onChange={e=>upDeposit(i,"amount",e.target.value)} placeholder="₹" style={{...inp,flex:1}}/>
             <label style={{ fontSize:10.5, display:"flex", alignItems:"center", gap:3, color: c.credited?"#1a7a3a":"#c8860a", whiteSpace:"nowrap" }}>
-              <input type="checkbox" checked={!!c.credited} onChange={e=>creditDeposit(i,e.target.checked)}/>{c.credited?"credited":"in transit"}
+              <input type="checkbox" checked={!!c.credited} onChange={e=>upDeposit(i,"credited",e.target.checked)}/>{c.credited?"credited":"in transit"}
             </label>
-            <button onClick={()=>{ if(c.credited) creditDeposit(i,false); delDeposit(i); }} style={{ border:"none", background:"none", color:"#c33", cursor:"pointer", fontSize:14 }}>×</button>
+            <button onClick={()=>delDeposit(i)} style={{ border:"none", background:"none", color:"#c33", cursor:"pointer", fontSize:14 }}>×</button>
           </div>
         ))}
-        {(!data.deposits||!data.deposits.length) && <div style={{fontSize:11,color:"#8a9a8a",fontStyle:"italic"}}>Cheques/cash you've deposited but not yet credited. Tick "credited" and it's added to your bank balance automatically — True Available rises by that amount.</div>}
+        {(!data.deposits||!data.deposits.length) && <div style={{fontSize:11,color:"#8a9a8a",fontStyle:"italic"}}>Cheques/cash deposited but not yet in the account. "In transit" shows as projected; tick "credited" and it's added to True Available. The bank figure above is never changed by the app — type it yourself from your statement.</div>}
       </div>
 
       <div style={{ display:"flex", gap:8, alignItems:"center" }}>
