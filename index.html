@@ -3900,7 +3900,7 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [ordOfficer,setOrdOfficer]=useState("");
   const [repPeriod,setRepPeriod]=useState("all"); // all | YYYY-MM
   const [beTransport,setBeTransport]=useState(0); // ₹/doz transport+other assumption for break-even (until master set)
-  const [costItems,setCostItems]=useState([{name:"An3f — All New 3 Fragrance 10 Sticks",sku:"",vol:95097,real:56.25,rawIncense:22,perfume:15,packaging:7,labour:3.5,freight:2.41,rent:11.30}]);
+  const [costItems,setCostItems]=useState([{name:"An3f — All New 3 Fragrance 10 Sticks",sku:"",vol:95097,real:56.25,rawIncense:22,perfume:15,packaging:7,labour:1.5,freight:2.41,rent:11.30}]);
   const [pools,setPools]=useState({rent:3000000, sd:4071862, admin:7178874, base:15086742, turnover:110000000, sdBasis:"value"});
   const [alertFloor,setAlertFloor]=useState(30); // contribution % floor for month-level watch alert
   useEffect(()=>{(async()=>{
