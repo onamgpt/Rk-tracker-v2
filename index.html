@@ -3887,6 +3887,12 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [tab, setTab] = useState("upload"); // upload | officers | products
   const [orders, setOrders] = useState([]);        // {id,date,customer,officer,total,lines:[{sku,name,doz,gp}], gpTotal}
   const [expenses, setExpenses] = useState({});     // officer -> monthly expense
+  const [officerMeta, setOfficerMeta] = useState({  // officer -> {age, exitCost}
+    "Satish":{age:65,exitCost:""},"Sugeesh":{age:58,exitCost:""},"Sunil":{age:50,exitCost:""},"Sebi":{age:55,exitCost:""},
+    "Sooraj":{age:"",exitCost:""},"Vinod":{age:56,exitCost:""},"Biju":{age:"",exitCost:""},
+    "Murugan":{age:65,exitCost:""},"Sadasivan":{age:70,exitCost:""}
+  });
+  const [retireAge, setRetireAge] = useState(58);
   const [photo, setPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(null);     // parsed order awaiting officer tag
@@ -3905,6 +3911,7 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [alertFloor,setAlertFloor]=useState(30); // contribution % floor for month-level watch alert
   useEffect(()=>{(async()=>{
     try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses(r.data.expenses||{}); } }catch(e){}
+    try{ const om=await sheetsAPI("getPortfolio",{key:"spectrum_officermeta",user:"main"}); if(om&&om.data){ if(om.data.meta) setOfficerMeta(m=>({...m,...om.data.meta})); if(typeof om.data.retireAge==="number") setRetireAge(om.data.retireAge); } }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
     try{ const pm=await sheetsAPI("getPortfolio",{key:"spectrum_master",user:"main"}); if(pm&&pm.data&&Array.isArray(pm.data)&&pm.data.length) setMaster(pm.data); }catch(e){}
     try{ const c=await sheetsAPI("getPortfolio",{key:"spectrum_costing",user:"main"}); if(c&&c.data&&Array.isArray(c.data)&&c.data.length) setCostItems(c.data); }catch(e){}
@@ -4061,6 +4068,9 @@ function Spectrum({ onClose, onSaveEntry }) {
   };
   const delOrder = async id => { const no=orders.filter(o=>o.id!==id); setOrders(no); await persist(no,expenses); };
   const setExp = async (off,val) => { const ne={...expenses,[off]:val}; setExpenses(ne); await persist(orders,ne); };
+  const persistOffMeta = async (meta,ra) => { try{ await sheetsAPI("savePortfolio",{key:"spectrum_officermeta",user:"main",data:{meta,retireAge:ra}}); }catch(e){} };
+  const setOffMeta = (off,field,val) => { const nm={...officerMeta,[off]:{...(officerMeta[off]||{}),[field]:val}}; setOfficerMeta(nm); persistOffMeta(nm,retireAge); };
+  const setRetAge = (v) => { const n=Number(v)||0; setRetireAge(n); persistOffMeta(officerMeta,n); };
 
   // officer rollups
   function officerStats(off){
@@ -4371,6 +4381,12 @@ function Spectrum({ onClose, onSaveEntry }) {
         const osColor=p=>p>40?"#c33":p>20?"#c8860a":"#1a7a3a";
         return <div>
           <div style={{fontSize:11,color:"#777",marginBottom:8}}>Officers grouped by distributor firm. Ranked lens: <b>① Receivables → ② Sales → ③ Contribution → ④ Margin</b>. 👑 = owner-operator (owns the firm they sell for) — judged separately.</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,background:"#f5f2fb",border:"1px solid #ddd0f0",borderRadius:8,padding:"7px 10px",marginBottom:10,flexWrap:"wrap"}}>
+            <span style={{fontSize:11,fontWeight:800,color:"#5a3a9a"}}>🎂 Retirement lens</span>
+            <span style={{fontSize:11,color:"#666"}}>flag officers aged</span>
+            <input type="number" value={retireAge} onChange={e=>setRetAge(e.target.value)} style={{width:48,padding:"4px",borderRadius:6,border:"1px solid #c8b8e8",fontSize:12,textAlign:"center",fontWeight:700}}/>
+            <span style={{fontSize:11,color:"#666"}}>+. Retire/retain is an economic view — Kerala labour-law sign-off must come from a local lawyer.</span>
+          </div>
           {firmList.map((fr,fi)=>(
             <div key={fi} style={{border:"1px solid "+(fr.hasOwner?"#e0c890":"#e5e0f0"),borderRadius:12,padding:11,marginBottom:12,background:fr.hasOwner?"#fffdf7":"#fbfbfe"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,paddingBottom:6,borderBottom:"1px solid #eee"}}>
@@ -4410,6 +4426,29 @@ function Spectrum({ onClose, onSaveEntry }) {
                     <input value={expenses[r.off]||""} onChange={e=>setExp(r.off,e.target.value)} placeholder={r.owner?"n/a — owns firm":"salary+exp"} style={{...inp,flex:1,fontSize:11,padding:"5px"}}/>
                     <span style={{fontSize:11,fontWeight:700,color:r.net>=0?"#1a7a3a":"#c33",whiteSpace:"nowrap"}}>net {fmt(r.net)}</span>
                   </div>
+                  {/* Retirement economics */}
+                  {(()=>{
+                    const meta=officerMeta[r.off]||{};
+                    const age=Number(meta.age)||0;
+                    const flagged=age>=retireAge;
+                    const annualSalary=(parseFloat(String(expenses[r.off]||"").replace(/[^0-9.]/g,""))||0)*12;
+                    const saveOnRetire=annualSalary-r.gp; // salary saved minus contribution lost (worst case, not redistributed)
+                    const exitCost=parseFloat(String(meta.exitCost||"").replace(/[^0-9.]/g,""))||0;
+                    return <div style={{marginTop:7,paddingTop:7,borderTop:"1px dashed #eee"}}>
+                      <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginBottom:5}}>
+                        <label style={{fontSize:10,color:"#888"}}>Age</label>
+                        <input type="number" value={meta.age||""} onChange={e=>setOffMeta(r.off,"age",e.target.value)} placeholder="?" style={{width:46,padding:"4px",borderRadius:6,border:"1px solid "+(flagged?"#e0a060":"#ccd"),fontSize:11,textAlign:"center",fontWeight:700,background:flagged?"#fff6ee":"#fff"}}/>
+                        {flagged && <span style={{fontSize:9.5,fontWeight:800,color:"#a34a00",background:"#fff2e0",borderRadius:5,padding:"2px 6px"}}>≥{retireAge}</span>}
+                        <label style={{fontSize:10,color:"#888",marginLeft:4}}>Exit cost ₹</label>
+                        <input value={meta.exitCost||""} onChange={e=>setOffMeta(r.off,"exitCost",e.target.value)} placeholder="gratuity+dues" style={{width:100,padding:"4px",borderRadius:6,border:"1px solid #ccd",fontSize:11}}/>
+                      </div>
+                      {r.owner ? <div style={{fontSize:10.5,color:"#8a6a2a",background:"#fdf6e8",borderRadius:6,padding:"5px 8px"}}>Owner-operator — not a retirement case. This is a <b>distributor-contract</b> renegotiation, not an HR exit.</div>
+                       : flagged ? (saveOnRetire>0
+                          ? <div style={{fontSize:10.5,color:"#1a7a3a",background:"#eef7ef",borderRadius:6,padding:"5px 8px"}}>✓ <b>Retire-friendly:</b> salary ({fmt(annualSalary)}) exceeds contribution they drive ({fmt(r.gp)}) → saves ~<b>{fmt(saveOnRetire)}/yr</b>{exitCost>0?" · exit cost "+fmt(exitCost)+" → payback "+(saveOnRetire>0?(exitCost/saveOnRetire).toFixed(1)+" yrs":"—"):""}. <i>Only if their volume can be picked up elsewhere.</i></div>
+                          : <div style={{fontSize:10.5,color:"#c33",background:"#fdeeee",borderRadius:6,padding:"5px 8px"}}>⚠ <b>Don't just cut:</b> they contribute {fmt(r.gp)} but cost only {fmt(annualSalary)} — retiring <b>loses ~{fmt(-saveOnRetire)}/yr</b> of net unless replaced. Transition, don't sweep.</div>)
+                       : (age>0 ? <div style={{fontSize:10,color:"#999"}}>Under {retireAge} — not flagged.</div> : <div style={{fontSize:10,color:"#bbb"}}>Enter age to assess.</div>)}
+                    </div>;
+                  })()}
                 </div>
               ))}
             </div>
