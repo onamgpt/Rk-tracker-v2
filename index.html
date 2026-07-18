@@ -4067,9 +4067,15 @@ function Spectrum({ onClose, onSaveEntry }) {
     const os=orders.filter(o=>o.officer===off);
     const sales=os.reduce((s,o)=>s+(o.total||0),0);
     const gp=os.reduce((s,o)=>s+(o.gpTotal||0),0);
+    const received=os.reduce((s,o)=>s+(Number(o.received)||0),0);
+    const outstanding=Math.max(0, sales-received);
     const exp=parseFloat(String(expenses[off]||"").replace(/[^0-9.]/g,""))||0;
     const net=gp-exp;
-    return { orders:os.length, sales, gp, exp, net };
+    const mset={};
+    os.forEach(o=>{ const d=new Date(o.date); if(!isNaN(d)) { const k=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); mset[k]=(mset[k]||0)+(o.total||0); } });
+    const months=Math.max(1,Object.keys(mset).length);
+    return { orders:os.length, sales, gp, exp, net, received, outstanding, months, perMonth:sales/months,
+             osPct: sales?outstanding/sales*100:0, gpPct: sales?gp/sales*100:0 };
   }
   const persistAlertFloor = async (f) => { setAlertFloor(f); try{ await sheetsAPI("savePortfolio",{key:"spectrum_alertcfg",user:"main",data:{floor:f}}); }catch(e){} };
 
@@ -4347,37 +4353,70 @@ function Spectrum({ onClose, onSaveEntry }) {
       </div>}
 
       {tab==="officers" && !IS_OWNER && <div style={{fontSize:12,color:"#777",background:"#f6f6f9",borderRadius:8,padding:14,textAlign:"center"}}>Officer performance is visible to management only.</div>}
-      {tab==="officers" && IS_OWNER && <div>
-        <div style={{fontSize:11,color:"#777",marginBottom:8}}>Enter each salesperson's monthly expense/salary. Net = Gross Profit from their tagged orders − their cost.</div>
-        {OFFICERS.map(off=>{ const s=officerStats(off); return (
-          <div key={off} style={{border:"1px solid #e5e0f0",borderRadius:10,padding:10,marginBottom:8,background:s.net>=0?"#f5fbf5":"#fdf3f3"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span style={{fontWeight:700,color:"#3a2a6a",fontSize:14}}>{off}</span>
-              <span style={{fontWeight:800,fontSize:15,color:s.net>=0?"#1a7a3a":"#c33"}}>{s.net>=0?"+":""}{fmt(s.net)}</span>
-            </div>
-            <div style={{fontSize:11,color:"#666",marginTop:3}}>{s.orders} orders · Sales {fmt(s.sales)} · Gross profit {fmt(s.gp)}</div>
-            <div style={{display:"flex",gap:6,alignItems:"center",marginTop:6}}>
-              <label style={{fontSize:11,color:"#555"}}>Monthly cost ₹</label>
-              <input value={expenses[off]||""} onChange={e=>setExp(off,e.target.value)} placeholder="salary+expenses" style={{...inp,flex:1}}/>
-            </div>
-            <div style={{fontSize:10,marginTop:4,color:s.net>=0?"#1a7a3a":"#c33",fontWeight:600}}>
-              {s.net>=0 ? "✓ Covering their cost (verified orders)" : "⚠ Not yet covering cost — needs more/higher-margin orders"}
-            </div>
-            {(() => {
-              const frs = fieldReports.filter(f => (f.officer||"").toLowerCase()===off.toLowerCase()).slice(0,3);
-              if(!frs.length) return null;
-              return <div style={{marginTop:8,paddingTop:8,borderTop:"1px dashed #d8d0e8"}}>
-                <div style={{fontSize:10,color:"#8a6a2a",fontWeight:700,marginBottom:3}}>📝 Field-reported (UNVERIFIED)</div>
-                {frs.map((f,i)=>(
-                  <div key={i} style={{fontSize:10.5,color:"#775",padding:"2px 0"}}>
-                    {f.date}: Sales ₹{f.sales||0} · Exp ₹{f.expenses||0} · Coll ₹{f.collections||0}{f.location?" · 📍":""}
+      {tab==="officers" && IS_OWNER && (()=>{
+        const FIRM_OF={
+          "Satish":{firm:"B&R",owner:true},"Sugeesh":{firm:"B&R"},"Sunil":{firm:"B&R"},"Sebi":{firm:"B&R"},
+          "Sooraj":{firm:"Chandan Traders"},"Vinod":{firm:"Arjun Enterprises",owner:true},"Biju":{firm:"CBC"}
+        };
+        const firmOf=o=>FIRM_OF[o]?FIRM_OF[o].firm:"Other / Unassigned";
+        const isOwn=o=>!!(FIRM_OF[o]&&FIRM_OF[o].owner);
+        const groups={};
+        OFFICERS.forEach(off=>{ const f=firmOf(off); (groups[f]=groups[f]||[]).push(off); });
+        const firmList=Object.keys(groups).map(f=>{
+          const st=groups[f].map(o=>({off:o,...officerStats(o),owner:isOwn(o)}));
+          return {firm:f, rows:st.sort((a,b)=>b.sales-a.sales),
+            sales:st.reduce((s,x)=>s+x.sales,0), out:st.reduce((s,x)=>s+x.outstanding,0),
+            gp:st.reduce((s,x)=>s+x.gp,0), hasOwner:st.some(x=>x.owner)};
+        }).sort((a,b)=>b.sales-a.sales);
+        const osColor=p=>p>40?"#c33":p>20?"#c8860a":"#1a7a3a";
+        return <div>
+          <div style={{fontSize:11,color:"#777",marginBottom:8}}>Officers grouped by distributor firm. Ranked lens: <b>① Receivables → ② Sales → ③ Contribution → ④ Margin</b>. 👑 = owner-operator (owns the firm they sell for) — judged separately.</div>
+          {firmList.map((fr,fi)=>(
+            <div key={fi} style={{border:"1px solid "+(fr.hasOwner?"#e0c890":"#e5e0f0"),borderRadius:12,padding:11,marginBottom:12,background:fr.hasOwner?"#fffdf7":"#fbfbfe"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,paddingBottom:6,borderBottom:"1px solid #eee"}}>
+                <span style={{fontWeight:800,fontSize:15,color:"#2a2a5a"}}>{fr.hasOwner?"👑 ":"🏢 "}{fr.firm}</span>
+                <span style={{fontSize:11,color:"#666"}}>Sales {fmt(fr.sales)} · O/S <b style={{color:osColor(fr.sales?fr.out/fr.sales*100:0)}}>{fmt(fr.out)}</b></span>
+              </div>
+              {fr.hasOwner && <div style={{background:"#fdf6e8",border:"1px solid #e8d5a8",borderRadius:7,padding:"7px 9px",marginBottom:8,fontSize:10.5,color:"#8a6a2a"}}>
+                ⚠ <b>Owner-operator.</b> This person owns the distributor. Their sales can grow while your margin thins — watch <b>credit taken</b> (receivables) and <b>discount/mix</b>, not just turnover. They carry their own capital & risk (the upside), but you can't manage them like a salaried officer.
+              </div>}
+              {fr.rows.map((r,i)=>(
+                <div key={i} style={{background:"#fff",border:"1px solid #eee",borderRadius:8,padding:"8px 10px",marginBottom:6}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                    <span style={{fontWeight:700,color:"#3a2a6a",fontSize:13.5}}>{r.owner?"👑 ":""}{r.off}</span>
+                    <span style={{fontSize:10,color:"#999"}}>{r.orders} orders · {r.months} mo</span>
                   </div>
-                ))}
-              </div>;
-            })()}
-          </div>
-        );})}
-      </div>}
+                  {/* ① Receivables — lead metric */}
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:r.osPct>40?"#fdeeee":r.osPct>20?"#fff8ec":"#eef7ef",borderRadius:6,padding:"6px 8px",marginBottom:5}}>
+                    <span style={{fontSize:10.5,fontWeight:800,color:"#555"}}>① OUTSTANDING</span>
+                    <span style={{fontWeight:800,fontSize:14,color:osColor(r.osPct)}}>{fmt(r.outstanding)} <span style={{fontSize:10}}>({r.osPct.toFixed(0)}% of sales)</span></span>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5,marginBottom:5}}>
+                    <div style={{textAlign:"center",background:"#f6f6fb",borderRadius:6,padding:"5px 3px"}}>
+                      <div style={{fontSize:8,color:"#889",fontWeight:800}}>② SALES/MO</div>
+                      <div style={{fontSize:12.5,fontWeight:800,color:"#2a2a5a"}}>{fmt(r.perMonth)}</div>
+                    </div>
+                    <div style={{textAlign:"center",background:"#f6f6fb",borderRadius:6,padding:"5px 3px"}}>
+                      <div style={{fontSize:8,color:"#889",fontWeight:800}}>③ CONTRIB</div>
+                      <div style={{fontSize:12.5,fontWeight:800,color:r.gp>=0?"#1a7a3a":"#c33"}}>{fmt(r.gp)}</div>
+                    </div>
+                    <div style={{textAlign:"center",background:"#f6f6fb",borderRadius:6,padding:"5px 3px"}}>
+                      <div style={{fontSize:8,color:"#889",fontWeight:800}}>④ MARGIN</div>
+                      <div style={{fontSize:12.5,fontWeight:800,color:r.gpPct<15?"#c33":"#555"}}>{r.gpPct.toFixed(0)}%</div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    <label style={{fontSize:10,color:"#888"}}>Monthly cost ₹</label>
+                    <input value={expenses[r.off]||""} onChange={e=>setExp(r.off,e.target.value)} placeholder={r.owner?"n/a — owns firm":"salary+exp"} style={{...inp,flex:1,fontSize:11,padding:"5px"}}/>
+                    <span style={{fontSize:11,fontWeight:700,color:r.net>=0?"#1a7a3a":"#c33",whiteSpace:"nowrap"}}>net {fmt(r.net)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+          <div style={{fontSize:9.5,color:"#999",fontStyle:"italic",marginTop:4}}>Receivables = sales − received on tagged orders. Owner-operators: monthly cost is usually n/a (they're a distributor, not salaried) — judge them on credit & margin, not net-of-salary.</div>
+        </div>;
+      })()}
 
       {tab==="products" && <div>
         {!IS_OWNER && <div style={{fontSize:12,color:"#777",background:"#f6f6f9",borderRadius:8,padding:10}}>
