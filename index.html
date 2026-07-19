@@ -3895,6 +3895,8 @@ function Spectrum({ onClose, onSaveEntry }) {
     "Murugan":{age:65,exitCost:"180000"},"Sadasivan":{age:70,exitCost:"180000"}
   });
   const [retireAge, setRetireAge] = useState(58);
+  const [hunters,setHunters]=useState([]);   // {name, channel, loadedMo, startMonths, newRev, contribPct, collected}
+  const [d2c,setD2c]=useState({adSpend:"",orders:"",revenue:"",repeatOrders:"",cogsPct:"22",feePct:"15"});
   const [photo, setPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(null);     // parsed order awaiting officer tag
@@ -3913,7 +3915,7 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [alertFloor,setAlertFloor]=useState(30); // contribution % floor for month-level watch alert
   useEffect(()=>{(async()=>{
     try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses({...WES_LEDGER, ...(r.data.expenses||{})}); } }catch(e){}
-    try{ const om=await sheetsAPI("getPortfolio",{key:"spectrum_officermeta",user:"main"}); if(om&&om.data){ if(om.data.meta) setOfficerMeta(m=>({...m,...om.data.meta})); if(typeof om.data.retireAge==="number") setRetireAge(om.data.retireAge); } }catch(e){}
+    try{ const g=await sheetsAPI("getPortfolio",{key:"spectrum_growth",user:"main"}); if(g&&g.data){ if(Array.isArray(g.data.hunters)) setHunters(g.data.hunters); if(g.data.d2c) setD2c(x=>({...x,...g.data.d2c})); } }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
     try{ const pm=await sheetsAPI("getPortfolio",{key:"spectrum_master",user:"main"}); if(pm&&pm.data&&Array.isArray(pm.data)&&pm.data.length) setMaster(pm.data); }catch(e){}
     try{ const c=await sheetsAPI("getPortfolio",{key:"spectrum_costing",user:"main"}); if(c&&c.data&&Array.isArray(c.data)&&c.data.length) setCostItems(c.data); }catch(e){}
@@ -4073,6 +4075,11 @@ function Spectrum({ onClose, onSaveEntry }) {
   const persistOffMeta = async (meta,ra) => { try{ await sheetsAPI("savePortfolio",{key:"spectrum_officermeta",user:"main",data:{meta,retireAge:ra}}); }catch(e){} };
   const setOffMeta = (off,field,val) => { const nm={...officerMeta,[off]:{...(officerMeta[off]||{}),[field]:val}}; setOfficerMeta(nm); persistOffMeta(nm,retireAge); };
   const setRetAge = (v) => { const n=Number(v)||0; setRetireAge(n); persistOffMeta(officerMeta,n); };
+  const persistGrowth = async (h,d) => { try{ await sheetsAPI("savePortfolio",{key:"spectrum_growth",user:"main",data:{hunters:h,d2c:d}}); }catch(e){} };
+  const addHunter = () => { const h=[...hunters,{name:"New hunter",channel:"Modern trade",loadedMo:90000,startMonths:0,newRev:0,contribPct:35,collected:100}]; setHunters(h); persistGrowth(h,d2c); };
+  const updHunter = (i,f,v) => { const h=hunters.map((x,idx)=>idx===i?{...x,[f]: f==="name"||f==="channel"?v:(parseFloat(v)||0)}:x); setHunters(h); persistGrowth(h,d2c); };
+  const delHunter = (i) => { const h=hunters.filter((_,idx)=>idx!==i); setHunters(h); persistGrowth(h,d2c); };
+  const updD2c = (f,v) => { const d={...d2c,[f]:v}; setD2c(d); persistGrowth(hunters,d); };
 
   // officer rollups
   function officerStats(off){
@@ -4155,7 +4162,7 @@ function Spectrum({ onClose, onSaveEntry }) {
       })()}
 
       <div style={{display:"flex",gap:6,marginBottom:12}}>
-        {[["upload","📤 Upload"],["orders","📋 Orders"],["officers","👥 Officers"],["products","📦 Products"],["reports","📊 Reports"],["costing","💠 Costing"]].map(([k,l])=>(
+        {[["upload","📤 Upload"],["orders","📋 Orders"],["officers","👥 Officers"],["products","📦 Products"],["reports","📊 Reports"],["costing","💠 Costing"],["growth","🚀 Growth"]].map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"8px",borderRadius:8,border:tab===k?"2px solid #5a3a9a":"1px solid #ccc",background:tab===k?"#f0eafa":"#fff",color:"#3a2a6a",fontWeight:700,cursor:"pointer",fontSize:12}}>{l}</button>
         ))}
       </div>
@@ -5024,6 +5031,82 @@ function Spectrum({ onClose, onSaveEntry }) {
             <div style={{fontSize:10,color:"#889",marginTop:5,fontStyle:"italic"}}>Only brands you've costed (RM entered) contribute here — add the rest to complete the verdict. Break-even needs total contribution ≥ {fmt(poolTotal)}.</div>
           </div>
         </div>
+        </div>;
+      })()}
+
+      {tab==="growth" && !IS_OWNER && <div style={{fontSize:12,color:"#777",background:"#f6f6f9",borderRadius:8,padding:14,textAlign:"center"}}>Growth engine is visible to management only.</div>}
+      {tab==="growth" && IS_OWNER && (()=>{
+        const ci={width:"100%",padding:"6px",borderRadius:6,border:"1px solid #cdd",fontSize:12,textAlign:"right",fontWeight:700};
+        const lab={fontSize:8.5,color:"#889",fontWeight:800,display:"block",marginBottom:2,textTransform:"uppercase"};
+        const ad=parseFloat(d2c.adSpend)||0, ord=parseFloat(d2c.orders)||0, rev=parseFloat(d2c.revenue)||0, rep=parseFloat(d2c.repeatOrders)||0;
+        const cogsP=(parseFloat(d2c.cogsPct)||0)/100, feeP=(parseFloat(d2c.feePct)||0)/100;
+        const roas=ad?rev/ad:0; const cac=ord?ad/ord:0; const aov=ord?rev/ord:0;
+        const grossPerOrder=aov*(1-cogsP-feeP); const netPerOrder=grossPerOrder-cac; const repeatRate=ord?rep/ord*100:0;
+        return <div>
+        <div style={{background:"#fbf3ee",border:"1px solid #e8c8a8",borderRadius:10,padding:"10px 12px",marginBottom:12}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#8a4a1a"}}>🏹 Track B — Hunters (new business only)</div>
+          <div style={{fontSize:10.5,color:"#8a6a4a",marginTop:3,lineHeight:1.5}}>Ring-fenced from the maintenance team. Paid on <b>contribution + collection</b>, never gross sales. <b>The VGK rule:</b> a hunter never controls his own collections or discount authority — he opens the account and earns on margin; a separate function collects and sets credit. Cut-line: hasn't cleared <b>~3× loaded cost in contribution by month 12</b> → not a hunter.</div>
+        </div>
+        {hunters.map((h,i)=>{
+          const loadedYr=(h.loadedMo||0)*12;
+          const contrib=(h.newRev||0)*((h.contribPct||0)/100)*((h.collected||0)/100);
+          const mult=loadedYr?contrib/loadedYr:0;
+          const cut=(h.startMonths||0)>=12 && mult<3;
+          const rampOk=(h.startMonths||0)<12;
+          return <div key={i} style={{border:"1px solid "+(cut?"#e0a0a0":"#e0dcec"),borderRadius:10,padding:12,marginBottom:10,background:cut?"#fdf3f3":"#fff"}}>
+            <div style={{display:"flex",gap:6,marginBottom:8,alignItems:"center"}}>
+              <input value={h.name} onChange={e=>updHunter(i,"name",e.target.value)} style={{flex:1,padding:"6px",borderRadius:6,border:"1px solid #ccd",fontSize:13,fontWeight:800,color:"#8a4a1a"}}/>
+              <button onClick={()=>delHunter(i)} style={{border:"none",background:"#f6eef0",color:"#c33",borderRadius:6,padding:"0 10px",cursor:"pointer",fontSize:16}}>×</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:6}}>
+              <div><label style={lab}>Channel</label><input value={h.channel} onChange={e=>updHunter(i,"channel",e.target.value)} style={{...ci,textAlign:"left",fontSize:11}}/></div>
+              <div><label style={lab}>Loaded ₹/mo</label><input type="number" value={h.loadedMo||""} onChange={e=>updHunter(i,"loadedMo",e.target.value)} style={ci}/></div>
+              <div><label style={lab}>Months in</label><input type="number" value={h.startMonths||""} onChange={e=>updHunter(i,"startMonths",e.target.value)} style={ci}/></div>
+              <div><label style={lab}>New rev ₹/yr</label><input type="number" value={h.newRev||""} onChange={e=>updHunter(i,"newRev",e.target.value)} style={ci}/></div>
+              <div><label style={lab}>Contrib %</label><input type="number" value={h.contribPct||""} onChange={e=>updHunter(i,"contribPct",e.target.value)} style={ci}/></div>
+              <div><label style={lab}>Collected %</label><input type="number" value={h.collected||""} onChange={e=>updHunter(i,"collected",e.target.value)} style={ci}/></div>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"6px 8px",background:"#faf8f5",borderRadius:7}}>
+              <span>Contribution: <b style={{color:"#1a7a3a"}}>{fmt(Math.round(contrib))}</b></span>
+              <span>vs loaded {fmt(loadedYr)} → <b style={{color:mult>=3?"#1a7a3a":(rampOk?"#c8860a":"#c33")}}>{mult.toFixed(1)}×</b></span>
+            </div>
+            <div style={{fontSize:10.5,marginTop:5,padding:"5px 8px",borderRadius:6,background:cut?"#fdeeee":(mult>=3?"#eef7ef":"#fff8ef"),color:cut?"#c33":(mult>=3?"#1a7a3a":"#8a5a1a"),fontWeight:700}}>
+              {cut?"✂ CUT-LINE: past 12 months and under 3× — this is not a hunter. Act."
+               : mult>=3?"✓ Keeper — clearing the bar. Scale this channel."
+               : rampOk?"⏳ Ramp ("+(h.startMonths||0)+"/12 mo) — on the clock. Needs 3× by month 12."
+               : "⚠ Under 3× — watch closely."}
+            </div>
+          </div>;
+        })}
+        <button onClick={addHunter} style={{padding:"9px 16px",borderRadius:8,border:"1px dashed #c8863a",background:"#fffaf3",color:"#8a4a1a",fontWeight:700,cursor:"pointer",fontSize:12.5,width:"100%",marginBottom:18}}>+ Add a hunter</button>
+
+        <div style={{background:"#eef4fb",border:"1px solid #c8d8ee",borderRadius:10,padding:"10px 12px",marginBottom:12}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#1a5a9a"}}>🛒 D2C dashboard — premium online</div>
+          <div style={{fontSize:10.5,color:"#5a6a8a",marginTop:3}}>The one law: <b>profit is in the repeat order.</b> Keep CAC below margin, gate ad spend on ROAS, watch repeat rate.</div>
+        </div>
+        <div style={{border:"1px solid #dde",borderRadius:10,padding:12,marginBottom:10,background:"#fff"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:8}}>
+            <div><label style={lab}>Ad spend ₹ (period)</label><input type="number" value={d2c.adSpend} onChange={e=>updD2c("adSpend",e.target.value)} style={ci}/></div>
+            <div><label style={lab}>Revenue ₹ (period)</label><input type="number" value={d2c.revenue} onChange={e=>updD2c("revenue",e.target.value)} style={ci}/></div>
+            <div><label style={lab}>Orders</label><input type="number" value={d2c.orders} onChange={e=>updD2c("orders",e.target.value)} style={ci}/></div>
+            <div><label style={lab}>Repeat orders</label><input type="number" value={d2c.repeatOrders} onChange={e=>updD2c("repeatOrders",e.target.value)} style={ci}/></div>
+            <div><label style={lab}>Product cost %</label><input type="number" value={d2c.cogsPct} onChange={e=>updD2c("cogsPct",e.target.value)} style={ci}/></div>
+            <div><label style={lab}>Marketplace fee %</label><input type="number" value={d2c.feePct} onChange={e=>updD2c("feePct",e.target.value)} style={ci}/></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+            <div style={{background:roas>=3?"#eef7ef":"#fdeeee",borderRadius:8,padding:"7px",textAlign:"center"}}><div style={{fontSize:8,color:"#889",fontWeight:800}}>ROAS</div><div style={{fontSize:15,fontWeight:800,color:roas>=3?"#1a7a3a":"#c33"}}>{roas.toFixed(1)}×</div></div>
+            <div style={{background:"#f7f7fa",borderRadius:8,padding:"7px",textAlign:"center"}}><div style={{fontSize:8,color:"#889",fontWeight:800}}>CAC</div><div style={{fontSize:15,fontWeight:800,color:"#5a3a9a"}}>{fmt(Math.round(cac))}</div></div>
+            <div style={{background:"#f7f7fa",borderRadius:8,padding:"7px",textAlign:"center"}}><div style={{fontSize:8,color:"#889",fontWeight:800}}>AOV</div><div style={{fontSize:15,fontWeight:800,color:"#333"}}>{fmt(Math.round(aov))}</div></div>
+            <div style={{background:netPerOrder>=0?"#eef7ef":"#fdeeee",borderRadius:8,padding:"7px",textAlign:"center"}}><div style={{fontSize:8,color:"#889",fontWeight:800}}>NET/ORDER</div><div style={{fontSize:15,fontWeight:800,color:netPerOrder>=0?"#1a7a3a":"#c33"}}>{fmt(Math.round(netPerOrder))}</div></div>
+            <div style={{background:repeatRate>=25?"#eef7ef":"#fff8ef",borderRadius:8,padding:"7px",textAlign:"center"}}><div style={{fontSize:8,color:"#889",fontWeight:800}}>REPEAT %</div><div style={{fontSize:15,fontWeight:800,color:repeatRate>=25?"#1a7a3a":"#8a5a1a"}}>{repeatRate.toFixed(0)}%</div></div>
+          </div>
+          <div style={{fontSize:10.5,marginTop:8,padding:"6px 9px",borderRadius:7,background:(roas>=3&&netPerOrder>=0)?"#eef7ef":"#fff8ef",color:(roas>=3&&netPerOrder>=0)?"#1a7a3a":"#8a5a1a",fontWeight:600}}>
+            {netPerOrder<0? "First orders losing money after CAC — normal early. Survives only if repeat climbs. Don't scale ad spend yet."
+             : roas>=3? "✓ Healthy — ROAS and net/order positive. Scalable; raise ad spend while ROAS holds."
+             : "Break-even zone — profit depends on repeat. Push subscription & email before scaling ads."}
+          </div>
+        </div>
+        <div style={{fontSize:10,color:"#999",fontStyle:"italic",marginBottom:10}}>Hunters create margin the caretaker team can't; D2C creates margin without any field team. Both close the ₹21L burden — tracked by numbers, not faith.</div>
         </div>;
       })()}
 
