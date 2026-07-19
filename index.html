@@ -4081,7 +4081,7 @@ function Spectrum({ onClose, onSaveEntry }) {
   const updHunter = (i,f,v) => { const h=hunters.map((x,idx)=>idx===i?{...x,[f]: f==="name"||f==="channel"?v:(parseFloat(v)||0)}:x); setHunters(h); persistGrowth(h,d2c,samples); };
   const delHunter = (i) => { const h=hunters.filter((_,idx)=>idx!==i); setHunters(h); persistGrowth(h,d2c,samples); };
   const updD2c = (f,v) => { const d={...d2c,[f]:v}; setD2c(d); persistGrowth(hunters,d,samples); };
-  const addSample = () => { const s=[...samples,{name:"New sampling channel",type:"Online insert",out:0,costPer:4,scanRate:8,convRate:30,ltv:1200}]; setSamples(s); persistGrowth(hunters,d2c,s); };
+  const addSample = () => { const s=[...samples,{name:"New sampling channel",type:"Cold — open",out:0,costPer:4,scanRate:8,convRate:30,ltv:1200,risk:"open"}]; setSamples(s); persistGrowth(hunters,d2c,s); };
   const updSample = (i,f,v) => { const s=samples.map((x,idx)=>idx===i?{...x,[f]: f==="name"||f==="type"?v:(parseFloat(v)||0)}:x); setSamples(s); persistGrowth(hunters,d2c,s); };
   const delSample = (i) => { const s=samples.filter((_,idx)=>idx!==i); setSamples(s); persistGrowth(hunters,d2c,s); };
 
@@ -5138,6 +5138,15 @@ function Spectrum({ onClose, onSaveEntry }) {
               <div><label style={lab}>Scan→cust %</label><input type="number" value={sm.convRate||""} onChange={e=>updSample(i,"convRate",e.target.value)} style={ci}/></div>
               <div><label style={lab}>Cust value ₹/yr</label><input type="number" value={sm.ltv||""} onChange={e=>updSample(i,"ltv",e.target.value)} style={ci}/></div>
             </div>
+            <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:6}}>
+              <label style={{fontSize:9,color:"#889",fontWeight:800}}>CHANNEL RISK</label>
+              <select value={sm.risk||"open"} onChange={e=>updSample(i,"risk",e.target.value)} style={{flex:1,padding:"5px",borderRadius:6,border:"1px solid "+(sm.risk==="contract"?"#e0a0a0":"#ccd"),fontSize:11,fontWeight:700,color:sm.risk==="contract"?"#c33":"#1a7a3a",background:sm.risk==="contract"?"#fdf3f3":"#f5fdf7"}}>
+                <option value="open">🟢 Open — no contract, sample freely</option>
+                <option value="warm-open">🟢 Warm base via open channels (cantonment temples/kirana/LPG)</option>
+                <option value="contract">🔴 Contractual (CSD / CPC) — CHECK AGREEMENT FIRST</option>
+              </select>
+            </div>
+            {sm.risk==="contract" && <div style={{fontSize:10,color:"#c33",background:"#fdeeee",border:"1px solid #f0c8c8",borderRadius:6,padding:"5px 8px",marginBottom:6}}>⚠ Contractual channel. Do NOT print QRs into this supply without checking the agreement — a QR driving direct sales can breach terms and risk the listing. If permitted, premium-range only (products the canteen doesn't stock), never same-SKU price competition.</div>}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
               <div style={{background:"#f7f7fa",borderRadius:7,padding:"6px",textAlign:"center"}}><div style={{fontSize:8,color:"#889",fontWeight:800}}>CUSTOMERS</div><div style={{fontSize:14,fontWeight:800,color:"#333"}}>{Math.round(custs)}</div></div>
               <div style={{background:cpa&&cpa<(sm.ltv||0)?"#eef7ef":"#fdeeee",borderRadius:7,padding:"6px",textAlign:"center"}}><div style={{fontSize:8,color:"#889",fontWeight:800}}>CPA</div><div style={{fontSize:14,fontWeight:800,color:cpa&&cpa<(sm.ltv||0)?"#1a7a3a":"#c33"}}>{fmt(Math.round(cpa))}</div></div>
