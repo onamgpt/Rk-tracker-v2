@@ -4081,8 +4081,8 @@ function Spectrum({ onClose, onSaveEntry }) {
   const updHunter = (i,f,v) => { const h=hunters.map((x,idx)=>idx===i?{...x,[f]: f==="name"||f==="channel"?v:(parseFloat(v)||0)}:x); setHunters(h); persistGrowth(h,d2c,samples); };
   const delHunter = (i) => { const h=hunters.filter((_,idx)=>idx!==i); setHunters(h); persistGrowth(h,d2c,samples); };
   const updD2c = (f,v) => { const d={...d2c,[f]:v}; setD2c(d); persistGrowth(hunters,d,samples); };
-  const addSample = () => { const s=[...samples,{name:"New sampling channel",type:"Cold — open",out:0,costPer:4,scanRate:8,convRate:30,ltv:1200,risk:"open"}]; setSamples(s); persistGrowth(hunters,d2c,s); };
-  const updSample = (i,f,v) => { const s=samples.map((x,idx)=>idx===i?{...x,[f]: f==="name"||f==="type"?v:(parseFloat(v)||0)}:x); setSamples(s); persistGrowth(hunters,d2c,s); };
+  const addSample = () => { const s=[...samples,{name:"New sampling channel",type:"Cold — open",officer:"",out:0,costPer:4,scanRate:8,convRate:30,ltv:1200,risk:"open"}]; setSamples(s); persistGrowth(hunters,d2c,s); };
+  const updSample = (i,f,v) => { const s=samples.map((x,idx)=>idx===i?{...x,[f]: (f==="name"||f==="type"||f==="risk"||f==="officer")?v:(parseFloat(v)||0)}:x); setSamples(s); persistGrowth(hunters,d2c,s); };
   const delSample = (i) => { const s=samples.filter((_,idx)=>idx!==i); setSamples(s); persistGrowth(hunters,d2c,s); };
 
   // officer rollups
@@ -5139,6 +5139,13 @@ function Spectrum({ onClose, onSaveEntry }) {
               <div><label style={lab}>Cust value ₹/yr</label><input type="number" value={sm.ltv||""} onChange={e=>updSample(i,"ltv",e.target.value)} style={ci}/></div>
             </div>
             <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:6}}>
+              <label style={{fontSize:9,color:"#889",fontWeight:800}}>OFFICER</label>
+              <select value={sm.officer||""} onChange={e=>updSample(i,"officer",e.target.value)} style={{flex:1,padding:"5px",borderRadius:6,border:"1px solid #ccd",fontSize:11,fontWeight:700,color:"#5a3a9a"}}>
+                <option value="">Unassigned / general</option>
+                {OFFICERS.map(o=><option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:6}}>
               <label style={{fontSize:9,color:"#889",fontWeight:800}}>CHANNEL RISK</label>
               <select value={sm.risk||"open"} onChange={e=>updSample(i,"risk",e.target.value)} style={{flex:1,padding:"5px",borderRadius:6,border:"1px solid "+(sm.risk==="contract"?"#e0a0a0":"#ccd"),fontSize:11,fontWeight:700,color:sm.risk==="contract"?"#c33":"#1a7a3a",background:sm.risk==="contract"?"#fdf3f3":"#f5fdf7"}}>
                 <option value="open">🟢 Open — no contract, sample freely</option>
@@ -5160,6 +5167,36 @@ function Spectrum({ onClose, onSaveEntry }) {
             </div>
           </div>;
         })}
+        {samples.length>0 && (()=>{
+          const agg=(keyFn)=>{
+            const m={};
+            samples.forEach(sm=>{
+              const k=keyFn(sm); if(!k) return;
+              const cost=(sm.out||0)*(sm.costPer||0);
+              const cust=(sm.out||0)*((sm.scanRate||0)/100)*((sm.convRate||0)/100);
+              if(!m[k])m[k]={out:0,cost:0,cust:0};
+              m[k].out+=(sm.out||0); m[k].cost+=cost; m[k].cust+=cust;
+            });
+            return Object.entries(m).map(([k,v])=>({k,...v,cpa:v.cust?v.cost/v.cust:0})).sort((a,b)=>b.cust-a.cust);
+          };
+          const byOff=agg(sm=>sm.officer||"");
+          const byChan=agg(sm=>sm.type||"");
+          const row=(x)=>(<div key={x.k} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"4px 8px",borderBottom:"1px solid #f0eef6"}}>
+            <span style={{fontWeight:700,color:"#3a2a6a",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{x.k}</span>
+            <span style={{color:"#667"}}>{Math.round(x.out).toLocaleString("en-IN")} out · <b style={{color:"#1a7a3a"}}>{Math.round(x.cust)}</b> cust · CPA <b style={{color:x.cpa&&x.cpa<1200?"#1a7a3a":"#c33"}}>{fmt(Math.round(x.cpa))}</b></span>
+          </div>);
+          return <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginBottom:10}}>
+            {byOff.length>0 && <div style={{background:"#f5f2fb",border:"1px solid #d8c8f0",borderRadius:8,padding:"8px 10px"}}>
+              <div style={{fontSize:11,fontWeight:800,color:"#5a3a9a",marginBottom:4}}>👤 By officer — objective field-effort proof</div>
+              {byOff.map(row)}
+              <div style={{fontSize:9,color:"#a58",fontStyle:"italic",marginTop:4}}>The scan is the referee — who actually distributed and converted, not who says they did.</div>
+            </div>}
+            {byChan.length>0 && <div style={{background:"#eef7ef",border:"1px solid #bfe0c5",borderRadius:8,padding:"8px 10px"}}>
+              <div style={{fontSize:11,fontWeight:800,color:"#1a7a3a",marginBottom:4}}>🎯 By channel — which sampling place converts</div>
+              {byChan.map(row)}
+            </div>}
+          </div>;
+        })()}
         <button onClick={addSample} style={{padding:"9px 16px",borderRadius:8,border:"1px dashed #4a9a5a",background:"#f5fdf7",color:"#1a7a3a",fontWeight:700,cursor:"pointer",fontSize:12.5,width:"100%",marginBottom:10}}>+ Add a sampling channel</button>
         </div>;
       })()}
