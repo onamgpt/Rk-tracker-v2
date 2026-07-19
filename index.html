@@ -3897,6 +3897,7 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [retireAge, setRetireAge] = useState(58);
   const [hunters,setHunters]=useState([]);   // {name, channel, loadedMo, startMonths, newRev, contribPct, collected}
   const [d2c,setD2c]=useState({adSpend:"",orders:"",revenue:"",repeatOrders:"",cogsPct:"22",feePct:"15"});
+  const [samples,setSamples]=useState([]);  // QR sampling channels
   const [photo, setPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(null);     // parsed order awaiting officer tag
@@ -3915,7 +3916,7 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [alertFloor,setAlertFloor]=useState(30); // contribution % floor for month-level watch alert
   useEffect(()=>{(async()=>{
     try{ const r=await sheetsAPI("getPortfolio",{key:"spectrum"}); if(r&&r.data){ setOrders(r.data.orders||[]); setExpenses({...WES_LEDGER, ...(r.data.expenses||{})}); } }catch(e){}
-    try{ const g=await sheetsAPI("getPortfolio",{key:"spectrum_growth",user:"main"}); if(g&&g.data){ if(Array.isArray(g.data.hunters)) setHunters(g.data.hunters); if(g.data.d2c) setD2c(x=>({...x,...g.data.d2c})); } }catch(e){}
+    try{ const g=await sheetsAPI("getPortfolio",{key:"spectrum_growth",user:"main"}); if(g&&g.data){ if(Array.isArray(g.data.hunters)) setHunters(g.data.hunters); if(g.data.d2c) setD2c(x=>({...x,...g.data.d2c})); if(Array.isArray(g.data.samples)) setSamples(g.data.samples); } }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFieldReports(f.data); }catch(e){}
     try{ const pm=await sheetsAPI("getPortfolio",{key:"spectrum_master",user:"main"}); if(pm&&pm.data&&Array.isArray(pm.data)&&pm.data.length) setMaster(pm.data); }catch(e){}
     try{ const c=await sheetsAPI("getPortfolio",{key:"spectrum_costing",user:"main"}); if(c&&c.data&&Array.isArray(c.data)&&c.data.length) setCostItems(c.data); }catch(e){}
@@ -4075,11 +4076,14 @@ function Spectrum({ onClose, onSaveEntry }) {
   const persistOffMeta = async (meta,ra) => { try{ await sheetsAPI("savePortfolio",{key:"spectrum_officermeta",user:"main",data:{meta,retireAge:ra}}); }catch(e){} };
   const setOffMeta = (off,field,val) => { const nm={...officerMeta,[off]:{...(officerMeta[off]||{}),[field]:val}}; setOfficerMeta(nm); persistOffMeta(nm,retireAge); };
   const setRetAge = (v) => { const n=Number(v)||0; setRetireAge(n); persistOffMeta(officerMeta,n); };
-  const persistGrowth = async (h,d) => { try{ await sheetsAPI("savePortfolio",{key:"spectrum_growth",user:"main",data:{hunters:h,d2c:d}}); }catch(e){} };
-  const addHunter = () => { const h=[...hunters,{name:"New hunter",channel:"Modern trade",loadedMo:90000,startMonths:0,newRev:0,contribPct:35,collected:100}]; setHunters(h); persistGrowth(h,d2c); };
-  const updHunter = (i,f,v) => { const h=hunters.map((x,idx)=>idx===i?{...x,[f]: f==="name"||f==="channel"?v:(parseFloat(v)||0)}:x); setHunters(h); persistGrowth(h,d2c); };
-  const delHunter = (i) => { const h=hunters.filter((_,idx)=>idx!==i); setHunters(h); persistGrowth(h,d2c); };
-  const updD2c = (f,v) => { const d={...d2c,[f]:v}; setD2c(d); persistGrowth(hunters,d); };
+  const persistGrowth = async (h,d,s) => { try{ await sheetsAPI("savePortfolio",{key:"spectrum_growth",user:"main",data:{hunters:h||hunters,d2c:d||d2c,samples:s||samples}}); }catch(e){} };
+  const addHunter = () => { const h=[...hunters,{name:"New hunter",channel:"Modern trade",loadedMo:90000,startMonths:0,newRev:0,contribPct:35,collected:100}]; setHunters(h); persistGrowth(h,d2c,samples); };
+  const updHunter = (i,f,v) => { const h=hunters.map((x,idx)=>idx===i?{...x,[f]: f==="name"||f==="channel"?v:(parseFloat(v)||0)}:x); setHunters(h); persistGrowth(h,d2c,samples); };
+  const delHunter = (i) => { const h=hunters.filter((_,idx)=>idx!==i); setHunters(h); persistGrowth(h,d2c,samples); };
+  const updD2c = (f,v) => { const d={...d2c,[f]:v}; setD2c(d); persistGrowth(hunters,d,samples); };
+  const addSample = () => { const s=[...samples,{name:"New sampling channel",type:"Online insert",out:0,costPer:4,scanRate:8,convRate:30,ltv:1200}]; setSamples(s); persistGrowth(hunters,d2c,s); };
+  const updSample = (i,f,v) => { const s=samples.map((x,idx)=>idx===i?{...x,[f]: f==="name"||f==="type"?v:(parseFloat(v)||0)}:x); setSamples(s); persistGrowth(hunters,d2c,s); };
+  const delSample = (i) => { const s=samples.filter((_,idx)=>idx!==i); setSamples(s); persistGrowth(hunters,d2c,s); };
 
   // officer rollups
   function officerStats(off){
@@ -5107,6 +5111,47 @@ function Spectrum({ onClose, onSaveEntry }) {
           </div>
         </div>
         <div style={{fontSize:10,color:"#999",fontStyle:"italic",marginBottom:10}}>Hunters create margin the caretaker team can't; D2C creates margin without any field team. Both close the ₹21L burden — tracked by numbers, not faith.</div>
+
+        {/* QR SAMPLING */}
+        <div style={{background:"#f0f7f0",border:"1px solid #bfe0c5",borderRadius:10,padding:"10px 12px",marginBottom:12}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#1a7a3a"}}>📎 QR sampling — your father's pouch, tracked</div>
+          <div style={{fontSize:10.5,color:"#3a6a4a",marginTop:3,lineHeight:1.5}}>The ₹1 two-stick pouch + a <b>QR code</b> = the undeniable lit sample, but now <b>tracked</b>. He handed out thousands blind; yours knows who scanned. Each channel: cost/sample (pouch + insert fee), scan rate, scan→customer conversion → <b>cost per acquired customer</b>. Scale only channels where CPA &lt; customer value.</div>
+        </div>
+        {samples.map((sm,i)=>{
+          const totalCost=(sm.out||0)*(sm.costPer||0);
+          const scans=(sm.out||0)*((sm.scanRate||0)/100);
+          const custs=scans*((sm.convRate||0)/100);
+          const cpa=custs?totalCost/custs:0;
+          const value=custs*(sm.ltv||0);
+          const roi=totalCost?value/totalCost:0;
+          const good=roi>=1.5, bad=totalCost>0&&roi<1;
+          return <div key={i} style={{border:"1px solid "+(bad?"#e0a0a0":"#dde5dd"),borderRadius:10,padding:12,marginBottom:10,background:bad?"#fdf3f3":"#fff"}}>
+            <div style={{display:"flex",gap:6,marginBottom:8,alignItems:"center"}}>
+              <input value={sm.name} onChange={e=>updSample(i,"name",e.target.value)} style={{flex:1,padding:"6px",borderRadius:6,border:"1px solid #ccd",fontSize:13,fontWeight:800,color:"#1a5a3a"}}/>
+              <button onClick={()=>delSample(i)} style={{border:"none",background:"#f6eef0",color:"#c33",borderRadius:6,padding:"0 10px",cursor:"pointer",fontSize:16}}>×</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:6}}>
+              <div><label style={lab}>Type</label><input value={sm.type} onChange={e=>updSample(i,"type",e.target.value)} style={{...ci,textAlign:"left",fontSize:10.5}}/></div>
+              <div><label style={lab}>Samples out</label><input type="number" value={sm.out||""} onChange={e=>updSample(i,"out",e.target.value)} style={ci}/></div>
+              <div><label style={lab}>Cost/sample ₹</label><input type="number" value={sm.costPer||""} onChange={e=>updSample(i,"costPer",e.target.value)} style={ci}/></div>
+              <div><label style={lab}>Scan rate %</label><input type="number" value={sm.scanRate||""} onChange={e=>updSample(i,"scanRate",e.target.value)} style={ci}/></div>
+              <div><label style={lab}>Scan→cust %</label><input type="number" value={sm.convRate||""} onChange={e=>updSample(i,"convRate",e.target.value)} style={ci}/></div>
+              <div><label style={lab}>Cust value ₹/yr</label><input type="number" value={sm.ltv||""} onChange={e=>updSample(i,"ltv",e.target.value)} style={ci}/></div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+              <div style={{background:"#f7f7fa",borderRadius:7,padding:"6px",textAlign:"center"}}><div style={{fontSize:8,color:"#889",fontWeight:800}}>CUSTOMERS</div><div style={{fontSize:14,fontWeight:800,color:"#333"}}>{Math.round(custs)}</div></div>
+              <div style={{background:cpa&&cpa<(sm.ltv||0)?"#eef7ef":"#fdeeee",borderRadius:7,padding:"6px",textAlign:"center"}}><div style={{fontSize:8,color:"#889",fontWeight:800}}>CPA</div><div style={{fontSize:14,fontWeight:800,color:cpa&&cpa<(sm.ltv||0)?"#1a7a3a":"#c33"}}>{fmt(Math.round(cpa))}</div></div>
+              <div style={{background:good?"#eef7ef":(bad?"#fdeeee":"#fff8ef"),borderRadius:7,padding:"6px",textAlign:"center"}}><div style={{fontSize:8,color:"#889",fontWeight:800}}>ROI</div><div style={{fontSize:14,fontWeight:800,color:good?"#1a7a3a":(bad?"#c33":"#8a5a1a")}}>{roi.toFixed(1)}×</div></div>
+            </div>
+            <div style={{fontSize:10.5,marginTop:6,padding:"5px 8px",borderRadius:6,background:good?"#eef7ef":(bad?"#fdeeee":"#fff8ef"),color:good?"#1a7a3a":(bad?"#c33":"#8a5a1a"),fontWeight:700}}>
+              {totalCost===0?"Enter numbers to score this channel."
+               :good?"✓ Scale this channel — every ₹1 of sampling returns ₹"+roi.toFixed(1)+"."
+               :bad?"✂ Not converting — CPA above customer value. Fix the QR offer or drop this channel."
+               :"Marginal — improve scan rate (better offer) or conversion before scaling."}
+            </div>
+          </div>;
+        })}
+        <button onClick={addSample} style={{padding:"9px 16px",borderRadius:8,border:"1px dashed #4a9a5a",background:"#f5fdf7",color:"#1a7a3a",fontWeight:700,cursor:"pointer",fontSize:12.5,width:"100%",marginBottom:10}}>+ Add a sampling channel</button>
         </div>;
       })()}
 
