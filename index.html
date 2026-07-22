@@ -3324,7 +3324,8 @@ function CSDPayments({ orders, onUpdateDepot, onClose }) {
         "This is a CSD (Canteen Stores Department) official payment/realisation statement, listing bills grouped under UTR numbers, with bill amount, CR note, DB note (debit note), TDS, and depot code for each line, then a grand total at the end.\\n" +
         "Return ONLY JSON in exactly this shape (example values):\\n" + shape + "\\n" +
         "Include every bill/debit line across all UTR groups in one flat 'bills' array, each carrying its own utr and utrDate. Use the final grand-total block for 'totals'. Dates as YYYY-MM-DD.";
-      const txt = await claudeAPI(prompt, "Return ONLY valid JSON. Read every line of every UTR block, do not skip any.", b64, photo.type, "");
+      const isPdf=(photo.type||"").indexOf("pdf")>-1;
+      const txt = await claudeAPI(prompt, "Return ONLY valid JSON. Read every line of every UTR block, do not skip any.", isPdf?"":b64, isPdf?"":photo.type, isPdf?b64:"");
       const clean = String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
       const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
       const obj = JSON.parse(s>=0 ? clean.substring(s,e+1) : clean);
@@ -3519,7 +3520,8 @@ function CSD({ onClose, onSaveEntry }) {
         "Return ONLY JSON in exactly this shape (this is an example, use the real values):\n" + shape + "\n" +
         "The allocation table lists depot names down the left, and one column of case counts per index number. Map each depot to its cases for each index. A blank cell means zero - omit it.\n" +
         "Dates as YYYY-MM-DD.";
-      const txt = await claudeAPI(prompt, "Return ONLY valid JSON. Read the depot allocation table carefully, column by column.", b64, photo.type, "");
+      const isPdf=(photo.type||"").indexOf("pdf")>-1;
+      const txt = await claudeAPI(prompt, "Return ONLY valid JSON. Read the depot allocation table carefully, column by column.", isPdf?"":b64, isPdf?"":photo.type, isPdf?b64:"");
       const clean = String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
       const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
       const obj = JSON.parse(s>=0 ? clean.substring(s,e+1) : clean);
@@ -3558,7 +3560,8 @@ function CSD({ onClose, onSaveEntry }) {
         "This is a TENTATIVE order quantity sheet from the Canteen Stores Department (CSD) — depots down the left, product index numbers across the top (13094, 13095, 13130, 13132), case counts in the cells.\n" +
         "Return ONLY JSON in exactly this shape (example values):\n" + fshape + "\n" +
         "Include every depot row. Zeros are fine. Ignore the Grand Total row. 'period' is the month it is for.";
-      const txt = await claudeAPI(fprompt, "Return ONLY valid JSON. Read the table cell by cell, carefully.", b64, photo.type, "");
+      const isPdf=(photo.type||"").indexOf("pdf")>-1;
+      const txt = await claudeAPI(fprompt, "Return ONLY valid JSON. Read the table cell by cell, carefully.", isPdf?"":b64, isPdf?"":photo.type, isPdf?b64:"");
       const clean = String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
       const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
       const obj = JSON.parse(s>=0 ? clean.substring(s,e+1) : clean);
