@@ -1118,6 +1118,30 @@ function LogisticsTracker({entries,onClose,onUpdateEntry,onNewSalesOrder}){
     const updated={...entry,tags:newTags};
     if(stageIdx>=3&&entry.paymentStatus!=="Paid")updated.paymentStatus="Paid"; // Payment Received also closes payment status
     await onUpdateEntry(updated);
+    // When marked Despatched (stage 0), auto-schedule a 15-day follow-up to Prakash for Kerala/Tamil Nadu orders
+    if(stageIdx===0){
+      const blob=((entry.title||"")+" "+(entry.person||"")+" "+(entry.vendor||"")+" "+(entry.notes||"")).toLowerCase();
+      const isSouth=/keral|kochi|cochin|kozhikode|calicut|trivandrum|thrissur|kannur|kollam|malappuram|tamil|chennai|coimbatore|madurai|salem|trichy|tirupur|erode/.test(blob);
+      if(isSouth) scheduleFollowup(entry, 15, "Kerala/Tamil Nadu");
+    }
+  };
+
+  const scheduleFollowup=async(entry, days, region)=>{
+    try{
+      // Find Prakash's Telegram chatId
+      const cr=await sheetsAPI("getPortfolio",{key:"tg_contacts"});
+      const contacts=(cr&&cr.data&&Array.isArray(cr.data))?cr.data:[];
+      const prakash=contacts.find(c=>/prakash/i.test(c.label||c.name||""));
+      if(!prakash){ alert("Scheduled note saved, but Prakash isn't in Telegram contacts yet — sync him in Menu → Telegram."); }
+      const when=new Date(); when.setDate(when.getDate()+days); when.setHours(10,0,0,0);
+      const amt=entry.amount?(" — ₹"+entry.amount):"";
+      const text="⏰ Follow-up ("+region+"): "+(entry.title||"Order")+amt+"\nDespatched "+days+" days ago — check delivery & payment status.";
+      const cur=await sheetsAPI("getPortfolio",{key:"tg_scheduled"});
+      const list=(cur&&cur.data&&Array.isArray(cur.data.scheduled))?cur.data.scheduled:[];
+      list.push({ id:"tg_"+Date.now(), text, chatIds: prakash?[prakash.chatId]:[], when:when.toISOString(), repeat:"once", created:new Date().toISOString() });
+      await sheetsAPI("savePortfolio",{key:"tg_scheduled",data:{scheduled:list}});
+      if(prakash) alert("✓ 15-day follow-up scheduled to Prakash on Telegram for this "+region+" order.");
+    }catch(e){ alert("Couldn't schedule reminder: "+e.message); }
   };
 
   const uploadDoc=(entry,stageName)=>{
@@ -1176,7 +1200,10 @@ function LogisticsTracker({entries,onClose,onUpdateEntry,onNewSalesOrder}){
           </div>;
         })}
       </div>
-      <div style={{display:"flex",justifyContent:"flex-end"}}><button className="bgh" onClick={()=>setSelectedId(null)}>Back to list</button></div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+        <button onClick={()=>scheduleFollowup(selected,15,"manual")} style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid #0088cc",background:"#e8f4fb",color:"#005f8f",cursor:"pointer",fontSize:12,fontWeight:700}}>⏰ Remind Prakash in 15d</button>
+        <button className="bgh" onClick={()=>setSelectedId(null)}>Back to list</button>
+      </div>
     </div>;
   }
 
