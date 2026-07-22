@@ -2400,7 +2400,8 @@ function PurchaseSalesCapture({ mode, onSaveEntry, onClose }) {
       const prompt =
 "Read this " + label + " bill/invoice/order image. Extract the key details for a business ledger entry.\\n" +
 "Return ONLY JSON: {\\\"party\\\":\\\"<" + who + ">\\\",\\\"date\\\":\\\"<YYYY-MM-DD or blank>\\\",\\\"invoiceNo\\\":\\\"<number or blank>\\\",\\\"amount\\\":<total amount as number>,\\\"items\\\":\\\"<short summary of items>\\\",\\\"notes\\\":\\\"<anything useful like GST, terms>\\\"}. Use numbers only for amount (no currency symbol). If unclear, leave blank/0.";
-      const txt = await claudeAPI(prompt, "Return ONLY valid JSON. Extract accurately from the bill.", b64, photo.type, "");
+      const isPdf = (photo.type||"").indexOf("pdf") > -1;
+      const txt = await claudeAPI(prompt, "Return ONLY valid JSON. Extract accurately from the bill.", isPdf ? "" : b64, isPdf ? "" : photo.type, isPdf ? b64 : "");
       const clean = String(txt || "").replace(/```json/g, "").replace(/```/g, "").trim();
       const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
       const obj = JSON.parse(s >= 0 ? clean.substring(s, e + 1) : clean);
@@ -2452,13 +2453,15 @@ function PurchaseSalesCapture({ mode, onSaveEntry, onClose }) {
       {!photo && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           <button onClick={() => camRef.current && camRef.current.click()} style={bigBtn("linear-gradient(135deg," + accent + ",#333)")}>📸 Camera</button>
-          <button onClick={() => galRef.current && galRef.current.click()} style={bigBtn("linear-gradient(135deg,#555,#333)")}>🖼️ Gallery / File</button>
+          <button onClick={() => galRef.current && galRef.current.click()} style={bigBtn("linear-gradient(135deg,#555,#333)")}>🖼️ Gallery / 📄 PDF / File</button>
         </div>
       )}
 
       {photo && (
         <div style={{ textAlign: "center", marginBottom: 12 }}>
-          <img src={photo.dataUrl} alt="bill" style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 8, border: "1px solid #ddd" }} />
+          {(photo.type||"").indexOf("pdf")>-1
+            ? <div style={{ padding:"18px", background:"#f4f0fa", borderRadius:8, border:"1px solid #d8c8f0", fontSize:13, color:"#5a3a9a", fontWeight:700 }}>📄 PDF ready — {photo.name || "document"}</div>
+            : <img src={photo.dataUrl} alt="bill" style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 8, border: "1px solid #ddd" }} />}
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             {!parsed && <button onClick={scan} disabled={busy} style={bigBtn(accent)}>{busy ? "⏳ Reading…" : "🔍 Read the bill"}</button>}
             <button onClick={() => { setPhoto(null); setParsed(null); setMsg(""); }} style={{ ...bigBtn("#888"), flex: parsed ? 1 : 0.4 }}>↺ Retake</button>
@@ -3995,7 +3998,8 @@ function Spectrum({ onClose, onSaveEntry }) {
     try{
       const b64=String(photo.dataUrl).split(",")[1];
       const prompt="Read this sales order / purchase order. Extract each line item. For each line return the SKU code (like ONAONA002xxx if present), the product name, and the ordered quantity in DOZENS (if the qty is in Cases or Pieces, convert: note pieces and cases; a 'Case = N Piece' means that many pieces; 12 pieces = 1 dozen). Also extract customer name, order/PO number, date, and grand total if shown.\\nReturn ONLY JSON: {\"customer\":\"\",\"orderNo\":\"\",\"date\":\"\",\"grandTotal\":<number or 0>,\"lines\":[{\"sku\":\"\",\"name\":\"\",\"pieces\":<number>,\"dozens\":<number>}]}";
-      const txt=await claudeAPI(prompt,"Return ONLY valid JSON. Convert quantities to dozens where possible.",b64,photo.type,"");
+      const isPdf=(photo.type||"").indexOf("pdf")>-1;
+      const txt=await claudeAPI(prompt,"Return ONLY valid JSON. Convert quantities to dozens where possible.",isPdf?"":b64,isPdf?"":photo.type,isPdf?b64:"");
       const clean=String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
       const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
       const obj=JSON.parse(s>=0?clean.substring(s,e+1):clean);
@@ -4184,10 +4188,10 @@ function Spectrum({ onClose, onSaveEntry }) {
       {msg && <div style={{fontSize:12,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:8}}>{msg}</div>}
 
       {tab==="upload" && <div>
-        <input ref={fileRef} type="file" accept="image/*" onChange={onPick} style={{display:"none"}}/>
-        <button onClick={()=>fileRef.current&&fileRef.current.click()} style={{width:"100%",padding:"11px",borderRadius:10,border:"1.5px dashed #7a5aba",background:"#f5f0fc",color:"#4a2a8a",fontWeight:700,fontSize:14,cursor:"pointer",marginBottom:10}}>📄 Upload / snap the sales order</button>
+        <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={onPick} style={{display:"none"}}/>
+        <button onClick={()=>fileRef.current&&fileRef.current.click()} style={{width:"100%",padding:"11px",borderRadius:10,border:"1.5px dashed #7a5aba",background:"#f5f0fc",color:"#4a2a8a",fontWeight:700,fontSize:14,cursor:"pointer",marginBottom:10}}>📄 Upload / snap sales order (photo or PDF)</button>
         {photo && <div style={{textAlign:"center",marginBottom:10}}>
-          <img src={photo.dataUrl} alt="order" style={{maxWidth:"100%",maxHeight:160,borderRadius:8,border:"1px solid #ddd"}}/>
+          {(photo.type||"").indexOf("pdf")>-1 ? <div style={{padding:"16px",background:"#f4f0fa",borderRadius:8,border:"1px solid #d8c8f0",fontSize:13,color:"#5a3a9a",fontWeight:700}}>📄 PDF ready — {photo.name||"sales order"}</div> : <img src={photo.dataUrl} alt="order" style={{maxWidth:"100%",maxHeight:160,borderRadius:8,border:"1px solid #ddd"}}/>}
           <button onClick={scanOrder} disabled={busy} className="bg" style={{width:"100%",marginTop:8}}>{busy?"⏳ Reading…":"🔍 Scan & match products"}</button>
         </div>}
 
