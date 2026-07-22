@@ -7222,15 +7222,15 @@ function App(){
                 {l:"📊 Tally",fn:()=>setShowTally(true), ownerOnly:true},
                 {l:"📍 Location",fn:()=>setShowLocation(true), ownerOnly:true},
                 {l:"📒 Day Book",fn:()=>setShowDayBook(true)},
-                {l:"🏥 Health",fn:()=>setShowHealth(true)},
-                {l:"🏋️ Gym",fn:()=>setShowGym(true)},
-                {l:"👨‍👩‍👧 Family",fn:()=>setShowFamily(true)},
+                {l:"🏥 Health",fn:()=>setShowHealth(true), personalOnly:true},
+                {l:"🏋️ Gym",fn:()=>setShowGym(true), personalOnly:true},
+                {l:"👨‍👩‍👧 Family",fn:()=>setShowFamily(true), personalOnly:true},
                 {l:"💬 Remind",fn:()=>setShowPaymentReminders(true), ownerOnly:true},
                 {l:"🚚 Logistics",fn:()=>setShowLogistics(true), ownerOnly:true},
                 {l:"📧 Email Scan",fn:()=>setShowEmailScan(true), ownerOnly:true},
                 {l:"🔗 Share",fn:()=>setShowShare(true)},
                 {l:"⚙️ Settings",fn:()=>setShowDD(true)}
-              ].filter(item => !item.ownerOnly || IS_OWNER).map(it=><button key={it.l} onClick={()=>{setNavMenuOpen(false);it.fn();}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:6,border:"none",background:"transparent",color:"#f0dcae",cursor:"pointer",fontSize:13,fontWeight:600}}>{it.l}</button>)}
+              ].filter(item => (!item.ownerOnly || IS_OWNER) && (!item.personalOnly || IS_OWNER || IS_FAMILY)).map(it=><button key={it.l} onClick={()=>{setNavMenuOpen(false);it.fn();}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:6,border:"none",background:"transparent",color:"#f0dcae",cursor:"pointer",fontSize:13,fontWeight:600}}>{it.l}</button>)}
             </div>}
           </div>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
