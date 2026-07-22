@@ -13,6 +13,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:#fdf8ef;font-family:'Palatino Linotype','Book Antiqua',Palatino,serif;color:#2a1a00;-webkit-tap-highlight-color:transparent;}
@@ -2971,6 +2973,197 @@ function TelegramTeam({ onClose }) {
 }
 
 
+function BankArchive({ onClose }) {
+  const [txns, setTxns] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [q, setQ] = useState("");
+  const [month, setMonth] = useState("");     // YYYY-MM
+  const [dir, setDir] = useState("all");      // all | credit | debit
+  const [limit, setLimit] = useState(100);
+  const fileRef = useRef(null);
+
+  useEffect(() => { (async () => {
+    try { const r = await sheetsAPI("getPortfolio", { key: "bank_archive" }); if (r && r.data && Array.isArray(r.data.txns)) setTxns(r.data.txns); } catch(e) {}
+    setLoaded(true);
+  })(); }, []);
+
+  const persist = async (list) => { try { await sheetsAPI("savePortfolio", { key: "bank_archive", data: { txns: list } }); } catch(e) { setMsg("Saved on screen but cloud save failed — check connection."); } };
+
+  const money = v => { const n = parseFloat(String(v==null?"":v).replace(/[^0-9.\-]/g, "")); return isNaN(n) ? 0 : n; };
+  const fmt = n => "₹" + Math.round(n).toLocaleString("en-IN");
+
+  // Normalise a parsed CSV row into our shape by guessing common column names
+  const normalise = (row) => {
+    const keys = Object.keys(row);
+    const find = (...names) => {
+      for (const n of names) {
+        const k = keys.find(k => k.toLowerCase().replace(/[^a-z]/g,"").includes(n));
+        if (k) return row[k];
+      }
+      return "";
+    };
+    const dateRaw = find("date", "txndate", "valuedate", "transactiondate");
+    const desc = find("narration", "description", "particular", "remarks", "details");
+    let credit = money(find("credit", "deposit", "cr", "creditamount"));
+    let debit  = money(find("debit", "withdrawal", "dr", "debitamount"));
+    const amt  = money(find("amount"));
+    // If single 'amount' column with sign
+    if (!credit && !debit && amt) { if (amt >= 0) credit = amt; else debit = Math.abs(amt); }
+    const bal  = money(find("balance", "closingbalance", "runningbalance"));
+    const ref  = find("chqno", "chequeno", "reference", "refno", "utr", "instrumentno");
+    // Parse date to YYYY-MM-DD
+    let date = "";
+    if (dateRaw) {
+      const s = String(dateRaw).trim();
+      const m1 = s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+      const m2 = s.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+      if (m2) date = m2[1] + "-" + String(m2[2]).padStart(2,"0") + "-" + String(m2[3]).padStart(2,"0");
+      else if (m1) { let y = m1[3]; if (y.length===2) y = "20"+y; date = y + "-" + String(m1[2]).padStart(2,"0") + "-" + String(m1[1]).padStart(2,"0"); }
+      else date = s;
+    }
+    return { date, desc: String(desc||"").trim(), credit, debit, bal, ref: String(ref||"").trim() };
+  };
+
+  const ingestRows = async (rawRows) => {
+    const rows = (rawRows || []).map(normalise).filter(t => t.date && (t.credit || t.debit));
+    if (!rows.length) { setMsg("No transactions found. Is this a bank CSV/Excel export with a header row?"); setBusy(false); return; }
+    const key = t => t.date + "|" + t.credit + "|" + t.debit + "|" + t.ref + "|" + (t.desc||"").slice(0,30);
+    const seen = new Set(txns.map(key));
+    const fresh = rows.filter(t => !seen.has(key(t)));
+    const merged = [...txns, ...fresh].sort((a,b) => (b.date||"").localeCompare(a.date||""));
+    setTxns(merged); await persist(merged);
+    setMsg("✓ Added " + fresh.length + " new transaction(s)" + (rows.length-fresh.length>0 ? (" (" + (rows.length-fresh.length) + " already there)") : ""));
+    setBusy(false);
+  };
+
+  const onFile = (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    setBusy(true); setMsg("📄 Reading " + f.name + "…");
+    const name = (f.name||"").toLowerCase();
+    if (name.endsWith(".xls") || name.endsWith(".xlsx")) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array" });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
+          ingestRows(json);
+        } catch (err) { setMsg("Couldn't read Excel: " + err.message); setBusy(false); }
+      };
+      reader.readAsArrayBuffer(f);
+      return;
+    }
+    Papa.parse(f, {
+      header: true, skipEmptyLines: true,
+      complete: (res) => { ingestRows(res.data || []); },
+      error: (e) => { setMsg("Parse error: " + e.message); setBusy(false); }
+    });
+  };
+
+  // Filtered slice — never render everything
+  const filtered = txns.filter(t => {
+    if (month && !(t.date||"").startsWith(month)) return false;
+    if (dir === "credit" && !t.credit) return false;
+    if (dir === "debit" && !t.debit) return false;
+    if (q) {
+      const hay = (t.desc + " " + t.ref + " " + t.credit + " " + t.debit).toLowerCase();
+      if (!hay.includes(q.toLowerCase())) return false;
+    }
+    return true;
+  });
+  const shown = filtered.slice(0, limit);
+  const totCr = filtered.reduce((s,t) => s + t.credit, 0);
+  const totDr = filtered.reduce((s,t) => s + t.debit, 0);
+
+  // Month options from data
+  const months = Array.from(new Set(txns.map(t => (t.date||"").slice(0,7)).filter(Boolean))).sort().reverse();
+
+  const clearAll = async () => {
+    if (!window.confirm("Remove ALL archived bank transactions? This cannot be undone.")) return;
+    setTxns([]); await persist([]); setMsg("Archive cleared.");
+  };
+
+  const inp = { width:"100%", padding:"9px", borderRadius:8, border:"1px solid #ccd", fontSize:13 };
+  if (!loaded) return <div style={{padding:20,textAlign:"center",color:"#888"}}>Loading archive…</div>;
+
+  return (
+    <div style={{ padding: 4 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+        <span style={{ fontSize:26 }}>🏦</span>
+        <div><h2 style={{ margin:0, fontSize:18, color:"#1a4a7a" }}>Bank Archive</h2>
+        <div style={{ fontSize:11, color:"#6a7a8a" }}>Searchable statement history · {txns.length} transactions</div></div>
+      </div>
+
+      <input ref={fileRef} type="file" accept=".csv,.xls,.xlsx,text/csv" onChange={onFile} style={{ display:"none" }} />
+      <button onClick={()=>fileRef.current&&fileRef.current.click()} disabled={busy} style={{ width:"100%", padding:"11px", borderRadius:10, border:"1.5px dashed #4a7aba", background:"#eef4fc", color:"#1a4a8a", fontWeight:700, fontSize:14, cursor:"pointer", marginBottom:10 }}>
+        {busy ? "⏳ Reading…" : "📥 Import bank statement (CSV / Excel export)"}
+      </button>
+      {msg && <div style={{ fontSize:12, color: msg[0]==="✓"?"#1a7a3a":"#a33", marginBottom:10 }}>{msg}</div>}
+
+      {txns.length > 0 && <>
+        {/* Filters */}
+        <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+          <input value={q} onChange={e=>{setQ(e.target.value); setLimit(100);}} placeholder="🔍 search dealer, reference, amount…" style={{...inp, flex:2}} />
+        </div>
+        <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+          <select value={month} onChange={e=>{setMonth(e.target.value); setLimit(100);}} style={{...inp, flex:1}}>
+            <option value="">All months</option>
+            {months.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+          <select value={dir} onChange={e=>{setDir(e.target.value); setLimit(100);}} style={{...inp, flex:1}}>
+            <option value="all">All</option>
+            <option value="credit">Credits (in)</option>
+            <option value="debit">Debits (out)</option>
+          </select>
+        </div>
+
+        {/* Totals for current filter */}
+        <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+          <div style={{ flex:1, background:"#eefaf0", border:"1px solid #a8d8b8", borderRadius:8, padding:"6px 10px", fontSize:11.5 }}>
+            <div style={{ color:"#888" }}>Credits</div><div style={{ fontWeight:800, color:"#1a7a3a", fontSize:14 }}>{fmt(totCr)}</div>
+          </div>
+          <div style={{ flex:1, background:"#fdf0f0", border:"1px solid #e0b0b0", borderRadius:8, padding:"6px 10px", fontSize:11.5 }}>
+            <div style={{ color:"#888" }}>Debits</div><div style={{ fontWeight:800, color:"#a33", fontSize:14 }}>{fmt(totDr)}</div>
+          </div>
+        </div>
+
+        <div style={{ fontSize:11, color:"#888", marginBottom:6 }}>
+          Showing {shown.length} of {filtered.length} matching{filtered.length>txns.length?"":""} · {txns.length} total
+        </div>
+
+        {/* Transaction rows */}
+        {shown.map((t, i) => (
+          <div key={i} style={{ display:"flex", justifyContent:"space-between", gap:8, padding:"7px 4px", borderBottom:"1px solid #eee" }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:12.5, color:"#233", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{t.desc || "—"}</div>
+              <div style={{ fontSize:10.5, color:"#999" }}>{t.date}{t.ref?(" · "+t.ref):""}</div>
+            </div>
+            <div style={{ textAlign:"right", whiteSpace:"nowrap" }}>
+              {t.credit>0 && <div style={{ fontSize:13, fontWeight:700, color:"#1a7a3a" }}>+{fmt(t.credit)}</div>}
+              {t.debit>0 && <div style={{ fontSize:13, fontWeight:700, color:"#a33" }}>−{fmt(t.debit)}</div>}
+              {t.bal>0 && <div style={{ fontSize:10, color:"#aaa" }}>bal {fmt(t.bal)}</div>}
+            </div>
+          </div>
+        ))}
+
+        {filtered.length > limit && <button onClick={()=>setLimit(l=>l+200)} style={{ width:"100%", marginTop:10, padding:"9px", borderRadius:8, border:"1px solid #ccd", background:"#f7f9fc", color:"#1a4a8a", cursor:"pointer", fontSize:13, fontWeight:600 }}>
+          Show more ({filtered.length - limit} more)
+        </button>}
+
+        <button onClick={clearAll} style={{ marginTop:14, fontSize:11, border:"none", background:"none", color:"#c33", cursor:"pointer", textDecoration:"underline" }}>Clear entire archive</button>
+      </>}
+
+      <div style={{ fontSize:10, color:"#999", marginTop:12, fontStyle:"italic" }}>
+        This is a searchable reference built from your bank's own CSV/Excel export. Only a filtered slice is shown at a time, so it stays fast even with a full year of statements. Your bank and Tally remain the source of truth.
+      </div>
+    </div>
+  );
+}
+
+
 function RulesEngine({ entries, onSaveEntry, onClose }) {
   const [rules, setRules] = useState([]);
   const [newRule, setNewRule] = useState("");
@@ -3543,9 +3736,19 @@ function CSD({ onClose, onSaveEntry }) {
       lines: pending.lines || [], depots
     };
     const no = [o, ...orders];
-    setOrders(no); setPending(null); setPhoto(null);
-    setMsg("✓ PO " + (o.poNo||"") + " saved with " + depots.length + " depots");
-    await persist(no);
+    // Forecast = PO: auto-seed a matching forecast so no separate upload is needed
+    const fcRows = depots.map(d => ({ depot: d.depot, cases: d.cases||{} }));
+    const fc = {
+      id: "fc_" + Date.now(),
+      period: pending.poDate || new Date().toISOString().slice(0,10),
+      fromPO: o.poNo || "",
+      added: new Date().toISOString().slice(0,10),
+      rows: fcRows
+    };
+    const nf = [fc, ...forecasts];
+    setOrders(no); setForecasts(nf); setPending(null); setPhoto(null);
+    setMsg("✓ PO " + (o.poNo||"") + " saved (" + depots.length + " depots) — Forecast auto-filled too");
+    await persist(no, nf);
     setTimeout(()=>setMsg(""), 3000);
   };
 
@@ -6823,6 +7026,7 @@ function App(){
   const [showTelegram,setShowTelegram]=useState(false);
   const [showGym,setShowGym]=useState(false);
   const [showRecv,setShowRecv]=useState(false);
+  const [showBank,setShowBank]=useState(false);
   const [tgShareEntry,setTgShareEntry]=useState(null);
   const [capMode,setCapMode]=useState(null); // "purchase" | "sales" | null
   const [showFieldReport,setShowFieldReport]=useState(false);
@@ -7241,6 +7445,7 @@ function App(){
             {navMenuOpen&&<div style={{position:"absolute",top:"112%",left:0,zIndex:950,background:"#2a2318",border:"1px solid #c8a060",borderRadius:10,padding:5,minWidth:180,boxShadow:"0 8px 22px rgba(0,0,0,.5)"}}>
               {[
                 {l:"📈 CFO Brief",fn:()=>setShowCFO(true), ownerOnly:true},
+                {l:"🏦 Bank Archive",fn:()=>setShowBank(true), ownerOnly:true},
                 {l:"💰 Receivables",fn:()=>setShowRecv(true), ownerOnly:true},
                 {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true), ownerOnly:true},
                 {l:"🛡️ CSD",fn:()=>setShowCSD(true), ownerOnly:true},
@@ -7514,6 +7719,7 @@ function App(){
     <Modal open={showTelegram && IS_OWNER} onClose={()=>setShowTelegram(false)}><TelegramTeam onClose={()=>setShowTelegram(false)}/></Modal>
     <Modal open={showGym} onClose={()=>setShowGym(false)}><GymLog entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowGym(false)}/></Modal>
     <Modal open={showRecv && IS_OWNER} onClose={()=>setShowRecv(false)}><Receivables entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRecv(false)}/></Modal>
+    <Modal open={showBank && IS_OWNER} onClose={()=>setShowBank(false)} wide><BankArchive onClose={()=>setShowBank(false)}/></Modal>
     <Modal open={!!tgShareEntry} onClose={()=>setTgShareEntry(null)}><TelegramShare entry={tgShareEntry} onClose={()=>setTgShareEntry(null)}/></Modal>
     <Modal open={!!capMode} onClose={()=>setCapMode(null)}><PurchaseSalesCapture mode={capMode} onSaveEntry={saveEntry} onClose={()=>setCapMode(null)}/></Modal>
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
