@@ -3695,11 +3695,17 @@ function CSD({ onClose, onSaveEntry }) {
   const num = v => { const n = parseFloat(String(v??"").replace(/[^0-9.]/g,"")); return isNaN(n)?0:n; };
 
   const onPick = ev => {
-    const f = ev.target.files && ev.target.files[0]; if (!f) return;
+    const f = ev.target.files && ev.target.files[0]; 
+    if (!f) { setMsg("❌ No file selected"); return; }
     const r = new FileReader();
-    r.onload = () => setPhoto({ dataUrl: r.result, type: f.type || "image/jpeg" });
+    r.onerror = () => setMsg("❌ Failed to read file");
+    r.onload = () => {
+      if (!r.result) { setMsg("❌ File read returned empty"); return; }
+      setPhoto({ dataUrl: r.result, type: f.type || "image/jpeg" });
+      setMsg(`✓ Ready to scan (${Math.round(f.size/1024)}KB)`);
+    };
     r.readAsDataURL(f);
-    setPending(null); setMsg("");
+    setPending(null);
   };
 
   const scan = async () => {
