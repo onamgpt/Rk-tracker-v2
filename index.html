@@ -4143,6 +4143,8 @@ function Spectrum({ onClose, onSaveEntry }) {
   const [samples,setSamples]=useState([]);  // QR sampling channels
   const [photo, setPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [mailList,setMailList]=useState(null);   // POs waiting in Gmail under #uploadcpc
+  const [mailBusy,setMailBusy]=useState(false);
   const [pending, setPending] = useState(null);     // parsed order awaiting officer tag
   const [tagOfficer, setTagOfficer] = useState("");
   const [msg, setMsg] = useState("");
@@ -4260,6 +4262,56 @@ function Spectrum({ onClose, onSaveEntry }) {
     };
     r.onerror=()=>setMsg("\u274C Could not read that file.");
     r.readAsDataURL(f);
+  };
+
+  // ── Pull POs forwarded to Gmail with #uploadcpc in the subject ────────────
+  const scanCpcMail = async () => {
+    setMailBusy(true); setMsg("\uD83D\uDCE1 Checking Gmail for #uploadcpc\u2026"); setMailList(null);
+    try{
+      const res = await intelAPI("scanEmails");
+      if(!res || res.error || res.ok===false) throw new Error((res&&res.error)||"could not reach Gmail");
+      const rows = res.emails || [];
+      const hits = rows.filter(m => String(m.subject||"").toLowerCase().indexOf("#uploadcpc") > -1)
+                       .map(m => ({
+                         gmailId: m.gmailId,
+                         subject: m.subject || "(no subject)",
+                         from: m.from || "",
+                         date: m.date || "",
+                         atts: (m.attachments||[]).filter(a => String(a.type||"").match(/pdf|image/))
+                       }))
+                       .filter(m => m.atts.length > 0);
+      setMailList(hits);
+      setMsg(hits.length ? ("\u2713 "+hits.length+" PO email(s) waiting")
+                         : "No #uploadcpc emails with attachments found. Forward the PO with #Trackerv23 #uploadcpc in the subject.");
+    }catch(e){
+      setMsg("\u274C "+String(e&&e.message?e.message:e).slice(0,200));
+    }
+    setMailBusy(false);
+  };
+
+  // Pull one attachment down and drop it straight into the scanner
+  const loadFromMail = async (mail, att) => {
+    setMailBusy(true); setMsg("\u2B07 Fetching "+(att.name||"attachment")+"\u2026");
+    try{
+      let b64 = att.inlineData && att.inlineData.length > 100 ? att.inlineData : "";
+      let type = att.type || "application/pdf";
+      if(!b64){
+        const ar = await intelAPI("getAttachment",{
+          gmailId: att.gmailId || mail.gmailId,
+          attachIndex: att.attachIndex,
+          attachmentId: att.attachmentId || "",
+          partId: att.partId || ""
+        });
+        if(!ar || !ar.base64) throw new Error("attachment could not be downloaded");
+        b64 = ar.base64; type = ar.type || type;
+      }
+      setPhoto({ dataUrl:"data:"+type+";base64,"+b64, type:type, name:att.name||"PO", label:(att.name||"attachment")+" \u00B7 from email" });
+      setMailList(null);
+      setMsg("\u2713 Loaded from email \u2014 tap Scan & match products");
+    }catch(e){
+      setMsg("\u274C "+String(e&&e.message?e.message:e).slice(0,200));
+    }
+    setMailBusy(false);
   };
 
   const scanOrder = async () => {
@@ -4467,9 +4519,25 @@ function Spectrum({ onClose, onSaveEntry }) {
 
       {tab==="upload" && <div>
         <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={onPick} style={{display:"none"}}/>
-        <button onClick={()=>fileRef.current&&fileRef.current.click()} style={{width:"100%",padding:"11px",borderRadius:10,border:"1.5px dashed #7a5aba",background:"#f5f0fc",color:"#4a2a8a",fontWeight:700,fontSize:14,cursor:"pointer",marginBottom:10}}>📄 Upload / snap sales order (photo or PDF)</button>
+        <button onClick={()=>fileRef.current&&fileRef.current.click()} style={{width:"100%",padding:"11px",borderRadius:10,border:"1.5px dashed #7a5aba",background:"#f5f0fc",color:"#4a2a8a",fontWeight:700,fontSize:14,cursor:"pointer",marginBottom:8}}>📄 Upload / snap sales order (photo or PDF)</button>
+
+        <button onClick={scanCpcMail} disabled={mailBusy} style={{width:"100%",padding:"10px",borderRadius:10,border:"1.5px solid #b8a0e0",background:"#fff",color:"#4a2a8a",fontWeight:700,fontSize:13,cursor:"pointer",marginBottom:10,opacity:mailBusy?0.6:1}}>
+          {mailBusy?"\u23F3 Checking\u2026":"\uD83D\uDCE7 Get PO from email (#uploadcpc)"}
+        </button>
+
+        {mailList && mailList.length>0 && <div style={{border:"1px solid #d8c8f0",borderRadius:10,padding:8,marginBottom:10,background:"#faf8ff"}}>
+          <div style={{fontSize:11,fontWeight:800,color:"#4a2a8a",marginBottom:6}}>PO EMAILS WAITING \u00B7 tap an attachment to load it</div>
+          {mailList.map((m,i)=><div key={m.gmailId+i} style={{padding:"6px 0",borderBottom:i<mailList.length-1?"1px solid #eee":"none"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#3a2a5a"}}>{String(m.subject).replace(/#uploadcpc/ig,"").replace(/#Trackerv23/ig,"").trim()||"(no subject)"}</div>
+            <div style={{fontSize:10.5,color:"#8a7aaa",marginBottom:4}}>{m.from} {m.date?("\u00B7 "+m.date):""}</div>
+            {m.atts.map((a,j)=><button key={j} onClick={()=>loadFromMail(m,a)} disabled={mailBusy}
+              style={{display:"block",width:"100%",textAlign:"left",padding:"7px 9px",marginTop:3,borderRadius:7,border:"1px solid #c8b0e8",background:"#fff",color:"#4a2a8a",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+              {String(a.type||"").indexOf("pdf")>-1?"\uD83D\uDCC4":"\uD83D\uDDBC"} {a.name||"attachment"}
+            </button>)}
+          </div>)}
+        </div>}
         {photo && <div style={{textAlign:"center",marginBottom:10}}>
-          {(photo.type||"").indexOf("pdf")>-1 ? <div style={{padding:"16px",background:"#f4f0fa",borderRadius:8,border:"1px solid #d8c8f0",fontSize:13,color:"#5a3a9a",fontWeight:700}}>📄 PDF ready — {photo.name||"sales order"}</div> : <img src={photo.dataUrl} alt="order" style={{maxWidth:"100%",maxHeight:160,borderRadius:8,border:"1px solid #ddd"}}/>}
+          {(photo.type||"").indexOf("pdf")>-1 ? <div style={{padding:"16px",background:"#f4f0fa",borderRadius:8,border:"1px solid #d8c8f0",fontSize:13,color:"#5a3a9a",fontWeight:700}}>📄 PDF ready — {photo.name||"sales order"}{photo.label?<div style={{fontSize:10.5,fontWeight:600,color:"#8a7aaa",marginTop:3}}>{photo.label}</div>:null}</div> : <img src={photo.dataUrl} alt="order" style={{maxWidth:"100%",maxHeight:160,borderRadius:8,border:"1px solid #ddd"}}/>}
           <button onClick={scanOrder} disabled={busy} className="bg" style={{width:"100%",marginTop:8}}>{busy?"⏳ Reading…":"🔍 Scan & match products"}</button>
         </div>}
 
@@ -6691,7 +6759,7 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
         setStatusMsg("Error: Intel error: "+((res&&res.error)||"Could not reach Gmail"));
         setScanning(false);return;
       }
-      const rows=res.emails||[];
+      const rows=(res.emails||[]).filter(m=>String(m.subject||"").toLowerCase().indexOf("#uploadcpc")===-1);
       if(rows.length===0){
         setStatusMsg("✅ No new unread #Trackerv23 emails found.\nForward an invoice to Gmail with #Trackerv23 in subject to import it.");
         setScanning(false);return;
