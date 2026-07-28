@@ -11,7 +11,7 @@ const https = require("https");
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_KEY || "";
 const BOT          = process.env.TELEGRAM_BOT_TOKEN || "";
-const OWNER_CHAT   = process.env.TELEGRAM_OWNER_CHAT_ID || "8632288596";
+const OWNER_CHAT   = process.env.TELEGRAM_OWNER_CHAT_ID || "-5372910186";
 
 const H = {
   "Access-Control-Allow-Origin": "*",
