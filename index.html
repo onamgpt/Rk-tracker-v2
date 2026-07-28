@@ -4231,18 +4231,50 @@ function Spectrum({ onClose, onSaveEntry }) {
   function matchSku(s){ const t=String(s||"").toUpperCase().replace(/\s/g,""); return master.find(m=>m.sku.toUpperCase()===t) || master.find(m=>t && m.sku.toUpperCase().indexOf(t.slice(-6))>-1); }
   function matchName(nm){ const t=String(nm||"").toLowerCase(); let best=null,bs=0; master.forEach(m=>{const a=m.name.toLowerCase();let sc=0;t.split(/\s+/).forEach(w=>{if(w.length>2&&a.indexOf(w)>-1)sc++;});if(sc>bs){bs=sc;best=m;}}); return bs>=2?best:null; }
 
-  const onPick = ev => { const f=ev.target.files&&ev.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>setPhoto({dataUrl:r.result,type:f.type||"image/jpeg"}); r.readAsDataURL(f); };
+  const onPick = ev => {
+    const f=ev.target.files&&ev.target.files[0]; if(!f)return;
+    setMsg(""); setPending(null);
+    const isPdf=(f.type||"").indexOf("pdf")>-1;
+    if(isPdf){
+      const r=new FileReader();
+      r.onload=()=>setPhoto({dataUrl:r.result,type:f.type||"application/pdf",label:"PDF \u00B7 "+Math.round(f.size/1024)+" KB"});
+      r.onerror=()=>setMsg("\u274C Could not read that file.");
+      r.readAsDataURL(f);
+      return;
+    }
+    const r=new FileReader();
+    r.onload=e=>{
+      const img=new Image();
+      img.onload=()=>{
+        const MAX=2000; let w=img.width,h=img.height;
+        if(w>MAX||h>MAX){ if(w>h){h=Math.round(h*MAX/w);w=MAX;} else {w=Math.round(w*MAX/h);h=MAX;} }
+        const c=document.createElement("canvas"); c.width=w; c.height=h;
+        const ctx=c.getContext("2d");
+        ctx.fillStyle="#fff"; ctx.fillRect(0,0,w,h);
+        ctx.drawImage(img,0,0,w,h);
+        const data=c.toDataURL("image/jpeg",0.92);
+        setPhoto({dataUrl:data,type:"image/jpeg",label:w+"x"+h+" \u00B7 "+Math.round(data.length/1365)+" KB"});
+      };
+      img.onerror=()=>setMsg("\u274C That image could not be opened.");
+      img.src=e.target.result;
+    };
+    r.onerror=()=>setMsg("\u274C Could not read that file.");
+    r.readAsDataURL(f);
+  };
 
   const scanOrder = async () => {
     if(!photo)return; setBusy(true); setMsg("📄 Reading sales order…"); setPending(null);
+    let txt="";
     try{
       const b64=String(photo.dataUrl).split(",")[1];
-      const prompt="Read this sales order / purchase order. Extract each line item. For each line return the SKU code (like ONAONA002xxx if present), the product name, and the ordered quantity in DOZENS (if the qty is in Cases or Pieces, convert: note pieces and cases; a 'Case = N Piece' means that many pieces; 12 pieces = 1 dozen). Also extract customer name, order/PO number, date, and grand total if shown.\\nReturn ONLY JSON: {\"customer\":\"\",\"orderNo\":\"\",\"date\":\"\",\"grandTotal\":<number or 0>,\"lines\":[{\"sku\":\"\",\"name\":\"\",\"pieces\":<number>,\"dozens\":<number>}]}";
+      const prompt="Read this institutional purchase order (KPKB / CSD / Master Bhandar portal format). Extract EVERY row of the items table.\n\nFor each row:\n1. SKU code. It frequently WRAPS across two lines in the SKU column, for example ONAONA002 on one line and 379 on the next. Join them into one code: ONAONA002379. Never return a partial or truncated code.\n2. Product name exactly as printed.\n3. Quantity. The PO Qty column reads like 2 Case = 288 Piece or 3 Case = 432 Piece. The number immediately BEFORE the word Piece is the TOTAL PIECES (288, 432). Use that number. dozens = pieces / 12.\n4. Final Rate per piece, Taxable Price, and Line Total where shown.\n\nAlso extract the buyer name (the party under From), the PO number, the date, and the grand total.\n\nReturn ONLY JSON, no commentary:\n{\"customer\":\"\",\"orderNo\":\"\",\"date\":\"\",\"grandTotal\":<number or 0>,\"lines\":[{\"sku\":\"\",\"name\":\"\",\"pieces\":<number>,\"dozens\":<number>,\"rate\":<number>,\"taxable\":<number>,\"lineTotal\":<number>}]}";
       const isPdf=(photo.type||"").indexOf("pdf")>-1;
-      const txt=await claudeAPI(prompt,"Return ONLY valid JSON. Convert quantities to dozens where possible.",isPdf?"":b64,isPdf?"":photo.type,isPdf?b64:"");
+      txt=await claudeAPI(prompt,"Return ONLY valid JSON. Read every row of the table. Join SKU codes that wrap across two lines.",isPdf?"":b64,isPdf?"":photo.type,isPdf?b64:"");
       const clean=String(txt||"").replace(/```json/g,"").replace(/```/g,"").trim();
       const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
-      const obj=JSON.parse(s>=0?clean.substring(s,e+1):clean);
+      if(s<0||e<0) throw new Error("model did not return JSON: "+clean.slice(0,140));
+      const obj=JSON.parse(clean.substring(s,e+1));
+      if(!obj.lines || !obj.lines.length) throw new Error("no line items found in that image");
       // match lines to master, compute GP
       let gpTotal=0; const lines=(obj.lines||[]).map(l=>{
         const m=matchSku(l.sku)||matchName(l.name);
@@ -4252,8 +4284,14 @@ function Spectrum({ onClose, onSaveEntry }) {
         return { sku:m?m.sku:(l.sku||"?"), name:m?m.name:(l.name||"unmatched"), doz:Math.round(doz*100)/100, gp, matched:!!m, gpp:m?m.gpp:null };
       });
       setPending({ customer:obj.customer||"", orderNo:obj.orderNo||"", date:obj.date||new Date().toISOString().slice(0,10), grandTotal:obj.grandTotal||0, lines, gpTotal });
-      setMsg("");
-    }catch(e){ setMsg("❌ Couldn't read the order clearly. Try a clearer image."); }
+      const unm=lines.filter(l=>!l.matched).length;
+      setMsg(unm ? ("⚠ "+lines.length+" lines read · "+unm+" not matched to your product master")
+                 : ("✓ "+lines.length+" lines read · all matched"));
+    }catch(e){
+      const em=String(e&&e.message?e.message:e);
+      setMsg("❌ "+em.slice(0,220));
+      try{ console.log("SPECTRUM SCAN FAILED:", em, "| raw reply:", txt); }catch(_){}
+    }
     setBusy(false);
   };
 
