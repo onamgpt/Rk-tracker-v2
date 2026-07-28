@@ -62,6 +62,7 @@ const BOT_TOKEN="8852628858:AAHAZ3ZjosHPrEC0OU8fDnRXBNcKnwO2gus";
 const OWNER_CHAT_ID="8632288596";
 const URL_USER=new URLSearchParams(window.location.search).get("user")||"main";
 const IS_OWNER=(URL_USER==="main");  // only the owner sees profit/margin figures
+const IS_ORDERS_USER=["main","prakash"].includes(URL_USER); // shop order management: owner + Prakash
 const FAMILY_USERS=["wife","daughter"];
 const SALES_USERS=["satish","sebi","sugeesh","sunil","biju","sadasivan","sooraj","murugan"];
 const IS_FAMILY=FAMILY_USERS.includes(URL_USER);
@@ -7010,6 +7011,398 @@ function PinGate({ children }){
   );
 }
 
+function Orders({ onClose }) {
+  const [tab,setTab]=useState("list");           // list | analytics
+  const [orders,setOrders]=useState([]);
+  const [status,setStatus]=useState("Pending");
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState("");
+  const [sel,setSel]=useState(null);             // selected order row
+  const [lines,setLines]=useState([]);
+  const [linesLoading,setLinesLoading]=useState(false);
+  const [tracking,setTracking]=useState("");
+  const [courier,setCourier]=useState("");
+  const [note,setNote]=useState("");
+  const [busy,setBusy]=useState("");
+  const [msg,setMsg]=useState("");
+  const [an,setAn]=useState(null);
+  const [anLoading,setAnLoading]=useState(false);
+  const [q,setQ]=useState("");
+
+  const STATUSES=["Pending","Dispatched","Delivered","Returned","Refunded"];
+
+  const api=async(payload)=>{
+    const r=await fetch("/.netlify/functions/orders-api",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(payload)
+    });
+    return r.json();
+  };
+
+  const load=async(st)=>{
+    setLoading(true);setErr("");
+    try{
+      const r=await api({action:"list",status:st||status});
+      if(!r.ok) throw new Error(r.error||"could not load orders");
+      setOrders(r.orders||[]);
+    }catch(e){ setErr(String(e.message||e)); }
+    setLoading(false);
+  };
+
+  const loadAnalytics=async()=>{
+    setAnLoading(true);setErr("");
+    try{
+      const r=await api({action:"analytics"});
+      if(!r.ok) throw new Error(r.error||"could not load analytics");
+      setAn(r.analytics);
+    }catch(e){ setErr(String(e.message||e)); }
+    setAnLoading(false);
+  };
+
+  useEffect(()=>{ load(status); },[status]);
+  useEffect(()=>{ if(tab==="analytics"&&!an) loadAnalytics(); },[tab]);
+
+  const openOrder=async(o)=>{
+    setSel(o);
+    setTracking(o.tracking_number||"");
+    setCourier(o.courier||"");
+    setNote(o.notes||"");
+    setMsg("");
+    setLines([]);setLinesLoading(true);
+    try{
+      const r=await api({action:"lines",invoiceNo:o.id});
+      if(r.ok) setLines(r.lines||[]);
+    }catch(e){}
+    setLinesLoading(false);
+  };
+
+  const setOrderStatus=async(newStatus)=>{
+    if(!sel) return;
+    if(newStatus==="Refunded"||newStatus==="Returned"){
+      if(!window.confirm("Mark "+sel.id+" as "+newStatus+"? This affects your revenue figures.")) return;
+    }
+    setBusy(newStatus);setMsg("");
+    try{
+      const r=await api({
+        action:"updateStatus",
+        invoiceNo:sel.id,
+        status:newStatus,
+        tracking:tracking,
+        courier:courier,
+        notes:note,
+        user:URL_USER
+      });
+      if(!r.ok) throw new Error(r.error||"update failed");
+      let m="✓ "+newStatus;
+      if(r.telegram==="sent") m+=" · Telegram sent";
+      else if(r.telegram) m+=" · Telegram "+r.telegram;
+      setMsg(m);
+      if(r.order) setSel(r.order);
+      setAn(null);                 // analytics is now stale
+      load(status);
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const saveDetails=async()=>{
+    if(!sel) return;
+    setBusy("save");setMsg("");
+    try{
+      const r=await api({
+        action:"updateStatus",
+        invoiceNo:sel.id,
+        tracking:tracking,
+        courier:courier,
+        notes:note,
+        user:URL_USER
+      });
+      if(!r.ok) throw new Error(r.error||"save failed");
+      setMsg("✓ Saved");
+      if(r.order) setSel(r.order);
+      load(status);
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const exportCSV=()=>{
+    const cols=["Invoice","Order ID","Date","Status","Customer","Phone","Address","City","PIN","State","Items","Amount","Tracking","Courier"];
+    const esc=(v)=>{ const s=String(v==null?"":v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
+    const rows=filtered.map(o=>[
+      o.id,o.order_id,o.created_at,o.status,o.customer_name,o.customer_phone,
+      o.customer_address,o.customer_city,o.customer_pin,o.customer_state,
+      o.items_summary,o.grand_total,o.tracking_number,o.courier
+    ].map(esc).join(","));
+    const csv=cols.join(",")+"\n"+rows.join("\n");
+    const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="onam-orders-"+(status==="All"?"all":status.toLowerCase())+"-"+new Date().toISOString().slice(0,10)+".csv";
+    a.click();
+  };
+
+  const filtered=orders.filter(o=>{
+    if(!q.trim()) return true;
+    const t=q.toLowerCase();
+    return [o.id,o.customer_name,o.customer_phone,o.customer_city,o.items_summary,o.tracking_number]
+      .some(f=>String(f||"").toLowerCase().indexOf(t)!==-1);
+  });
+
+  const statusColor=(s)=>({
+    Pending:"#b8860b",Dispatched:"#1565c0",Delivered:"#2e7d32",
+    Returned:"#c62828",Refunded:"#6a1b9a"
+  }[s]||"#555");
+
+  const ageBadge=(o)=>{
+    if((o.status||"Pending")!=="Pending"||!o.created_log_ts) return null;
+    const hrs=(Date.now()-new Date(o.created_log_ts).getTime())/3600000;
+    if(isNaN(hrs)) return null;
+    const urgent=hrs>48;
+    return <span style={{fontSize:10,fontWeight:700,padding:"1px 5px",borderRadius:4,
+      background:urgent?"#ffebee":"#fff8e1",color:urgent?"#c62828":"#b8860b",marginLeft:6}}>
+      {hrs<24?Math.round(hrs)+"h":Math.round(hrs/24)+"d"} waiting
+    </span>;
+  };
+
+  const card={background:"#fff",border:"1px solid #e0d5c0",borderRadius:8,padding:10,marginBottom:8};
+  const btn={padding:"8px 12px",borderRadius:6,border:"none",cursor:"pointer",fontSize:12,fontWeight:700};
+  const inp={width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #ccc",fontSize:13,boxSizing:"border-box"};
+
+  // ---------------- DETAIL VIEW ----------------
+  if(sel) return <div style={{maxHeight:"80vh",overflowY:"auto"}}>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+      <button onClick={()=>{setSel(null);setMsg("");}} style={{...btn,background:"#eee",color:"#333"}}>← Back</button>
+      <div style={{fontWeight:800,fontSize:15,flex:1}}>{sel.id}</div>
+      <span style={{fontSize:11,fontWeight:700,padding:"3px 8px",borderRadius:10,color:"#fff",background:statusColor(sel.status)}}>{sel.status||"Pending"}</span>
+    </div>
+
+    {msg&&<div style={{padding:"8px 10px",borderRadius:6,marginBottom:10,fontSize:12,fontWeight:700,
+      background:msg.startsWith("✓")?"#e8f5e9":"#ffebee",color:msg.startsWith("✓")?"#2e7d32":"#c62828"}}>{msg}</div>}
+
+    <div style={card}>
+      <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:4}}>CUSTOMER</div>
+      <div style={{fontWeight:700,fontSize:14}}>{sel.customer_name||"-"}</div>
+      <div style={{fontSize:13}}>{sel.customer_phone||"-"}</div>
+      <div style={{fontSize:13,color:"#555",marginTop:4}}>{sel.customer_address||"-"}</div>
+      <div style={{fontSize:13,color:"#555"}}>{[sel.customer_city,sel.customer_pin].filter(Boolean).join(" - ")}</div>
+      <div style={{fontSize:13,color:"#555"}}>{sel.customer_state||""}</div>
+      {sel.customer_gstin&&<div style={{fontSize:12,marginTop:4,fontWeight:700}}>GSTIN: {sel.customer_gstin}</div>}
+    </div>
+
+    <div style={card}>
+      <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:6}}>ITEMS</div>
+      {linesLoading?<div style={{fontSize:12,color:"#888"}}>Loading…</div>:
+       lines.length?lines.map((l,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"3px 0",borderBottom:i<lines.length-1?"1px solid #f0f0f0":"none"}}>
+         <span>{l.item_name}{l.pack_size?" ("+l.pack_size+")":""}</span>
+         <span style={{fontWeight:700}}>× {l.qty}</span>
+       </div>):
+       <div style={{fontSize:13,color:"#555"}}>{sel.items_summary||"No line detail"}</div>}
+    </div>
+
+    <div style={card}>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"2px 0"}}>
+        <span>Taxable</span><span>Rs.{sel.taxable_value}</span></div>
+      {sel.tax_type==="IGST"
+        ? <div style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"2px 0"}}><span>IGST</span><span>Rs.{sel.igst}</span></div>
+        : <div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"2px 0"}}><span>CGST</span><span>Rs.{sel.cgst}</span></div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"2px 0"}}><span>SGST</span><span>Rs.{sel.sgst}</span></div>
+          </div>}
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:15,fontWeight:800,paddingTop:6,borderTop:"1px solid #ddd",marginTop:4}}>
+        <span>Total</span><span>Rs.{sel.grand_total}</span></div>
+      <div style={{fontSize:11,color:"#888",marginTop:6}}>
+        {sel.created_at} · {sel.payment_id||"no payment id"}
+      </div>
+    </div>
+
+    <div style={card}>
+      <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:6}}>DISPATCH DETAILS (optional)</div>
+      <div style={{marginBottom:6}}>
+        <input value={tracking} onChange={e=>setTracking(e.target.value)} placeholder="Tracking number" style={inp}/>
+      </div>
+      <div style={{marginBottom:6}}>
+        <input value={courier} onChange={e=>setCourier(e.target.value)} placeholder="Courier (DTDC, Delhivery, India Post…)" style={inp}/>
+      </div>
+      <div style={{marginBottom:8}}>
+        <textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Notes (packing, remarks…)" rows={2} style={{...inp,resize:"vertical"}}/>
+      </div>
+      <button onClick={saveDetails} disabled={!!busy} style={{...btn,background:"#555",color:"#fff",width:"100%"}}>
+        {busy==="save"?"Saving…":"Save details only"}
+      </button>
+    </div>
+
+    <div style={{...card,background:"#fffdf5"}}>
+      <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:8}}>MARK AS</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+        {STATUSES.filter(s=>s!==(sel.status||"Pending")).map(s=>
+          <button key={s} onClick={()=>setOrderStatus(s)} disabled={!!busy}
+            style={{...btn,background:statusColor(s),color:"#fff",opacity:busy?0.6:1}}>
+            {busy===s?"…":s}
+          </button>)}
+      </div>
+      {(sel.status||"Pending")==="Pending"&&
+        <div style={{fontSize:11,color:"#888",marginTop:8}}>Marking Dispatched sends you a Telegram alert.</div>}
+    </div>
+  </div>;
+
+  // ---------------- ANALYTICS VIEW ----------------
+  if(tab==="analytics") return <div style={{maxHeight:"80vh",overflowY:"auto"}}>
+    <div style={{display:"flex",gap:6,marginBottom:12}}>
+      <button onClick={()=>setTab("list")} style={{...btn,background:"#eee",color:"#333"}}>📦 Orders</button>
+      <button style={{...btn,background:"#5a3a1a",color:"#fff"}}>📊 Analytics</button>
+      <button onClick={()=>{setAn(null);loadAnalytics();}} style={{...btn,background:"#eee",color:"#333",marginLeft:"auto"}}>↻</button>
+      <button onClick={onClose} style={{...btn,background:"#eee",color:"#333"}}>✕</button>
+    </div>
+
+    {err&&<div style={{padding:10,background:"#ffebee",color:"#c62828",borderRadius:6,fontSize:12,marginBottom:10}}>{err}</div>}
+    {anLoading&&<div style={{padding:20,textAlign:"center",color:"#888"}}>Calculating…</div>}
+
+    {an&&<div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+        <div style={{...card,marginBottom:0,textAlign:"center"}}>
+          <div style={{fontSize:22,fontWeight:800,color:"#2e7d32"}}>Rs.{an.revenue}</div>
+          <div style={{fontSize:11,color:"#888"}}>Revenue</div>
+        </div>
+        <div style={{...card,marginBottom:0,textAlign:"center"}}>
+          <div style={{fontSize:22,fontWeight:800}}>{an.totalOrders}</div>
+          <div style={{fontSize:11,color:"#888"}}>Orders</div>
+        </div>
+        <div style={{...card,marginBottom:0,textAlign:"center"}}>
+          <div style={{fontSize:18,fontWeight:800}}>Rs.{an.avgOrder}</div>
+          <div style={{fontSize:11,color:"#888"}}>Avg order</div>
+        </div>
+        <div style={{...card,marginBottom:0,textAlign:"center"}}>
+          <div style={{fontSize:18,fontWeight:800}}>{an.avgLagHours==null?"—":an.avgLagHours+"h"}</div>
+          <div style={{fontSize:11,color:"#888"}}>Avg to dispatch</div>
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:6}}>STATUS</div>
+        {Object.keys(an.byStatus).length?Object.keys(an.byStatus).map(s=>
+          <div key={s} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"3px 0"}}>
+            <span><span style={{display:"inline-block",width:8,height:8,borderRadius:4,background:statusColor(s),marginRight:6}}></span>{s}</span>
+            <span style={{fontWeight:700}}>{an.byStatus[s]}</span>
+          </div>):<div style={{fontSize:12,color:"#888"}}>No orders yet</div>}
+        {an.refundedValue>0&&<div style={{fontSize:11,color:"#c62828",marginTop:6}}>Refunded value Rs.{an.refundedValue} (excluded from revenue)</div>}
+      </div>
+
+      {an.pendingAgeing&&an.pendingAgeing.length>0&&<div style={{...card,borderColor:"#e0b0b0"}}>
+        <div style={{fontSize:11,color:"#c62828",fontWeight:700,marginBottom:6}}>⏳ WAITING TO SHIP — OLDEST FIRST</div>
+        {an.pendingAgeing.slice(0,8).map(p=>
+          <div key={p.id} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}>
+            <span>{p.name||p.id}</span>
+            <span style={{fontWeight:700,color:p.hours>48?"#c62828":"#b8860b"}}>
+              {p.hours<24?Math.round(p.hours)+"h":Math.round(p.hours/24)+"d"}
+            </span>
+          </div>)}
+      </div>}
+
+      <div style={card}>
+        <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:6}}>TOP PRODUCTS (by qty)</div>
+        {an.topProducts.length?an.topProducts.slice(0,10).map((p,i)=>
+          <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}>
+            <span>{i+1}. {p.name}</span>
+            <span style={{fontWeight:700}}>{p.qty} · Rs.{Math.round(p.value)}</span>
+          </div>):<div style={{fontSize:12,color:"#888"}}>No line data yet</div>}
+      </div>
+
+      <div style={card}>
+        <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:6}}>
+          CUSTOMERS — {an.uniqueCustomers} unique, {an.repeatCustomers} repeat
+        </div>
+        {an.topCustomers.length?an.topCustomers.map((c,i)=>
+          <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}>
+            <span>{c.name||c.phone}{c.orders>1&&<span style={{color:"#2e7d32",fontWeight:700}}> ×{c.orders}</span>}</span>
+            <span style={{fontWeight:700}}>Rs.{Math.round(c.value)}</span>
+          </div>):<div style={{fontSize:12,color:"#888"}}>No customers yet</div>}
+      </div>
+
+      <div style={card}>
+        <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:6}}>BY STATE</div>
+        {an.states.length?an.states.slice(0,10).map((s,i)=>
+          <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}>
+            <span>{s.state}</span>
+            <span style={{fontWeight:700}}>{s.orders} · Rs.{Math.round(s.revenue)}</span>
+          </div>):<div style={{fontSize:12,color:"#888"}}>—</div>}
+      </div>
+
+      <div style={card}>
+        <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:6}}>GST COLLECTED (for the accountant)</div>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"2px 0"}}><span>Taxable value</span><span>Rs.{an.gst.taxable}</span></div>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"2px 0"}}><span>CGST</span><span>Rs.{an.gst.cgst}</span></div>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"2px 0"}}><span>SGST</span><span>Rs.{an.gst.sgst}</span></div>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"2px 0"}}><span>IGST</span><span>Rs.{an.gst.igst}</span></div>
+      </div>
+
+      {an.daily.length>0&&<div style={card}>
+        <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:6}}>LAST {an.daily.length} ACTIVE DAYS</div>
+        {an.daily.slice().reverse().map((d,i)=>
+          <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}>
+            <span>{d.date}</span>
+            <span style={{fontWeight:700}}>{d.orders} · Rs.{Math.round(d.revenue)}</span>
+          </div>)}
+      </div>}
+    </div>}
+  </div>;
+
+  // ---------------- LIST VIEW ----------------
+  return <div style={{maxHeight:"80vh",overflowY:"auto"}}>
+    <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+      <button style={{...btn,background:"#5a3a1a",color:"#fff"}}>📦 Orders</button>
+      <button onClick={()=>setTab("analytics")} style={{...btn,background:"#eee",color:"#333"}}>📊 Analytics</button>
+      <button onClick={()=>load(status)} style={{...btn,background:"#eee",color:"#333",marginLeft:"auto"}}>↻</button>
+      <button onClick={exportCSV} disabled={!filtered.length} style={{...btn,background:"#eee",color:"#333"}}>📤 CSV</button>
+      <button onClick={onClose} style={{...btn,background:"#eee",color:"#333"}}>✕</button>
+    </div>
+
+    <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
+      {["Pending","Dispatched","Delivered","All"].map(s=>
+        <button key={s} onClick={()=>setStatus(s)}
+          style={{...btn,padding:"6px 10px",fontSize:11,
+            background:status===s?statusColor(s==="All"?"":s):"#f0f0f0",
+            color:status===s?"#fff":"#555"}}>{s}</button>)}
+    </div>
+
+    <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search name, phone, invoice, item…" style={{...inp,marginBottom:10}}/>
+
+    {err&&<div style={{padding:10,background:"#ffebee",color:"#c62828",borderRadius:6,fontSize:12,marginBottom:10}}>{err}</div>}
+    {loading&&<div style={{padding:20,textAlign:"center",color:"#888"}}>Loading…</div>}
+    {!loading&&!filtered.length&&!err&&<div style={{padding:20,textAlign:"center",color:"#888",fontSize:13}}>
+      No {status==="All"?"":status.toLowerCase()} orders.
+    </div>}
+
+    {filtered.map(o=>
+      <div key={o.id} onClick={()=>openOrder(o)} style={{...card,cursor:"pointer"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontWeight:700,fontSize:13}}>
+              {o.customer_name||"(no name)"}{ageBadge(o)}
+            </div>
+            <div style={{fontSize:11,color:"#888"}}>{o.id}</div>
+            <div style={{fontSize:12,color:"#555",marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              {o.items_summary||"—"}
+            </div>
+            <div style={{fontSize:11,color:"#888",marginTop:2}}>
+              {[o.customer_city,o.customer_state].filter(Boolean).join(", ")}
+            </div>
+            {o.tracking_number&&<div style={{fontSize:11,color:"#1565c0",marginTop:2}}>
+              📮 {o.tracking_number}{o.courier?" · "+o.courier:""}
+            </div>}
+          </div>
+          <div style={{textAlign:"right",flexShrink:0}}>
+            <div style={{fontWeight:800,fontSize:14}}>Rs.{o.grand_total}</div>
+            <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:8,color:"#fff",background:statusColor(o.status)}}>{o.status||"Pending"}</span>
+          </div>
+        </div>
+      </div>)}
+
+    {!loading&&filtered.length>0&&<div style={{fontSize:11,color:"#888",textAlign:"center",padding:"6px 0"}}>
+      {filtered.length} order{filtered.length===1?"":"s"} · tap any to manage
+    </div>}
+  </div>;
+}
+
 function App(){
   if(IS_VIEW_MODE) return<ShareableView/>;
 
@@ -7033,6 +7426,7 @@ function App(){
   const [showGym,setShowGym]=useState(false);
   const [showRecv,setShowRecv]=useState(false);
   const [showBank,setShowBank]=useState(false);
+  const [showOrders,setShowOrders]=useState(false);
   const [tgShareEntry,setTgShareEntry]=useState(null);
   const [capMode,setCapMode]=useState(null); // "purchase" | "sales" | null
   const [showFieldReport,setShowFieldReport]=useState(false);
@@ -7453,6 +7847,7 @@ function App(){
                 {l:"📈 CFO Brief",fn:()=>setShowCFO(true), ownerOnly:true},
                 {l:"🏦 Bank Archive",fn:()=>setShowBank(true), ownerOnly:true},
                 {l:"💰 Receivables",fn:()=>setShowRecv(true), ownerOnly:true},
+                {l:"📦 Orders",fn:()=>setShowOrders(true), ordersOnly:true},
                 {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true), ownerOnly:true},
                 {l:"🛡️ CSD",fn:()=>setShowCSD(true), ownerOnly:true},
                 {l:"🪔 Kerala",fn:()=>setShowKerala(true), ownerOnly:true},
@@ -7471,7 +7866,7 @@ function App(){
                 {l:"📧 Email Scan",fn:()=>setShowEmailScan(true), ownerOnly:true},
                 {l:"🔗 Share",fn:()=>setShowShare(true)},
                 {l:"⚙️ Settings",fn:()=>setShowDD(true)}
-              ].filter(item => (!item.ownerOnly || IS_OWNER) && (!item.personalOnly || IS_OWNER || IS_FAMILY)).map(it=><button key={it.l} onClick={()=>{setNavMenuOpen(false);it.fn();}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:6,border:"none",background:"transparent",color:"#f0dcae",cursor:"pointer",fontSize:13,fontWeight:600}}>{it.l}</button>)}
+              ].filter(item => (!item.ownerOnly || IS_OWNER) && (!item.personalOnly || IS_OWNER || IS_FAMILY) && (!item.ordersOnly || IS_ORDERS_USER)).map(it=><button key={it.l} onClick={()=>{setNavMenuOpen(false);it.fn();}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:6,border:"none",background:"transparent",color:"#f0dcae",cursor:"pointer",fontSize:13,fontWeight:600}}>{it.l}</button>)}
             </div>}
           </div>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
@@ -7726,6 +8121,7 @@ function App(){
     <Modal open={showGym} onClose={()=>setShowGym(false)}><GymLog entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowGym(false)}/></Modal>
     <Modal open={showRecv && IS_OWNER} onClose={()=>setShowRecv(false)}><Receivables entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRecv(false)}/></Modal>
     <Modal open={showBank && IS_OWNER} onClose={()=>setShowBank(false)} wide><BankArchive onClose={()=>setShowBank(false)}/></Modal>
+    <Modal open={showOrders && IS_ORDERS_USER} onClose={()=>setShowOrders(false)} wide><Orders onClose={()=>setShowOrders(false)}/></Modal>
     <Modal open={!!tgShareEntry} onClose={()=>setTgShareEntry(null)}><TelegramShare entry={tgShareEntry} onClose={()=>setTgShareEntry(null)}/></Modal>
     <Modal open={!!capMode} onClose={()=>setCapMode(null)}><PurchaseSalesCapture mode={capMode} onSaveEntry={saveEntry} onClose={()=>setCapMode(null)}/></Modal>
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
