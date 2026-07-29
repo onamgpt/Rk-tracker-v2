@@ -7509,6 +7509,362 @@ function Orders({ onClose }) {
   </div>;
 }
 
+function AIMTrading({ onClose }) {
+  const [book,setBook]=useState("INDIA");
+  const [tab,setTab]=useState("dash");        // dash | ledger | audit | gate
+  const [data,setData]=useState(null);
+  const [ledger,setLedger]=useState([]);
+  const [audit,setAudit]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState("");
+  const [msg,setMsg]=useState("");
+  const [busy,setBusy]=useState("");
+  const [openForm,setOpenForm]=useState(false);
+  const [tradeFor,setTradeFor]=useState(null);
+  const [f,setF]=useState({symbol:"",name:"",shares:"",price:"",costs:""});
+  const [tf,setTf]=useState({action:"BUY",shares:"",price:"",costs:"",note:""});
+  const [cashEdit,setCashEdit]=useState("");
+  const [g,setG]=useState({profitableYears:"",opMargin:"",bestRoe:"",debtEquity:"",interestCover:"",cashFlow:"",marketCap:"",price:"",turnover:"",yearsListed:"",drawdown:"",pledge:"",auditorResigned:false,qualifiedOpinion:false,regulatoryAction:false});
+  const [gRes,setGRes]=useState(null);
+
+  const cur=book==="INDIA"?"Rs.":"$";
+
+  const api=async(payload)=>{
+    const r=await fetch("/.netlify/functions/aim-api",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(Object.assign({book},payload))
+    });
+    return r.json();
+  };
+
+  const load=async()=>{
+    setLoading(true);setErr("");
+    try{
+      const r=await api({action:"dashboard"});
+      if(!r.ok) throw new Error(r.error||"could not load");
+      setData(r);setCashEdit(String(r.cash||0));
+    }catch(e){ setErr(String(e.message||e)); }
+    setLoading(false);
+  };
+
+  const loadLedger=async()=>{
+    setLoading(true);
+    try{ const r=await api({action:"ledger"}); if(r.ok) setLedger(r.transactions||[]); }catch(e){}
+    setLoading(false);
+  };
+
+  const runAudit=async()=>{
+    setLoading(true);setAudit(null);
+    try{ const r=await api({action:"audit"}); if(r.ok) setAudit(r); else setErr(r.error||"audit failed"); }catch(e){ setErr(String(e.message||e)); }
+    setLoading(false);
+  };
+
+  useEffect(()=>{ if(tab==="dash") load(); if(tab==="ledger") loadLedger(); if(tab==="audit") runAudit(); },[book,tab]);
+
+  const saveCash=async()=>{
+    setBusy("cash");setMsg("");
+    try{
+      const r=await api({action:"setCash",cash:parseFloat(cashEdit)||0});
+      if(!r.ok) throw new Error(r.error);
+      setMsg("\u2713 Cash updated");load();
+    }catch(e){ setMsg("\u2717 "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const savePrice=async(sym,price)=>{
+    if(!price) return;
+    setBusy("p"+sym);setMsg("");
+    try{
+      const r=await api({action:"updatePrice",symbol:sym,price:parseFloat(price)});
+      if(!r.ok) throw new Error(r.error);
+      load();
+    }catch(e){ setMsg("\u2717 "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const doOpen=async()=>{
+    setBusy("open");setMsg("");
+    try{
+      const r=await api({action:"openPosition",symbol:f.symbol,name:f.name,
+        shares:parseFloat(f.shares)||0,price:parseFloat(f.price)||0,costs:parseFloat(f.costs)||0});
+      if(!r.ok) throw new Error(r.error);
+      setMsg("\u2713 Opened "+f.symbol+" \u00B7 Portfolio Control set to "+cur+r.pc);
+      setOpenForm(false);setF({symbol:"",name:"",shares:"",price:"",costs:""});load();
+    }catch(e){ setMsg("\u2717 "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const doTrade=async()=>{
+    if(!tradeFor) return;
+    setBusy("trade");setMsg("");
+    try{
+      const r=await api({action:"recordTrade",symbol:tradeFor.symbol,tradeAction:tf.action,
+        shares:parseFloat(tf.shares)||0,price:parseFloat(tf.price)||0,
+        costs:parseFloat(tf.costs)||0,note:tf.note});
+      if(!r.ok) throw new Error(r.error);
+      setMsg("\u2713 "+tf.action+" recorded \u00B7 PC "+cur+r.pcBefore+" \u2192 "+cur+r.pcAfter);
+      setTradeFor(null);setTf({action:"BUY",shares:"",price:"",costs:"",note:""});load();
+    }catch(e){ setMsg("\u2717 "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const runGate=async()=>{
+    setBusy("gate");setGRes(null);
+    try{
+      const r=await api({action:"gateCheck",data:g});
+      if(!r.ok) throw new Error(r.error);
+      setGRes(r);
+    }catch(e){ setMsg("\u2717 "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const card={background:"#fff",border:"1px solid #e0d5c0",borderRadius:8,padding:10,marginBottom:8};
+  const btn={padding:"8px 12px",borderRadius:6,border:"none",cursor:"pointer",fontSize:12,fontWeight:700};
+  const inp={width:"100%",padding:"7px 9px",borderRadius:6,border:"1px solid #ccc",fontSize:13,boxSizing:"border-box",marginBottom:6};
+  const sigColor=(a)=>a==="BUY"?"#1565c0":a==="SELL"?"#2e7d32":"#888";
+
+  const num=(v)=>{const x=parseFloat(v);return isNaN(x)?0:x;};
+  const fmtN=(v)=>num(v).toLocaleString("en-IN",{maximumFractionDigits:2});
+
+  return <div style={{maxHeight:"80vh",overflowY:"auto"}}>
+    <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
+      <button onClick={()=>setBook("INDIA")} style={{...btn,background:book==="INDIA"?"#5a3a1a":"#eee",color:book==="INDIA"?"#fff":"#555"}}>\uD83C\uDDEE\uD83C\uDDF3 India</button>
+      <button onClick={()=>setBook("USA")} style={{...btn,background:book==="USA"?"#5a3a1a":"#eee",color:book==="USA"?"#fff":"#555"}}>\uD83C\uDDFA\uD83C\uDDF8 USA</button>
+      <button onClick={onClose} style={{...btn,background:"#eee",color:"#333",marginLeft:"auto"}}>\u2715</button>
+    </div>
+
+    <div style={{display:"flex",gap:4,marginBottom:10,flexWrap:"wrap"}}>
+      {[["dash","\uD83D\uDCCA Signals"],["ledger","\uD83D\uDCD2 Ledger"],["audit","\uD83D\uDD0D Audit"],["gate","\u2705 Gate check"]].map(([k,l])=>
+        <button key={k} onClick={()=>setTab(k)} style={{...btn,padding:"6px 10px",fontSize:11,
+          background:tab===k?"#5a3a1a":"#f0f0f0",color:tab===k?"#fff":"#555"}}>{l}</button>)}
+    </div>
+
+    {msg&&<div style={{padding:"8px 10px",borderRadius:6,marginBottom:10,fontSize:12,fontWeight:700,
+      background:msg[0]==="\u2713"?"#e8f5e9":"#ffebee",color:msg[0]==="\u2713"?"#2e7d32":"#c62828"}}>{msg}</div>}
+    {err&&<div style={{padding:10,background:"#ffebee",color:"#c62828",borderRadius:6,fontSize:12,marginBottom:10}}>{err}</div>}
+    {loading&&<div style={{padding:20,textAlign:"center",color:"#888"}}>Loading\u2026</div>}
+
+    {/* ─────────────────────────────── SIGNALS ─────────────────────────────── */}
+    {tab==="dash"&&data&&<div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+        <div style={{...card,marginBottom:0,textAlign:"center"}}>
+          <div style={{fontSize:19,fontWeight:800}}>{cur}{fmtN(data.summary.total)}</div>
+          <div style={{fontSize:10,color:"#888"}}>Total</div>
+        </div>
+        <div style={{...card,marginBottom:0,textAlign:"center"}}>
+          <div style={{fontSize:19,fontWeight:800,color:data.summary.unrealised>=0?"#2e7d32":"#c62828"}}>
+            {data.summary.unrealised>=0?"+":""}{fmtN(data.summary.unrealised)}
+          </div>
+          <div style={{fontSize:10,color:"#888"}}>Unrealised ({data.summary.unrealisedPct}%)</div>
+        </div>
+        <div style={{...card,marginBottom:0,textAlign:"center"}}>
+          <div style={{fontSize:16,fontWeight:800}}>{cur}{fmtN(data.summary.stockValue)}</div>
+          <div style={{fontSize:10,color:"#888"}}>In stock</div>
+        </div>
+        <div style={{...card,marginBottom:0,textAlign:"center"}}>
+          <div style={{fontSize:16,fontWeight:800,color:data.summary.cashPct<15?"#c62828":"#333"}}>{data.summary.cashPct}%</div>
+          <div style={{fontSize:10,color:"#888"}}>Cash reserve</div>
+        </div>
+      </div>
+
+      {data.summary.cashPct<15&&data.summary.total>0&&<div style={{...card,background:"#fff8e1",borderColor:"#e0c080"}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#8a6a1a"}}>\u26A0 Cash reserve is thin</div>
+        <div style={{fontSize:11,color:"#7a6a4a",marginTop:3}}>
+          Below about 15% the system has little ammunition left. Further buy signals may not be fundable.
+        </div>
+      </div>}
+
+      <div style={card}>
+        <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:6}}>CASH IN THIS BOOK</div>
+        <div style={{display:"flex",gap:6}}>
+          <input value={cashEdit} onChange={e=>setCashEdit(e.target.value)} style={{...inp,marginBottom:0}} inputMode="decimal"/>
+          <button onClick={saveCash} disabled={!!busy} style={{...btn,background:"#555",color:"#fff",flexShrink:0}}>
+            {busy==="cash"?"\u2026":"Save"}
+          </button>
+        </div>
+      </div>
+
+      {(data.holdings||[]).map(h=>{
+        const s=h.signal||{};
+        return <div key={h.id} style={card}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontWeight:800,fontSize:14}}>{h.symbol}</div>
+              <div style={{fontSize:11,color:"#888"}}>{h.name||""}</div>
+              <div style={{fontSize:11,color:"#555",marginTop:3}}>
+                {fmtN(h.shares)} sh @ avg {cur}{fmtN(h.avg_cost)}
+              </div>
+            </div>
+            <div style={{textAlign:"right",flexShrink:0}}>
+              <div style={{fontWeight:800,fontSize:14}}>{cur}{fmtN(s.mv)}</div>
+              <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:8,color:"#fff",background:sigColor(s.action)}}>{s.action}</span>
+            </div>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:4,marginTop:8,padding:"6px 0",borderTop:"1px solid #f0f0f0",fontSize:11}}>
+            <div><span style={{color:"#888"}}>PC </span><b>{cur}{fmtN(h.portfolio_control)}</b></div>
+            <div><span style={{color:"#888"}}>SAFE </span><b>{cur}{fmtN(s.safe)}</b></div>
+            <div><span style={{color:"#888"}}>Advice </span><b>{cur}{fmtN(s.advice)}</b></div>
+          </div>
+
+          {s.action!=="HOLD"&&<div style={{background:s.action==="BUY"?"#e3f2fd":"#e8f5e9",borderRadius:6,padding:"7px 9px",marginTop:6}}>
+            <div style={{fontSize:12,fontWeight:800,color:sigColor(s.action)}}>
+              {s.action} {cur}{fmtN(s.amount)} \u00B7 about {s.qty} shares
+            </div>
+          </div>}
+
+          <div style={{display:"flex",gap:5,marginTop:8}}>
+            <input defaultValue={h.last_price} placeholder="price" inputMode="decimal"
+              onBlur={e=>{ if(parseFloat(e.target.value)!==parseFloat(h.last_price)) savePrice(h.symbol,e.target.value); }}
+              style={{...inp,marginBottom:0,flex:1}}/>
+            <button onClick={()=>{setTradeFor(h);setTf({action:s.action==="SELL"?"SELL":"BUY",shares:String(s.qty||""),price:String(h.last_price||""),costs:"",note:""});}}
+              style={{...btn,background:"#5a3a1a",color:"#fff",flexShrink:0}}>Record trade</button>
+          </div>
+        </div>;
+      })}
+
+      {!openForm&&<button onClick={()=>setOpenForm(true)} style={{...btn,background:"#eee",color:"#333",width:"100%",padding:"10px"}}>
+        + Open a new position
+      </button>}
+
+      {openForm&&<div style={{...card,background:"#fafafa"}}>
+        <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:6}}>OPEN POSITION \u00B7 this sets Portfolio Control</div>
+        <input value={f.symbol} onChange={e=>setF({...f,symbol:e.target.value})} placeholder="Symbol (e.g. INFY)" style={inp}/>
+        <input value={f.name} onChange={e=>setF({...f,name:e.target.value})} placeholder="Company name" style={inp}/>
+        <input value={f.shares} onChange={e=>setF({...f,shares:e.target.value})} placeholder="Shares" inputMode="decimal" style={inp}/>
+        <input value={f.price} onChange={e=>setF({...f,price:e.target.value})} placeholder="Price per share" inputMode="decimal" style={inp}/>
+        <input value={f.costs} onChange={e=>setF({...f,costs:e.target.value})} placeholder="Brokerage + taxes (optional)" inputMode="decimal" style={inp}/>
+        <div style={{display:"flex",gap:6}}>
+          <button onClick={doOpen} disabled={!!busy} style={{...btn,background:"#2e7d32",color:"#fff",flex:1}}>{busy==="open"?"\u2026":"Open"}</button>
+          <button onClick={()=>setOpenForm(false)} style={{...btn,background:"#eee",color:"#333"}}>Cancel</button>
+        </div>
+      </div>}
+
+      {tradeFor&&<div style={{...card,background:"#fffdf5",borderColor:"#e0c080"}}>
+        <div style={{fontSize:12,fontWeight:800,marginBottom:6}}>Record trade \u00B7 {tradeFor.symbol}</div>
+        <div style={{display:"flex",gap:6,marginBottom:6}}>
+          {["BUY","SELL"].map(a=><button key={a} onClick={()=>setTf({...tf,action:a})}
+            style={{...btn,flex:1,background:tf.action===a?sigColor(a):"#eee",color:tf.action===a?"#fff":"#555"}}>{a}</button>)}
+        </div>
+        <input value={tf.shares} onChange={e=>setTf({...tf,shares:e.target.value})} placeholder="Shares" inputMode="decimal" style={inp}/>
+        <input value={tf.price} onChange={e=>setTf({...tf,price:e.target.value})} placeholder="Price" inputMode="decimal" style={inp}/>
+        <input value={tf.costs} onChange={e=>setTf({...tf,costs:e.target.value})} placeholder="Brokerage + taxes" inputMode="decimal" style={inp}/>
+        <input value={tf.note} onChange={e=>setTf({...tf,note:e.target.value})} placeholder="Note (optional)" style={inp}/>
+        <div style={{fontSize:10.5,color:"#8a6a1a",marginBottom:6}}>
+          {tf.action==="BUY"?"Portfolio Control will rise by half this amount.":"Portfolio Control stays unchanged on a sale."}
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          <button onClick={doTrade} disabled={!!busy} style={{...btn,background:"#5a3a1a",color:"#fff",flex:1}}>{busy==="trade"?"\u2026":"Record"}</button>
+          <button onClick={()=>setTradeFor(null)} style={{...btn,background:"#eee",color:"#333"}}>Cancel</button>
+        </div>
+      </div>}
+    </div>}
+
+    {/* ─────────────────────────────── LEDGER ─────────────────────────────── */}
+    {tab==="ledger"&&<div>
+      <div style={{fontSize:11,color:"#888",marginBottom:8}}>
+        Append-only. Corrections are entered as new adjusting rows, never by editing history.
+      </div>
+      {!ledger.length&&!loading&&<div style={{padding:20,textAlign:"center",color:"#888",fontSize:13}}>No transactions yet.</div>}
+      {ledger.map(t=><div key={t.id} style={card}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+          <div>
+            <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:6,color:"#fff",background:sigColor(t.action)}}>{t.action}</span>
+            <b style={{fontSize:13,marginLeft:6}}>{t.symbol}</b>
+          </div>
+          <div style={{fontSize:11,color:"#888"}}>{t.txn_date}</div>
+        </div>
+        <div style={{fontSize:12,marginTop:5}}>
+          {fmtN(t.shares)} @ {cur}{fmtN(t.price)} = <b>{cur}{fmtN(t.amount)}</b>
+          {num(t.costs)>0?<span style={{color:"#888"}}> + {cur}{fmtN(t.costs)} costs</span>:null}
+        </div>
+        <div style={{fontSize:10.5,color:"#888",marginTop:3}}>
+          PC {cur}{fmtN(t.pc_before)} \u2192 {cur}{fmtN(t.pc_after)} \u00B7 cash after {cur}{fmtN(t.cash_after)}
+        </div>
+        {t.note&&<div style={{fontSize:10.5,color:"#8a6a1a",marginTop:3}}>{t.note}</div>}
+      </div>)}
+    </div>}
+
+    {/* ─────────────────────────────── AUDIT ─────────────────────────────── */}
+    {tab==="audit"&&<div>
+      <div style={{fontSize:11,color:"#888",marginBottom:8}}>
+        Portfolio Control recomputed from the entire ledger and compared against the stored value.
+      </div>
+      {audit&&<div style={{...card,background:audit.clean?"#e8f5e9":"#ffebee",borderColor:audit.clean?"#a0d0a0":"#e0a0a0"}}>
+        <div style={{fontSize:14,fontWeight:800,color:audit.clean?"#2e7d32":"#c62828"}}>
+          {audit.clean?"\u2713 Ledger and holdings agree":"\u2717 "+audit.mismatches+" mismatch(es) found"}
+        </div>
+        <div style={{fontSize:11,color:"#666",marginTop:3}}>{audit.checked} position(s) checked</div>
+      </div>}
+      {audit&&audit.results.map(r=><div key={r.symbol} style={{...card,borderColor:r.ok?"#e0d5c0":"#e0a0a0"}}>
+        <div style={{display:"flex",justifyContent:"space-between"}}>
+          <b style={{fontSize:13}}>{r.symbol}</b>
+          <span style={{fontSize:11,fontWeight:700,color:r.ok?"#2e7d32":"#c62828"}}>{r.ok?"\u2713 OK":"\u2717 MISMATCH"}</span>
+        </div>
+        <div style={{fontSize:11.5,marginTop:5}}>
+          <div>Stored PC <b>{cur}{fmtN(r.storedPC)}</b> \u00B7 from ledger <b>{cur}{fmtN(r.ledgerPC)}</b>
+            {Math.abs(num(r.pcDiff))>=1&&<span style={{color:"#c62828",fontWeight:700}}> \u00B7 diff {fmtN(r.pcDiff)}</span>}</div>
+          <div>Stored shares <b>{fmtN(r.storedShares)}</b> \u00B7 from ledger <b>{fmtN(r.ledgerShares)}</b></div>
+          <div style={{color:"#888",marginTop:2}}>{r.txnCount} transaction(s)</div>
+        </div>
+      </div>)}
+    </div>}
+
+    {/* ────────────────────────────── GATE CHECK ────────────────────────────── */}
+    {tab==="gate"&&<div>
+      <div style={{fontSize:11,color:"#888",marginBottom:8}}>
+        Stage 1 of the manual. Every rule must pass \u2014 a strong number never compensates for a failure.
+      </div>
+      <div style={card}>
+        {[["profitableYears","Profitable years, of last 3"],["opMargin","Operating margin %"],
+          ["bestRoe","Best ROE in last 4 years %"],["debtEquity","Debt to equity"],
+          ["interestCover","Interest cover (x)"],["cashFlow","Operating cash flow"],
+          ["marketCap",book==="INDIA"?"Market cap (Rs. crore)":"Market cap ($ million)"],
+          ["price",book==="INDIA"?"Share price (Rs.)":"Share price ($)"],
+          ["turnover",book==="INDIA"?"Daily turnover (Rs. crore)":"Daily turnover ($ million)"],
+          ["yearsListed","Years listed"],["drawdown","% below 52-week high"]].map(([k,l])=>
+          <div key={k} style={{marginBottom:6}}>
+            <div style={{fontSize:10.5,color:"#888",marginBottom:2}}>{l}</div>
+            <input value={g[k]} onChange={e=>setG({...g,[k]:e.target.value})} inputMode="decimal" style={{...inp,marginBottom:0}}/>
+          </div>)}
+        {book==="INDIA"&&<div>
+          <div style={{marginBottom:6}}>
+            <div style={{fontSize:10.5,color:"#888",marginBottom:2}}>Promoter pledge %</div>
+            <input value={g.pledge} onChange={e=>setG({...g,pledge:e.target.value})} inputMode="decimal" style={{...inp,marginBottom:0}}/>
+          </div>
+          {[["auditorResigned","Auditor resigned in last 24 months"],
+            ["qualifiedOpinion","Qualified audit opinion"],
+            ["regulatoryAction","Regulatory action pending"]].map(([k,l])=>
+            <label key={k} style={{display:"flex",alignItems:"center",gap:7,fontSize:12,padding:"5px 0",cursor:"pointer"}}>
+              <input type="checkbox" checked={g[k]} onChange={e=>setG({...g,[k]:e.target.checked})}/>
+              <span>{l}</span>
+            </label>)}
+        </div>}
+        <button onClick={runGate} disabled={!!busy} style={{...btn,background:"#5a3a1a",color:"#fff",width:"100%",marginTop:8}}>
+          {busy==="gate"?"\u2026":"Run gate check"}
+        </button>
+      </div>
+
+      {gRes&&<div>
+        <div style={{...card,background:gRes.passed?"#e8f5e9":"#ffebee",borderColor:gRes.passed?"#a0d0a0":"#e0a0a0"}}>
+          <div style={{fontSize:15,fontWeight:800,color:gRes.passed?"#2e7d32":"#c62828"}}>
+            {gRes.passed?"\u2713 PASSES the quality gate":"\u2717 FAILS \u2014 "+gRes.failedCount+" rule(s)"}
+          </div>
+          <div style={{fontSize:11.5,color:"#666",marginTop:4}}>{gRes.drawdownBand}</div>
+        </div>
+        <div style={card}>
+          {gRes.checks.map((c,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:11.5,padding:"4px 0",borderBottom:i<gRes.checks.length-1?"1px solid #f4f4f4":"none"}}>
+            <span style={{color:c.pass?"#333":"#c62828",fontWeight:c.pass?400:700}}>
+              {c.pass?"\u2713":"\u2717"} {c.rule}
+            </span>
+            <span style={{color:"#888",flexShrink:0}}>{c.detail}</span>
+          </div>)}
+        </div>
+      </div>}
+    </div>}
+  </div>;
+}
+
 function App(){
   if(IS_VIEW_MODE) return<ShareableView/>;
 
@@ -7533,6 +7889,7 @@ function App(){
   const [showRecv,setShowRecv]=useState(false);
   const [showBank,setShowBank]=useState(false);
   const [showOrders,setShowOrders]=useState(false);
+  const [showAIM,setShowAIM]=useState(false);
   const [tgShareEntry,setTgShareEntry]=useState(null);
   const [capMode,setCapMode]=useState(null); // "purchase" | "sales" | null
   const [showFieldReport,setShowFieldReport]=useState(false);
@@ -7954,6 +8311,7 @@ function App(){
                 {l:"🏦 Bank Archive",fn:()=>setShowBank(true), ownerOnly:true},
                 {l:"💰 Receivables",fn:()=>setShowRecv(true), ownerOnly:true},
                 {l:"📦 Orders",fn:()=>setShowOrders(true), ordersOnly:true},
+                {l:"📈 AIM Trading",fn:()=>setShowAIM(true), ownerOnly:true},
                 {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true), ownerOnly:true},
                 {l:"🛡️ CSD",fn:()=>setShowCSD(true), ownerOnly:true},
                 {l:"🪔 Kerala",fn:()=>setShowKerala(true), ownerOnly:true},
@@ -8228,6 +8586,7 @@ function App(){
     <Modal open={showRecv && IS_OWNER} onClose={()=>setShowRecv(false)}><Receivables entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRecv(false)}/></Modal>
     <Modal open={showBank && IS_OWNER} onClose={()=>setShowBank(false)} wide><BankArchive onClose={()=>setShowBank(false)}/></Modal>
     <Modal open={showOrders && IS_ORDERS_USER} onClose={()=>setShowOrders(false)} wide><Orders onClose={()=>setShowOrders(false)}/></Modal>
+    <Modal open={showAIM && IS_OWNER} onClose={()=>setShowAIM(false)} wide><AIMTrading onClose={()=>setShowAIM(false)}/></Modal>
     <Modal open={!!tgShareEntry} onClose={()=>setTgShareEntry(null)}><TelegramShare entry={tgShareEntry} onClose={()=>setTgShareEntry(null)}/></Modal>
     <Modal open={!!capMode} onClose={()=>setCapMode(null)}><PurchaseSalesCapture mode={capMode} onSaveEntry={saveEntry} onClose={()=>setCapMode(null)}/></Modal>
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
