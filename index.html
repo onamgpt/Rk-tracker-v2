@@ -7674,13 +7674,13 @@ function AIMScreener() {
     cancelRef.current=false; setRows(null); setNote("");
     let syms=NIFTY;
     if(universe==="gated"){
-      if(!fund){ setNote("\u274C Universe file not loaded yet \u2014 wait a moment and try again."); return; }
+      if(!fund){ setNote("❌ Universe file not loaded yet — wait a moment and try again."); return; }
       syms=Object.keys(fund.stocks);
     }
     else if(universe==="full"){
-      setNote("Loading full NSE list from Zerodha\u2026");
+      setNote("Loading full NSE list from Zerodha…");
       const full=await getFullList();
-      if(!full){ setNote("\u274C Full scan needs a Zerodha token. Connect below, or run the Nifty 50 scan."); return; }
+      if(!full){ setNote("❌ Full scan needs a Zerodha token. Connect below, or run the Nifty 50 scan."); return; }
       syms=full;
     }
     setRunning(true);
@@ -7711,7 +7711,7 @@ function AIMScreener() {
     setRows(keep);
     setRunning(false);
     const parts=Object.keys(reasons).sort((a,b)=>reasons[b]-reasons[a]).map(k=>reasons[k]+" "+k);
-    setNote((cancelRef.current?"Stopped early. ":"")+keep.length+" passed the gate, "+gated+" rejected \u2014 "+parts.join(", "));
+    setNote((cancelRef.current?"Stopped early. ":"")+keep.length+" passed the gate, "+gated+" rejected — "+parts.join(", "));
   };
 
   const csv=()=>{
@@ -7744,16 +7744,16 @@ function AIMScreener() {
     <div style={card}>
       <div style={{fontSize:10.5,color:"#888",marginBottom:3}}>Universe</div>
       <select value={universe} onChange={e=>setUniverse(e.target.value)} style={inp}>
-        <option value="gated">Quality-gated universe {fund?"\u2014 "+fund.meta.count+" companies":"\u2014 loading\u2026"}</option>
-        <option value="nifty">Nifty 50 \u2014 quick, about a minute</option>
-        <option value="full">Full NSE \u2014 every listed stock, needs Zerodha</option>
+        <option value="gated">Quality-gated universe {fund?"— "+fund.meta.count+" companies":"— loading…"}</option>
+        <option value="nifty">Nifty 50 — quick, about a minute</option>
+        <option value="full">Full NSE — every listed stock, needs Zerodha</option>
       </select>
 
       <div style={{fontSize:10.5,color:"#888",marginBottom:3}}>History window</div>
       <select value={lookback} onChange={e=>setLookback(e.target.value)} style={inp}>
         <option value="1y">1 year</option>
         <option value="2y">2 years</option>
-        <option value="5y">5 years \u2014 best bounce-back evidence</option>
+        <option value="5y">5 years — best bounce-back evidence</option>
       </select>
       <div style={{fontSize:10.5,color:"#8a6a1a",marginBottom:6}}>
         Bounce-back needs several cycles to mean anything. Over 1 year most stocks show one drawdown or none.
@@ -7766,13 +7766,13 @@ function AIMScreener() {
       </div>}
 
       {!running
-        ? <button onClick={run} style={{...btn,background:"#5a3a1a",color:"#fff",width:"100%"}}>\uD83D\uDD0D Scan</button>
-        : <button onClick={()=>{cancelRef.current=true;}} style={{...btn,background:"#c62828",color:"#fff",width:"100%"}}>\u25A0 Stop</button>}
+        ? <button onClick={run} style={{...btn,background:"#5a3a1a",color:"#fff",width:"100%"}}>🔍 Scan</button>
+        : <button onClick={()=>{cancelRef.current=true;}} style={{...btn,background:"#c62828",color:"#fff",width:"100%"}}>■ Stop</button>}
     </div>
 
     {running&&<div style={{...card,background:"#f8f8f4"}}>
       <div style={{fontSize:12,fontWeight:700}}>Scanned {prog.done} of {prog.total}</div>
-      <div style={{fontSize:11,color:"#666",marginTop:3}}>{prog.kept} passed the gate \u00B7 {prog.gated} rejected</div>
+      <div style={{fontSize:11,color:"#666",marginTop:3}}>{prog.kept} passed the gate · {prog.gated} rejected</div>
       <div style={{height:6,background:"#e8e4dc",borderRadius:3,marginTop:6,overflow:"hidden"}}>
         <div style={{height:"100%",width:(prog.total?prog.done/prog.total*100:0)+"%",background:"#5a3a1a"}}/>
       </div>
@@ -7781,7 +7781,7 @@ function AIMScreener() {
     {note&&<div style={{...card,background:"#fffdf5",fontSize:11.5,color:"#6a5a3a",lineHeight:1.5}}>{note}</div>}
 
     {rows&&rows.length>0&&<div>
-      <button onClick={csv} style={{...btn,background:"#eee",color:"#333",width:"100%",marginBottom:8}}>\u2B07 CSV (all {rows.length})</button>
+      <button onClick={csv} style={{...btn,background:"#eee",color:"#333",width:"100%",marginBottom:8}}>⬇ CSV (all {rows.length})</button>
       {rows.slice(0,60).map((r,i)=><div key={r.sym} style={card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div><b style={{fontSize:13}}>{i+1}. {r.sym}</b>
@@ -7795,12 +7795,12 @@ function AIMScreener() {
           <div>{r.turn===null?"":"Rs."+r.turn.toFixed(1)+"cr/day"}</div>
         </div>
         {r.f&&<div style={{marginTop:5,paddingTop:5,borderTop:"1px solid #f0f0f0",fontSize:10.5,color:"#6a5a3a"}}>
-          <div style={{fontWeight:700}}>{r.f.n} \u00B7 {r.f.ind}</div>
-          <div>ROE {r.f.roe}% \u00B7 D/E {r.f.de} \u00B7 OPM {r.f.opm}% \u00B7 pledge {r.f.pl||0}% \u00B7 mcap Rs.{Math.round(r.f.mc)}cr</div>
+          <div style={{fontWeight:700}}>{r.f.n} · {r.f.ind}</div>
+          <div>ROE {r.f.roe}% · D/E {r.f.de} · OPM {r.f.opm}% · pledge {r.f.pl||0}% · mcap Rs.{Math.round(r.f.mc)}cr</div>
         </div>}
       </div>)}
       {rows.length>60&&<div style={{fontSize:11,color:"#888",textAlign:"center",padding:8}}>
-        Showing top 60 \u00B7 CSV has all {rows.length}
+        Showing top 60 · CSV has all {rows.length}
       </div>}
     </div>}
 
@@ -7871,8 +7871,8 @@ function AIMTrading({ onClose }) {
     try{
       const r=await api({action:"setCash",cash:parseFloat(cashEdit)||0});
       if(!r.ok) throw new Error(r.error);
-      setMsg("\u2713 Cash updated");load();
-    }catch(e){ setMsg("\u2717 "+String(e.message||e)); }
+      setMsg("✓ Cash updated");load();
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
 
@@ -7883,7 +7883,7 @@ function AIMTrading({ onClose }) {
       const r=await api({action:"updatePrice",symbol:sym,price:parseFloat(price)});
       if(!r.ok) throw new Error(r.error);
       load();
-    }catch(e){ setMsg("\u2717 "+String(e.message||e)); }
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
 
@@ -7893,9 +7893,9 @@ function AIMTrading({ onClose }) {
       const r=await api({action:"openPosition",symbol:f.symbol,name:f.name,
         shares:parseFloat(f.shares)||0,price:parseFloat(f.price)||0,costs:parseFloat(f.costs)||0});
       if(!r.ok) throw new Error(r.error);
-      setMsg("\u2713 Opened "+f.symbol+" \u00B7 Portfolio Control set to "+cur+r.pc);
+      setMsg("✓ Opened "+f.symbol+" · Portfolio Control set to "+cur+r.pc);
       setOpenForm(false);setF({symbol:"",name:"",shares:"",price:"",costs:""});load();
-    }catch(e){ setMsg("\u2717 "+String(e.message||e)); }
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
 
@@ -7907,9 +7907,9 @@ function AIMTrading({ onClose }) {
         shares:parseFloat(tf.shares)||0,price:parseFloat(tf.price)||0,
         costs:parseFloat(tf.costs)||0,note:tf.note});
       if(!r.ok) throw new Error(r.error);
-      setMsg("\u2713 "+tf.action+" recorded \u00B7 PC "+cur+r.pcBefore+" \u2192 "+cur+r.pcAfter);
+      setMsg("✓ "+tf.action+" recorded · PC "+cur+r.pcBefore+" → "+cur+r.pcAfter);
       setTradeFor(null);setTf({action:"BUY",shares:"",price:"",costs:"",note:""});load();
-    }catch(e){ setMsg("\u2717 "+String(e.message||e)); }
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
 
@@ -7925,7 +7925,7 @@ function AIMTrading({ onClose }) {
     try{
       const r=await api({action:"cryptoTax",proceeds:parseFloat(taxCalc.proceeds)||0,costBasis:parseFloat(taxCalc.costBasis)||0});
       if(r.ok) setTaxRes(r);
-    }catch(e){ setMsg("\u2717 "+String(e.message||e)); }
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
 
@@ -7935,7 +7935,7 @@ function AIMTrading({ onClose }) {
       const r=await api({action:"gateCheck",data:g});
       if(!r.ok) throw new Error(r.error);
       setGRes(r);
-    }catch(e){ setMsg("\u2717 "+String(e.message||e)); }
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
 
@@ -7949,22 +7949,22 @@ function AIMTrading({ onClose }) {
 
   return <div style={{maxHeight:"80vh",overflowY:"auto"}}>
     <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
-      <button onClick={()=>setBook("INDIA")} style={{...btn,background:book==="INDIA"?"#5a3a1a":"#eee",color:book==="INDIA"?"#fff":"#555"}}>\uD83C\uDDEE\uD83C\uDDF3 India</button>
-      <button onClick={()=>setBook("USA")} style={{...btn,background:book==="USA"?"#5a3a1a":"#eee",color:book==="USA"?"#fff":"#555"}}>\uD83C\uDDFA\uD83C\uDDF8 USA</button>
-      <button onClick={()=>setBook("CRYPTO")} style={{...btn,background:isCrypto?"#5a3a1a":"#eee",color:isCrypto?"#fff":"#555"}}>\u20BF Crypto</button>
-      <button onClick={onClose} style={{...btn,background:"#eee",color:"#333",marginLeft:"auto"}}>\u2715</button>
+      <button onClick={()=>setBook("INDIA")} style={{...btn,background:book==="INDIA"?"#5a3a1a":"#eee",color:book==="INDIA"?"#fff":"#555"}}>🇮🇳 India</button>
+      <button onClick={()=>setBook("USA")} style={{...btn,background:book==="USA"?"#5a3a1a":"#eee",color:book==="USA"?"#fff":"#555"}}>🇺🇸 USA</button>
+      <button onClick={()=>setBook("CRYPTO")} style={{...btn,background:isCrypto?"#5a3a1a":"#eee",color:isCrypto?"#fff":"#555"}}>₿ Crypto</button>
+      <button onClick={onClose} style={{...btn,background:"#eee",color:"#333",marginLeft:"auto"}}>✕</button>
     </div>
 
     <div style={{display:"flex",gap:4,marginBottom:10,flexWrap:"wrap"}}>
-      {[["dash","\uD83D\uDCCA Signals"],["screener","\uD83D\uDD0D Screener"],["compare","\u2696 Compare"],["ledger","\uD83D\uDCD2 Ledger"],["audit","\uD83D\uDD0D Audit"],["gate","\u2705 Gate check"]].map(([k,l])=>
+      {[["dash","📊 Signals"],["screener","🔍 Screener"],["compare","⚖ Compare"],["ledger","📒 Ledger"],["audit","🔍 Audit"],["gate","✅ Gate check"]].map(([k,l])=>
         <button key={k} onClick={()=>setTab(k)} style={{...btn,padding:"6px 10px",fontSize:11,
           background:tab===k?"#5a3a1a":"#f0f0f0",color:tab===k?"#fff":"#555"}}>{l}</button>)}
     </div>
 
     {msg&&<div style={{padding:"8px 10px",borderRadius:6,marginBottom:10,fontSize:12,fontWeight:700,
-      background:msg[0]==="\u2713"?"#e8f5e9":"#ffebee",color:msg[0]==="\u2713"?"#2e7d32":"#c62828"}}>{msg}</div>}
+      background:msg[0]==="✓"?"#e8f5e9":"#ffebee",color:msg[0]==="✓"?"#2e7d32":"#c62828"}}>{msg}</div>}
     {err&&<div style={{padding:10,background:"#ffebee",color:"#c62828",borderRadius:6,fontSize:12,marginBottom:10}}>{err}</div>}
-    {loading&&<div style={{padding:20,textAlign:"center",color:"#888"}}>Loading\u2026</div>}
+    {loading&&<div style={{padding:20,textAlign:"center",color:"#888"}}>Loading…</div>}
 
     {/* ─────────────────────────────── SIGNALS ─────────────────────────────── */}
     {tab==="dash"&&data&&<div>
@@ -7992,14 +7992,14 @@ function AIMTrading({ onClose }) {
       {isCrypto&&<div style={{...card,background:"#fff4f4",borderColor:"#e0a0a0"}}>
         <div style={{fontSize:12,fontWeight:800,color:"#c62828"}}>Tax before you act on a sell signal</div>
         <div style={{fontSize:11,color:"#8a4a4a",marginTop:4,lineHeight:1.5}}>
-          Flat 31.2% on every gain, 1% TDS on every sale, and losses give <b>no</b> relief \u2014 not against
+          Flat 31.2% on every gain, 1% TDS on every sale, and losses give <b>no</b> relief — not against
           other income, not against gains on the other coin, not carried forward. AIM trades often,
           so model each sell first.
         </div>
         <div style={{display:"flex",gap:5,marginTop:8}}>
           <input value={taxCalc.proceeds} onChange={e=>setTaxCalc({...taxCalc,proceeds:e.target.value})} placeholder="Sale proceeds" inputMode="decimal" style={{...inp,marginBottom:0}}/>
           <input value={taxCalc.costBasis} onChange={e=>setTaxCalc({...taxCalc,costBasis:e.target.value})} placeholder="Cost of those coins" inputMode="decimal" style={{...inp,marginBottom:0}}/>
-          <button onClick={runTax} disabled={!!busy} style={{...btn,background:"#c62828",color:"#fff",flexShrink:0}}>{busy==="tax"?"\u2026":"Tax"}</button>
+          <button onClick={runTax} disabled={!!busy} style={{...btn,background:"#c62828",color:"#fff",flexShrink:0}}>{busy==="tax"?"…":"Tax"}</button>
         </div>
         {taxRes&&<div style={{background:"#fff",borderRadius:6,padding:"8px 10px",marginTop:8,fontSize:11.5}}>
           <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}><span>Gain</span><b>{cur}{fmtN(taxRes.gain)}</b></div>
@@ -8014,7 +8014,7 @@ function AIMTrading({ onClose }) {
       </div>}
 
       {data.summary.cashPct<15&&data.summary.total>0&&<div style={{...card,background:"#fff8e1",borderColor:"#e0c080"}}>
-        <div style={{fontSize:12,fontWeight:700,color:"#8a6a1a"}}>\u26A0 Cash reserve is thin</div>
+        <div style={{fontSize:12,fontWeight:700,color:"#8a6a1a"}}>⚠ Cash reserve is thin</div>
         <div style={{fontSize:11,color:"#7a6a4a",marginTop:3}}>
           Below about 15% the system has little ammunition left. Further buy signals may not be fundable.
         </div>
@@ -8025,7 +8025,7 @@ function AIMTrading({ onClose }) {
         <div style={{display:"flex",gap:6}}>
           <input value={cashEdit} onChange={e=>setCashEdit(e.target.value)} style={{...inp,marginBottom:0}} inputMode="decimal"/>
           <button onClick={saveCash} disabled={!!busy} style={{...btn,background:"#555",color:"#fff",flexShrink:0}}>
-            {busy==="cash"?"\u2026":"Save"}
+            {busy==="cash"?"…":"Save"}
           </button>
         </div>
       </div>
@@ -8055,7 +8055,7 @@ function AIMTrading({ onClose }) {
 
           {s.action!=="HOLD"&&<div style={{background:s.action==="BUY"?"#e3f2fd":"#e8f5e9",borderRadius:6,padding:"7px 9px",marginTop:6}}>
             <div style={{fontSize:12,fontWeight:800,color:sigColor(s.action)}}>
-              {s.action} {cur}{fmtN(s.amount)} \u00B7 about {s.qty} shares
+              {s.action} {cur}{fmtN(s.amount)} · about {s.qty} shares
             </div>
           </div>}
 
@@ -8074,7 +8074,7 @@ function AIMTrading({ onClose }) {
       </button>}
 
       {openForm&&<div style={{...card,background:"#fafafa"}}>
-        <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:6}}>OPEN POSITION \u00B7 this sets Portfolio Control</div>
+        <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:6}}>OPEN POSITION · this sets Portfolio Control</div>
         {isCrypto
           ? <div style={{display:"flex",gap:6,marginBottom:6}}>
               {["BTC","ETH"].map(c=><button key={c} onClick={()=>setF({...f,symbol:c,name:c==="BTC"?"Bitcoin":"Ethereum"})}
@@ -8086,13 +8086,13 @@ function AIMTrading({ onClose }) {
         <input value={f.price} onChange={e=>setF({...f,price:e.target.value})} placeholder="Price per share" inputMode="decimal" style={inp}/>
         <input value={f.costs} onChange={e=>setF({...f,costs:e.target.value})} placeholder="Brokerage + taxes (optional)" inputMode="decimal" style={inp}/>
         <div style={{display:"flex",gap:6}}>
-          <button onClick={doOpen} disabled={!!busy} style={{...btn,background:"#2e7d32",color:"#fff",flex:1}}>{busy==="open"?"\u2026":"Open"}</button>
+          <button onClick={doOpen} disabled={!!busy} style={{...btn,background:"#2e7d32",color:"#fff",flex:1}}>{busy==="open"?"…":"Open"}</button>
           <button onClick={()=>setOpenForm(false)} style={{...btn,background:"#eee",color:"#333"}}>Cancel</button>
         </div>
       </div>}
 
       {tradeFor&&<div style={{...card,background:"#fffdf5",borderColor:"#e0c080"}}>
-        <div style={{fontSize:12,fontWeight:800,marginBottom:6}}>Record trade \u00B7 {tradeFor.symbol}</div>
+        <div style={{fontSize:12,fontWeight:800,marginBottom:6}}>Record trade · {tradeFor.symbol}</div>
         <div style={{display:"flex",gap:6,marginBottom:6}}>
           {["BUY","SELL"].map(a=><button key={a} onClick={()=>setTf({...tf,action:a})}
             style={{...btn,flex:1,background:tf.action===a?sigColor(a):"#eee",color:tf.action===a?"#fff":"#555"}}>{a}</button>)}
@@ -8105,7 +8105,7 @@ function AIMTrading({ onClose }) {
           {tf.action==="BUY"?"Portfolio Control will rise by half this amount.":"Portfolio Control stays unchanged on a sale."}
         </div>
         <div style={{display:"flex",gap:6}}>
-          <button onClick={doTrade} disabled={!!busy} style={{...btn,background:"#5a3a1a",color:"#fff",flex:1}}>{busy==="trade"?"\u2026":"Record"}</button>
+          <button onClick={doTrade} disabled={!!busy} style={{...btn,background:"#5a3a1a",color:"#fff",flex:1}}>{busy==="trade"?"…":"Record"}</button>
           <button onClick={()=>setTradeFor(null)} style={{...btn,background:"#eee",color:"#333"}}>Cancel</button>
         </div>
       </div>}
@@ -8121,7 +8121,7 @@ function AIMTrading({ onClose }) {
       </div>
       {cmp&&cmp.map(b=><div key={b.book} style={{...card,borderColor:b.book==="CRYPTO"?"#e0a0a0":"#e0d5c0"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <b style={{fontSize:14}}>{b.book==="CRYPTO"?"\u20BF CRYPTO":b.book==="INDIA"?"INDIA":"USA"}</b>
+          <b style={{fontSize:14}}>{b.book==="CRYPTO"?"₿ CRYPTO":b.book==="INDIA"?"INDIA":"USA"}</b>
           <span style={{fontSize:11,color:"#888"}}>{b.positions} position(s)</span>
         </div>
         {b.positions===0&&b.symbolCount===0
@@ -8180,7 +8180,7 @@ function AIMTrading({ onClose }) {
           {num(t.costs)>0?<span style={{color:"#888"}}> + {cur}{fmtN(t.costs)} costs</span>:null}
         </div>
         <div style={{fontSize:10.5,color:"#888",marginTop:3}}>
-          PC {cur}{fmtN(t.pc_before)} \u2192 {cur}{fmtN(t.pc_after)} \u00B7 cash after {cur}{fmtN(t.cash_after)}
+          PC {cur}{fmtN(t.pc_before)} → {cur}{fmtN(t.pc_after)} · cash after {cur}{fmtN(t.cash_after)}
         </div>
         {t.note&&<div style={{fontSize:10.5,color:"#8a6a1a",marginTop:3}}>{t.note}</div>}
       </div>)}
@@ -8193,19 +8193,19 @@ function AIMTrading({ onClose }) {
       </div>
       {audit&&<div style={{...card,background:audit.clean?"#e8f5e9":"#ffebee",borderColor:audit.clean?"#a0d0a0":"#e0a0a0"}}>
         <div style={{fontSize:14,fontWeight:800,color:audit.clean?"#2e7d32":"#c62828"}}>
-          {audit.clean?"\u2713 Ledger and holdings agree":"\u2717 "+audit.mismatches+" mismatch(es) found"}
+          {audit.clean?"✓ Ledger and holdings agree":"✗ "+audit.mismatches+" mismatch(es) found"}
         </div>
         <div style={{fontSize:11,color:"#666",marginTop:3}}>{audit.checked} position(s) checked</div>
       </div>}
       {audit&&audit.results.map(r=><div key={r.symbol} style={{...card,borderColor:r.ok?"#e0d5c0":"#e0a0a0"}}>
         <div style={{display:"flex",justifyContent:"space-between"}}>
           <b style={{fontSize:13}}>{r.symbol}</b>
-          <span style={{fontSize:11,fontWeight:700,color:r.ok?"#2e7d32":"#c62828"}}>{r.ok?"\u2713 OK":"\u2717 MISMATCH"}</span>
+          <span style={{fontSize:11,fontWeight:700,color:r.ok?"#2e7d32":"#c62828"}}>{r.ok?"✓ OK":"✗ MISMATCH"}</span>
         </div>
         <div style={{fontSize:11.5,marginTop:5}}>
-          <div>Stored PC <b>{cur}{fmtN(r.storedPC)}</b> \u00B7 from ledger <b>{cur}{fmtN(r.ledgerPC)}</b>
-            {Math.abs(num(r.pcDiff))>=1&&<span style={{color:"#c62828",fontWeight:700}}> \u00B7 diff {fmtN(r.pcDiff)}</span>}</div>
-          <div>Stored shares <b>{fmtN(r.storedShares)}</b> \u00B7 from ledger <b>{fmtN(r.ledgerShares)}</b></div>
+          <div>Stored PC <b>{cur}{fmtN(r.storedPC)}</b> · from ledger <b>{cur}{fmtN(r.ledgerPC)}</b>
+            {Math.abs(num(r.pcDiff))>=1&&<span style={{color:"#c62828",fontWeight:700}}> · diff {fmtN(r.pcDiff)}</span>}</div>
+          <div>Stored shares <b>{fmtN(r.storedShares)}</b> · from ledger <b>{fmtN(r.ledgerShares)}</b></div>
           <div style={{color:"#888",marginTop:2}}>{r.txnCount} transaction(s)</div>
         </div>
       </div>)}
@@ -8214,7 +8214,7 @@ function AIMTrading({ onClose }) {
     {/* ────────────────────────────── GATE CHECK ────────────────────────────── */}
     {tab==="gate"&&<div>
       <div style={{fontSize:11,color:"#888",marginBottom:8}}>
-        Stage 1 of the manual. Every rule must pass \u2014 a strong number never compensates for a failure.
+        Stage 1 of the manual. Every rule must pass — a strong number never compensates for a failure.
       </div>
       <div style={card}>
         {[["profitableYears","Profitable years, of last 3"],["opMargin","Operating margin %"],
@@ -8242,21 +8242,21 @@ function AIMTrading({ onClose }) {
             </label>)}
         </div>}
         <button onClick={runGate} disabled={!!busy} style={{...btn,background:"#5a3a1a",color:"#fff",width:"100%",marginTop:8}}>
-          {busy==="gate"?"\u2026":"Run gate check"}
+          {busy==="gate"?"…":"Run gate check"}
         </button>
       </div>
 
       {gRes&&<div>
         <div style={{...card,background:gRes.passed?"#e8f5e9":"#ffebee",borderColor:gRes.passed?"#a0d0a0":"#e0a0a0"}}>
           <div style={{fontSize:15,fontWeight:800,color:gRes.passed?"#2e7d32":"#c62828"}}>
-            {gRes.passed?"\u2713 PASSES the quality gate":"\u2717 FAILS \u2014 "+gRes.failedCount+" rule(s)"}
+            {gRes.passed?"✓ PASSES the quality gate":"✗ FAILS — "+gRes.failedCount+" rule(s)"}
           </div>
           <div style={{fontSize:11.5,color:"#666",marginTop:4}}>{gRes.drawdownBand}</div>
         </div>
         <div style={card}>
           {gRes.checks.map((c,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:11.5,padding:"4px 0",borderBottom:i<gRes.checks.length-1?"1px solid #f4f4f4":"none"}}>
             <span style={{color:c.pass?"#333":"#c62828",fontWeight:c.pass?400:700}}>
-              {c.pass?"\u2713":"\u2717"} {c.rule}
+              {c.pass?"✓":"✗"} {c.rule}
             </span>
             <span style={{color:"#888",flexShrink:0}}>{c.detail}</span>
           </div>)}
