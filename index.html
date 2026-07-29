@@ -7519,6 +7519,16 @@ function Orders({ onClose }) {
 //  Price-based factors only. ROE, debt, cash flow and promoter pledge need a
 //  fundamentals feed and are left to the Gate check tab, by hand.
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+//  AIM SCREENER  —  full NSE scan with the Stage 1 gate applied BEFORE scoring
+//
+//  The old screener scored everything and filtered afterwards, which is how a
+//  Rs.9 stock reached rank 9. Here the gate runs first: anything that fails is
+//  discarded and never receives a score.
+//
+//  Price-based factors only. ROE, debt, cash flow and promoter pledge need a
+//  fundamentals feed and are left to the Gate check tab, by hand.
+// ─────────────────────────────────────────────────────────────────────────────
 function AIMScreener() {
   const [universe,setUniverse]=useState("nifty");
   const [lookback,setLookback]=useState("2y");
@@ -7528,6 +7538,11 @@ function AIMScreener() {
   const [rows,setRows]=useState(null);
   const [note,setNote]=useState("");
   const cancelRef=useRef(false);
+  const [fund,setFund]=useState(null);        // fundamentals-gated universe
+
+  useEffect(()=>{
+    fetch("/aim-universe.json").then(r=>r.json()).then(setFund).catch(()=>setFund(null));
+  },[]);
 
   const NIFTY=["RELIANCE","TCS","HDFCBANK","ICICIBANK","INFY","ITC","SBIN","BHARTIARTL","LT","HCLTECH",
     "BAJFINANCE","ASIANPAINT","TITAN","SUNPHARMA","MARUTI","AXISBANK","KOTAKBANK","NESTLEIND","ULTRACEMCO",
@@ -7607,6 +7622,15 @@ function AIMScreener() {
   };
 
   // ── STAGE 2 SCORE — survivors only. Price factors, renormalised to 100. ────
+  // The manual's drawdown bands, as a preference rather than a pass/fail.
+  // 8-25% below the high is where AIM does its best work; at the high it just waits.
+  const bandScore=(dd)=>{
+    if(dd<8) return 35;                      // little discount — AIM sits idle
+    if(dd<=25) return 100;                   // PREFERRED
+    if(dd<=40) return 100-(dd-25)*3.5;       // allowed but flagged
+    return 0;
+  };
+
   const score=(m)=>{
     let v;
     if(m.volAnn<15) v=m.volAnn/15*40;
@@ -7619,8 +7643,9 @@ function AIMScreener() {
     let t=0;
     if(m.ma200!==null){ if(m.ltp>=m.ma200) t+=60; if(m.maRising) t+=40; }
 
-    // manual weights 30/25/20 renormalised across the three price factors
-    return v*0.40+b*0.33+t*0.27;
+    // manual weights: volatility 30, bounce-back 25, trend 20, plus the
+    // drawdown band at 25 — without it the list ranks stocks at their highs first.
+    return v*0.30+b*0.25+t*0.20+bandScore(m.drawdown)*0.25;
   };
 
   const fetchHist=(sym)=>fetch("/.netlify/functions/yahoo?action=history&symbol="+encodeURIComponent(sym+".NS")+"&range="+lookback)
@@ -7648,7 +7673,11 @@ function AIMScreener() {
   const run=async()=>{
     cancelRef.current=false; setRows(null); setNote("");
     let syms=NIFTY;
-    if(universe==="full"){
+    if(universe==="gated"){
+      if(!fund){ setNote("\u274C Universe file not loaded yet \u2014 wait a moment and try again."); return; }
+      syms=Object.keys(fund.stocks);
+    }
+    else if(universe==="full"){
       setNote("Loading full NSE list from Zerodha\u2026");
       const full=await getFullList();
       if(!full){ setNote("\u274C Full scan needs a Zerodha token. Connect below, or run the Nifty 50 scan."); return; }
@@ -7671,7 +7700,8 @@ function AIMScreener() {
         const m=metrics(d.closes,d.vols);
         const fail=gate(m);
         if(fail){ gated++; reasons[fail]=(reasons[fail]||0)+1; return; }
-        keep.push(Object.assign({sym:s},m,{score:score(m)}));
+        const f=(fund&&fund.stocks[s])||null;
+        keep.push(Object.assign({sym:s},m,{score:score(m),f:f}));
       });
       setProg({done,total,kept:keep.length,gated});
       await new Promise(r=>setTimeout(r,220));
@@ -7686,11 +7716,13 @@ function AIMScreener() {
 
   const csv=()=>{
     if(!rows||!rows.length) return;
-    let s="Rank,Symbol,LTP,PctBelow52wHigh,PosInRange,AnnVolPct,BounceBackPct,DrawdownsSeen,TurnoverCr,Above200DMA,Score\n";
+    let s="Rank,Symbol,LTP,PctBelow52wHigh,PosInRange,AnnVolPct,BounceBackPct,DrawdownsSeen,TurnoverCr,Above200DMA,MarketCapCr,ROE,DebtEquity,OPM,PledgePct,Score\n";
     rows.forEach((r,i)=>{
       s+=[i+1,r.sym,r.ltp.toFixed(2),r.drawdown.toFixed(1),r.posPct.toFixed(1),r.volAnn.toFixed(1),
           r.bouncePct===null?"":r.bouncePct.toFixed(0),r.ddCount,r.turn===null?"":r.turn.toFixed(2),
-          (r.ma200!==null&&r.ltp>=r.ma200)?"Y":"N",Math.round(r.score)].join(",")+"\n";
+          (r.ma200!==null&&r.ltp>=r.ma200)?"Y":"N",
+          r.f?r.f.mc:"",r.f?r.f.roe:"",r.f?r.f.de:"",r.f?r.f.opm:"",r.f?(r.f.pl||0):"",
+          Math.round(r.score)].join(",")+"\n";
     });
     const a=document.createElement("a");
     a.href=URL.createObjectURL(new Blob([s],{type:"text/csv"}));
@@ -7704,15 +7736,17 @@ function AIMScreener() {
 
   return <div>
     <div style={{fontSize:11,color:"#888",marginBottom:8,lineHeight:1.5}}>
-      The quality gate runs <b>before</b> scoring, so a stock that fails is discarded rather than ranked.
-      Price factors only \u2014 ROE, debt and pledge still need the Gate check tab.
+      Two gates run <b>before</b> any score. The fundamentals gate (ROE, debt, interest cover,
+      cash flow, market cap, promoter pledge) comes from your uploaded company data; the price gate
+      (floor, turnover, drawdown, volatility) comes from live history. Only survivors get ranked.
     </div>
 
     <div style={card}>
       <div style={{fontSize:10.5,color:"#888",marginBottom:3}}>Universe</div>
       <select value={universe} onChange={e=>setUniverse(e.target.value)} style={inp}>
+        <option value="gated">Quality-gated universe {fund?"\u2014 "+fund.meta.count+" companies":"\u2014 loading\u2026"}</option>
         <option value="nifty">Nifty 50 \u2014 quick, about a minute</option>
-        <option value="full">Full NSE \u2014 all listed stocks, needs Zerodha</option>
+        <option value="full">Full NSE \u2014 every listed stock, needs Zerodha</option>
       </select>
 
       <div style={{fontSize:10.5,color:"#888",marginBottom:3}}>History window</div>
@@ -7760,6 +7794,10 @@ function AIMScreener() {
           <div>{r.bouncePct===null?"no drawdowns seen":r.bouncePct.toFixed(0)+"% bounced back ("+r.ddCount+")"}</div>
           <div>{r.turn===null?"":"Rs."+r.turn.toFixed(1)+"cr/day"}</div>
         </div>
+        {r.f&&<div style={{marginTop:5,paddingTop:5,borderTop:"1px solid #f0f0f0",fontSize:10.5,color:"#6a5a3a"}}>
+          <div style={{fontWeight:700}}>{r.f.n} \u00B7 {r.f.ind}</div>
+          <div>ROE {r.f.roe}% \u00B7 D/E {r.f.de} \u00B7 OPM {r.f.opm}% \u00B7 pledge {r.f.pl||0}% \u00B7 mcap Rs.{Math.round(r.f.mc)}cr</div>
+        </div>}
       </div>)}
       {rows.length>60&&<div style={{fontSize:11,color:"#888",textAlign:"center",padding:8}}>
         Showing top 60 \u00B7 CSV has all {rows.length}
