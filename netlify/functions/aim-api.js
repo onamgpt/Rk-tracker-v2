@@ -97,13 +97,14 @@ function replayLedger(txns) {
     return d !== 0 ? d : (a.id - b.id);
   });
 
-  let pc = 0, shares = 0, cost = 0, first = true;
+  let pc = 0, shares = 0, cost = 0, first = true, realised = 0, costsPaid = 0;
   const steps = [];
 
   rows.forEach(t => {
     const act = String(t.action || "").toUpperCase();
     const amt = n(t.amount);
     const pcBefore = pc;
+    costsPaid += n(t.costs);
 
     if (act === "BUY") {
       // The opening purchase sets PC. Every later buy adds half its value.
@@ -113,9 +114,11 @@ function replayLedger(txns) {
       first = false;
     } else if (act === "SELL") {
       // PC deliberately unchanged — this asymmetry is the ratchet.
-      shares -= n(t.shares);
-      if (shares > 0) cost = cost * (shares / (shares + n(t.shares)));
-      else cost = 0;
+      const sold = n(t.shares);
+      const avg = shares > 0 ? cost / shares : 0;
+      realised += (n(t.price) - avg) * sold - n(t.costs);
+      shares -= sold;
+      cost = shares > 0 ? avg * shares : 0;
     } else if (act === "ADJUST") {
       // Explicit correction, recorded rather than hidden.
       if (t.pc_after !== null && t.pc_after !== undefined) pc = n(t.pc_after);
@@ -128,7 +131,7 @@ function replayLedger(txns) {
     });
   });
 
-  return { pc: r2(pc), shares: r2(shares), cost: r2(cost), steps };
+  return { pc: r2(pc), shares: r2(shares), cost: r2(cost), realised: r2(realised), costsPaid: r2(costsPaid), steps };
 }
 
 // ============================================================================
@@ -367,6 +370,45 @@ exports.handler = async (event) => {
     // pass/fail per rule — deliberately not a score, so nothing compensates.
     if (action === "gateCheck") {
       const d = body.data || {};
+
+      // Crypto has no earnings, no balance sheet and no auditor, so the equity
+      // gate is meaningless here. A different gate applies, built on survival
+      // through drawdown cycles rather than on financial statements.
+      if (book === "CRYPTO") {
+        const cc = [];
+        const cadd = (rule, pass, detail) => cc.push({ rule, pass: !!pass, detail });
+        const sym = String(d.symbol || "").toUpperCase();
+
+        cadd("Bitcoin or Ethereum only", sym === "BTC" || sym === "ETH",
+             sym || "not set");
+        cadd("At least 8 years of price history", n(d.yearsLive) >= 8,
+             n(d.yearsLive) + " years");
+        cadd("Survived and recovered from at least 2 drawdowns over 50%",
+             n(d.majorRecoveries) >= 2, n(d.majorRecoveries) + " recoveries");
+        cadd("Top 2 by market cap", n(d.rank) > 0 && n(d.rank) <= 2,
+             "rank " + n(d.rank));
+        cadd("Listed on a regulated Indian exchange", !!d.indianExchange,
+             d.indianExchange ? "yes" : "no");
+        cadd("Daily volume above USD 1 billion", n(d.volume) >= 1000,
+             "$" + n(d.volume) + "m");
+        cadd("Position sized so a 70% fall is survivable",
+             !!d.drawdownAccepted,
+             d.drawdownAccepted ? "acknowledged" : "NOT acknowledged");
+
+        const failed2 = cc.filter(c => !c.pass);
+        return OK({
+          ok: true,
+          passed: failed2.length === 0,
+          failedCount: failed2.length,
+          checks: cc,
+          drawdownBand: "Crypto is judged on cycle survival, not on distance from the high. "
+                      + "Bitcoin has repeatedly fallen 70-80% and recovered; the 40% equity "
+                      + "rule would exclude it almost permanently and is not applied here.",
+          taxWarning: "Every sale is taxed at a flat 31.2% with no loss offset, plus 1% TDS. "
+                    + "AIM trades often, so model the tax before acting on a sell signal."
+        });
+      }
+
       const isIndia = book === "INDIA";
       const checks = [];
       const add = (rule, pass, detail) => checks.push({ rule, pass: !!pass, detail });
@@ -413,6 +455,86 @@ exports.handler = async (event) => {
         failedCount: failed.length,
         checks,
         drawdownBand: band
+      });
+    }
+
+    // ----------------------------------------------------------- COMPARE
+    // Head-to-head across books. Crypto tax is deterministic (flat 31.2%, no
+    // offset) so it is computed exactly. Equity tax depends on holding period,
+    // so both scenarios are shown rather than one guessed figure.
+    if (action === "compare") {
+      const books = ["INDIA", "USA", "CRYPTO"];
+      const out = [];
+
+      for (const b of books) {
+        const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + b);
+        const holdings = (hr.status < 300 && hr.body) ? hr.body : [];
+        const tr = await sb("GET", "/rest/v1/aim_transactions?select=*&book=eq." + b + "&order=txn_date.asc,id.asc&limit=5000");
+        const txns = (tr.status < 300 && tr.body) ? tr.body : [];
+        const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + b);
+        const cash = (cr.status < 300 && cr.body && cr.body.length) ? n(cr.body[0].cash) : 0;
+
+        let realised = 0, costsPaid = 0;
+        const symbols = {};
+        txns.forEach(t => { symbols[String(t.symbol).toUpperCase()] = 1; });
+        Object.keys(symbols).forEach(sym => {
+          const mine = txns.filter(t => String(t.symbol).toUpperCase() === sym);
+          const rep = replayLedger(mine);
+          realised += rep.realised;
+          costsPaid += rep.costsPaid;
+        });
+
+        const marketValue = holdings.reduce((s2, h) => s2 + n(h.shares) * n(h.last_price), 0);
+        const invested    = holdings.reduce((s2, h) => s2 + n(h.shares) * n(h.avg_cost), 0);
+        const unrealised  = marketValue - invested;
+
+        // Crypto: flat 31.2%, no loss offset, so a loss yields zero relief.
+        const cryptoTax = b === "CRYPTO" ? (realised > 0 ? realised * 0.312 : 0) : null;
+        const equityStcg = b !== "CRYPTO" ? (realised > 0 ? realised * 0.20 : 0) : null;
+        const equityLtcg = b !== "CRYPTO" ? (realised > 0 ? realised * 0.125 : 0) : null;
+
+        out.push({
+          book: b,
+          positions: holdings.length,
+          invested: r2(invested),
+          marketValue: r2(marketValue),
+          cash: r2(cash),
+          total: r2(marketValue + cash),
+          unrealised: r2(unrealised),
+          unrealisedPct: invested > 0 ? r2(unrealised / invested * 100) : 0,
+          realised: r2(realised),
+          costsPaid: r2(costsPaid),
+          tax: {
+            crypto: cryptoTax === null ? null : r2(cryptoTax),
+            stcg: equityStcg === null ? null : r2(equityStcg),
+            ltcg: equityLtcg === null ? null : r2(equityLtcg)
+          },
+          netAfterTax: b === "CRYPTO"
+            ? r2(unrealised + realised - (cryptoTax || 0))
+            : r2(unrealised + realised - (equityStcg || 0)),
+          symbolCount: Object.keys(symbols).length
+        });
+      }
+
+      return OK({ ok: true, books: out });
+    }
+
+    // ------------------------------------------------- CRYPTO TAX ESTIMATE
+    // What a sale actually costs under Section 115BBH / 194S.
+    if (action === "cryptoTax") {
+      const proceeds = n(body.proceeds), costBasis = n(body.costBasis);
+      const gain = proceeds - costBasis;
+      const tds = proceeds * 0.01;
+      const tax = gain > 0 ? gain * 0.312 : 0;
+      return OK({
+        ok: true,
+        proceeds: r2(proceeds), costBasis: r2(costBasis), gain: r2(gain),
+        tds: r2(tds), tax: r2(tax),
+        netInHand: r2(proceeds - tds - tax),
+        effectivePct: gain > 0 ? r2((tax + tds) / gain * 100) : null,
+        note: gain <= 0
+          ? "Loss on a VDA gives no relief: it cannot offset other income, other crypto gains, or be carried forward. The 1% TDS is still deducted."
+          : "Flat 30% plus 4% cess under Section 115BBH, plus 1% TDS under Section 194S."
       });
     }
 

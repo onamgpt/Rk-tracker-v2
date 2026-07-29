@@ -7526,8 +7526,12 @@ function AIMTrading({ onClose }) {
   const [cashEdit,setCashEdit]=useState("");
   const [g,setG]=useState({profitableYears:"",opMargin:"",bestRoe:"",debtEquity:"",interestCover:"",cashFlow:"",marketCap:"",price:"",turnover:"",yearsListed:"",drawdown:"",pledge:"",auditorResigned:false,qualifiedOpinion:false,regulatoryAction:false});
   const [gRes,setGRes]=useState(null);
+  const [cmp,setCmp]=useState(null);
+  const [taxCalc,setTaxCalc]=useState({proceeds:"",costBasis:""});
+  const [taxRes,setTaxRes]=useState(null);
 
-  const cur=book==="INDIA"?"Rs.":"$";
+  const isCrypto=book==="CRYPTO";
+  const cur=book==="USA"?"$":isCrypto?"Rs.":"Rs.";
 
   const api=async(payload)=>{
     const r=await fetch("/.netlify/functions/aim-api",{
@@ -7559,7 +7563,7 @@ function AIMTrading({ onClose }) {
     setLoading(false);
   };
 
-  useEffect(()=>{ if(tab==="dash") load(); if(tab==="ledger") loadLedger(); if(tab==="audit") runAudit(); },[book,tab]);
+  useEffect(()=>{ if(tab==="dash") load(); if(tab==="ledger") loadLedger(); if(tab==="audit") runAudit(); if(tab==="compare") runCompare(); },[book,tab]);
 
   const saveCash=async()=>{
     setBusy("cash");setMsg("");
@@ -7608,6 +7612,22 @@ function AIMTrading({ onClose }) {
     setBusy("");
   };
 
+  const runCompare=async()=>{
+    setLoading(true);setCmp(null);
+    try{ const r=await api({action:"compare"}); if(r.ok) setCmp(r.books); else setErr(r.error||"compare failed"); }
+    catch(e){ setErr(String(e.message||e)); }
+    setLoading(false);
+  };
+
+  const runTax=async()=>{
+    setBusy("tax");setTaxRes(null);
+    try{
+      const r=await api({action:"cryptoTax",proceeds:parseFloat(taxCalc.proceeds)||0,costBasis:parseFloat(taxCalc.costBasis)||0});
+      if(r.ok) setTaxRes(r);
+    }catch(e){ setMsg("\u2717 "+String(e.message||e)); }
+    setBusy("");
+  };
+
   const runGate=async()=>{
     setBusy("gate");setGRes(null);
     try{
@@ -7630,11 +7650,12 @@ function AIMTrading({ onClose }) {
     <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
       <button onClick={()=>setBook("INDIA")} style={{...btn,background:book==="INDIA"?"#5a3a1a":"#eee",color:book==="INDIA"?"#fff":"#555"}}>\uD83C\uDDEE\uD83C\uDDF3 India</button>
       <button onClick={()=>setBook("USA")} style={{...btn,background:book==="USA"?"#5a3a1a":"#eee",color:book==="USA"?"#fff":"#555"}}>\uD83C\uDDFA\uD83C\uDDF8 USA</button>
+      <button onClick={()=>setBook("CRYPTO")} style={{...btn,background:isCrypto?"#5a3a1a":"#eee",color:isCrypto?"#fff":"#555"}}>\u20BF Crypto</button>
       <button onClick={onClose} style={{...btn,background:"#eee",color:"#333",marginLeft:"auto"}}>\u2715</button>
     </div>
 
     <div style={{display:"flex",gap:4,marginBottom:10,flexWrap:"wrap"}}>
-      {[["dash","\uD83D\uDCCA Signals"],["ledger","\uD83D\uDCD2 Ledger"],["audit","\uD83D\uDD0D Audit"],["gate","\u2705 Gate check"]].map(([k,l])=>
+      {[["dash","\uD83D\uDCCA Signals"],["compare","\u2696 Compare"],["ledger","\uD83D\uDCD2 Ledger"],["audit","\uD83D\uDD0D Audit"],["gate","\u2705 Gate check"]].map(([k,l])=>
         <button key={k} onClick={()=>setTab(k)} style={{...btn,padding:"6px 10px",fontSize:11,
           background:tab===k?"#5a3a1a":"#f0f0f0",color:tab===k?"#fff":"#555"}}>{l}</button>)}
     </div>
@@ -7666,6 +7687,30 @@ function AIMTrading({ onClose }) {
           <div style={{fontSize:10,color:"#888"}}>Cash reserve</div>
         </div>
       </div>
+
+      {isCrypto&&<div style={{...card,background:"#fff4f4",borderColor:"#e0a0a0"}}>
+        <div style={{fontSize:12,fontWeight:800,color:"#c62828"}}>Tax before you act on a sell signal</div>
+        <div style={{fontSize:11,color:"#8a4a4a",marginTop:4,lineHeight:1.5}}>
+          Flat 31.2% on every gain, 1% TDS on every sale, and losses give <b>no</b> relief \u2014 not against
+          other income, not against gains on the other coin, not carried forward. AIM trades often,
+          so model each sell first.
+        </div>
+        <div style={{display:"flex",gap:5,marginTop:8}}>
+          <input value={taxCalc.proceeds} onChange={e=>setTaxCalc({...taxCalc,proceeds:e.target.value})} placeholder="Sale proceeds" inputMode="decimal" style={{...inp,marginBottom:0}}/>
+          <input value={taxCalc.costBasis} onChange={e=>setTaxCalc({...taxCalc,costBasis:e.target.value})} placeholder="Cost of those coins" inputMode="decimal" style={{...inp,marginBottom:0}}/>
+          <button onClick={runTax} disabled={!!busy} style={{...btn,background:"#c62828",color:"#fff",flexShrink:0}}>{busy==="tax"?"\u2026":"Tax"}</button>
+        </div>
+        {taxRes&&<div style={{background:"#fff",borderRadius:6,padding:"8px 10px",marginTop:8,fontSize:11.5}}>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}><span>Gain</span><b>{cur}{fmtN(taxRes.gain)}</b></div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}><span>Tax at 31.2%</span><b style={{color:"#c62828"}}>{cur}{fmtN(taxRes.tax)}</b></div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}><span>TDS at 1%</span><b style={{color:"#c62828"}}>{cur}{fmtN(taxRes.tds)}</b></div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderTop:"1px solid #eee",marginTop:3}}>
+            <span><b>In hand</b></span><b>{cur}{fmtN(taxRes.netInHand)}</b></div>
+          {taxRes.effectivePct!==null&&<div style={{fontSize:10.5,color:"#8a4a4a",marginTop:4}}>
+            {taxRes.effectivePct}% of your gain goes to tax and TDS.</div>}
+          <div style={{fontSize:10.5,color:"#888",marginTop:4}}>{taxRes.note}</div>
+        </div>}
+      </div>}
 
       {data.summary.cashPct<15&&data.summary.total>0&&<div style={{...card,background:"#fff8e1",borderColor:"#e0c080"}}>
         <div style={{fontSize:12,fontWeight:700,color:"#8a6a1a"}}>\u26A0 Cash reserve is thin</div>
@@ -7729,7 +7774,12 @@ function AIMTrading({ onClose }) {
 
       {openForm&&<div style={{...card,background:"#fafafa"}}>
         <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:6}}>OPEN POSITION \u00B7 this sets Portfolio Control</div>
-        <input value={f.symbol} onChange={e=>setF({...f,symbol:e.target.value})} placeholder="Symbol (e.g. INFY)" style={inp}/>
+        {isCrypto
+          ? <div style={{display:"flex",gap:6,marginBottom:6}}>
+              {["BTC","ETH"].map(c=><button key={c} onClick={()=>setF({...f,symbol:c,name:c==="BTC"?"Bitcoin":"Ethereum"})}
+                style={{...btn,flex:1,background:f.symbol===c?"#5a3a1a":"#eee",color:f.symbol===c?"#fff":"#555"}}>{c}</button>)}
+            </div>
+          : <input value={f.symbol} onChange={e=>setF({...f,symbol:e.target.value})} placeholder="Symbol (e.g. INFY)" style={inp}/>}
         <input value={f.name} onChange={e=>setF({...f,name:e.target.value})} placeholder="Company name" style={inp}/>
         <input value={f.shares} onChange={e=>setF({...f,shares:e.target.value})} placeholder="Shares" inputMode="decimal" style={inp}/>
         <input value={f.price} onChange={e=>setF({...f,price:e.target.value})} placeholder="Price per share" inputMode="decimal" style={inp}/>
@@ -7756,6 +7806,54 @@ function AIMTrading({ onClose }) {
         <div style={{display:"flex",gap:6}}>
           <button onClick={doTrade} disabled={!!busy} style={{...btn,background:"#5a3a1a",color:"#fff",flex:1}}>{busy==="trade"?"\u2026":"Record"}</button>
           <button onClick={()=>setTradeFor(null)} style={{...btn,background:"#eee",color:"#333"}}>Cancel</button>
+        </div>
+      </div>}
+    </div>}
+
+    {/* COMPARE */}
+    {tab==="compare"&&<div>
+      <div style={{fontSize:11,color:"#888",marginBottom:8}}>
+        Head to head. Unrealised is what the positions show now; realised is what the ledger says you
+        actually banked. Tax is shown separately because it differs sharply between the books.
+      </div>
+      {cmp&&cmp.map(b=><div key={b.book} style={{...card,borderColor:b.book==="CRYPTO"?"#e0a0a0":"#e0d5c0"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <b style={{fontSize:14}}>{b.book==="CRYPTO"?"\u20BF CRYPTO":b.book==="INDIA"?"INDIA":"USA"}</b>
+          <span style={{fontSize:11,color:"#888"}}>{b.positions} position(s)</span>
+        </div>
+        {b.positions===0&&b.symbolCount===0
+          ? <div style={{fontSize:11.5,color:"#888",marginTop:6}}>Nothing recorded in this book yet.</div>
+          : <div style={{marginTop:6,fontSize:11.5}}>
+              <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}><span>Invested</span><b>{b.book==="USA"?"$":"Rs."}{fmtN(b.invested)}</b></div>
+              <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}><span>Market value</span><b>{b.book==="USA"?"$":"Rs."}{fmtN(b.marketValue)}</b></div>
+              <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
+                <span>Unrealised</span>
+                <b style={{color:b.unrealised>=0?"#2e7d32":"#c62828"}}>{b.unrealised>=0?"+":""}{fmtN(b.unrealised)} ({b.unrealisedPct}%)</b></div>
+              <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
+                <span>Realised (banked)</span>
+                <b style={{color:b.realised>=0?"#2e7d32":"#c62828"}}>{b.realised>=0?"+":""}{fmtN(b.realised)}</b></div>
+              <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0",color:"#888"}}><span>Costs paid</span><span>{fmtN(b.costsPaid)}</span></div>
+              <div style={{borderTop:"1px solid #eee",marginTop:4,paddingTop:4}}>
+                {b.book==="CRYPTO"
+                  ? <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
+                      <span>Tax on realised (31.2% flat)</span><b style={{color:"#c62828"}}>{fmtN(b.tax.crypto)}</b></div>
+                  : <div>
+                      <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
+                        <span>If short term (20%)</span><b>{fmtN(b.tax.stcg)}</b></div>
+                      <div style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
+                        <span>If long term (12.5%)</span><b>{fmtN(b.tax.ltcg)}</b></div>
+                    </div>}
+              </div>
+            </div>}
+      </div>)}
+
+      {cmp&&<div style={{...card,background:"#f8f8f4"}}>
+        <div style={{fontSize:11,color:"#666",lineHeight:1.6}}>
+          <b>Reading this fairly.</b> A pre-tax comparison flatters crypto. Equity long-term gains are
+          taxed at 12.5% above the annual exemption and losses can be set off; crypto is 31.2% flat with
+          no offset at all. On identical pre-tax returns the equity book keeps materially more.
+          Also note the books cover different periods, so compare percentages rather than rupees until
+          both have run the same length of time.
         </div>
       </div>}
     </div>}
