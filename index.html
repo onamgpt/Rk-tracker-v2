@@ -7509,6 +7509,269 @@ function Orders({ onClose }) {
   </div>;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  AIM SCREENER  —  full NSE scan with the Stage 1 gate applied BEFORE scoring
+//
+//  The old screener scored everything and filtered afterwards, which is how a
+//  Rs.9 stock reached rank 9. Here the gate runs first: anything that fails is
+//  discarded and never receives a score.
+//
+//  Price-based factors only. ROE, debt, cash flow and promoter pledge need a
+//  fundamentals feed and are left to the Gate check tab, by hand.
+// ─────────────────────────────────────────────────────────────────────────────
+function AIMScreener() {
+  const [universe,setUniverse]=useState("nifty");
+  const [lookback,setLookback]=useState("2y");
+  const [token,setToken]=useState(()=>{ try{ return localStorage.getItem("aim_kite_token")||""; }catch(e){ return ""; } });
+  const [running,setRunning]=useState(false);
+  const [prog,setProg]=useState({done:0,total:0,kept:0,gated:0});
+  const [rows,setRows]=useState(null);
+  const [note,setNote]=useState("");
+  const cancelRef=useRef(false);
+
+  const NIFTY=["RELIANCE","TCS","HDFCBANK","ICICIBANK","INFY","ITC","SBIN","BHARTIARTL","LT","HCLTECH",
+    "BAJFINANCE","ASIANPAINT","TITAN","SUNPHARMA","MARUTI","AXISBANK","KOTAKBANK","NESTLEIND","ULTRACEMCO",
+    "WIPRO","ONGC","NTPC","POWERGRID","TATAMOTORS","TATASTEEL","JSWSTEEL","ADANIENT","COALINDIA","GRASIM",
+    "HINDALCO","CIPLA","DRREDDY","EICHERMOT","BAJAJ-AUTO","HEROMOTOCO","BRITANNIA","DIVISLAB","APOLLOHOSP",
+    "TECHM","INDUSINDBK","BPCL","IOC","SHREECEM","UPL","TATACONSUM","SBILIFE","HDFCLIFE","BAJAJFINSV",
+    "ADANIPORTS","M&M"];
+
+  // ── metrics from a daily close series ──────────────────────────────────────
+  const metrics=(closes,vols)=>{
+    const n=closes.length;
+    const ltp=closes[n-1];
+    const win=closes.slice(Math.max(0,n-250));
+    const hi=Math.max.apply(null,win), lo=Math.min.apply(null,win);
+    const drawdown=hi>0?(hi-ltp)/hi*100:0;
+    const posPct=hi>lo?(ltp-lo)/(hi-lo)*100:50;
+
+    // annualised volatility from daily log-ish returns
+    let s=0,s2=0,c=0;
+    for(let i=1;i<n;i++){ if(closes[i-1]>0){ const r=(closes[i]-closes[i-1])/closes[i-1]; s+=r; s2+=r*r; c++; } }
+    const mean=c?s/c:0;
+    const sd=c>1?Math.sqrt(Math.max(0,s2/c-mean*mean)):0;
+    const volAnn=sd*Math.sqrt(252)*100;
+
+    // 200-day moving average and its slope
+    let ma200=null, maRising=false;
+    if(n>=200){
+      const last200=closes.slice(n-200);
+      ma200=last200.reduce((a,b)=>a+b,0)/200;
+      if(n>=220){
+        const prev200=closes.slice(n-220,n-20);
+        const prevMa=prev200.reduce((a,b)=>a+b,0)/200;
+        maRising=ma200>=prevMa;
+      }
+    }
+
+    // bounce-back: drawdowns of 10%+ and whether they recovered within ~6 months
+    let peak=closes[0], peakI=0, inDD=false, low=0, lowI=0, total=0, back=0;
+    for(let i=1;i<n;i++){
+      if(!inDD){
+        if(closes[i]>peak){ peak=closes[i]; peakI=i; }
+        else if((peak-closes[i])/peak>=0.10){ inDD=true; low=closes[i]; lowI=i; }
+      }else{
+        if(closes[i]<low){ low=closes[i]; lowI=i; }
+        if(closes[i]>=peak){
+          total++; if(i-lowI<=126) back++;
+          inDD=false; peak=closes[i]; peakI=i;
+        }
+      }
+    }
+    if(inDD) total++;                       // still underwater counts against it
+    const bouncePct=total>0?back/total*100:null;
+
+    // average daily turnover in Rs. crore
+    let turn=null;
+    if(vols&&vols.length){
+      const k=Math.min(20,vols.length);
+      let t=0,cc=0;
+      for(let i=vols.length-k;i<vols.length;i++){
+        if(vols[i]&&closes[i]){ t+=vols[i]*closes[i]; cc++; }
+      }
+      if(cc) turn=(t/cc)/1e7;               // rupees -> crore
+    }
+
+    return {ltp,hi,lo,drawdown,posPct,volAnn,ma200,maRising,bouncePct,ddCount:total,turn,bars:n};
+  };
+
+  // ── STAGE 1 GATE — runs before any score is computed ───────────────────────
+  const gate=(m)=>{
+    if(m.bars<200) return "too little history";
+    if(m.ltp<50) return "price below Rs.50";
+    if(m.turn!==null&&m.turn<5) return "turnover below Rs.5cr";
+    if(m.drawdown>40) return "more than 40% below high";
+    if(m.volAnn<10) return "too little volatility";
+    if(m.volAnn>90) return "volatility beyond sane range";
+    return null;                            // null means it passed
+  };
+
+  // ── STAGE 2 SCORE — survivors only. Price factors, renormalised to 100. ────
+  const score=(m)=>{
+    let v;
+    if(m.volAnn<15) v=m.volAnn/15*40;
+    else if(m.volAnn<25) v=40+(m.volAnn-15)/10*60;
+    else if(m.volAnn<=45) v=100;
+    else v=Math.max(0,100-(m.volAnn-45)*3);
+
+    const b=m.bouncePct===null?50:m.bouncePct;
+
+    let t=0;
+    if(m.ma200!==null){ if(m.ltp>=m.ma200) t+=60; if(m.maRising) t+=40; }
+
+    // manual weights 30/25/20 renormalised across the three price factors
+    return v*0.40+b*0.33+t*0.27;
+  };
+
+  const fetchHist=(sym)=>fetch("/.netlify/functions/yahoo?action=history&symbol="+encodeURIComponent(sym+".NS")+"&range="+lookback)
+    .then(r=>r.json())
+    .then(d=>{
+      const res=d&&d.chart&&d.chart.result&&d.chart.result[0];
+      if(!res) return null;
+      const q=res.indicators&&res.indicators.quote&&res.indicators.quote[0];
+      if(!q) return null;
+      const cl=[],vl=[];
+      (q.close||[]).forEach((c,i)=>{ if(c!==null&&c!==undefined){ cl.push(c); vl.push((q.volume&&q.volume[i])||0); } });
+      return cl.length?{closes:cl,vols:vl}:null;
+    }).catch(()=>null);
+
+  const getFullList=async()=>{
+    if(!token) return null;
+    try{
+      const r=await fetch("/.netlify/functions/kite",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"instruments",access_token:token})});
+      const d=await r.json();
+      return (d.symbols&&d.symbols.length>100)?d.symbols:null;
+    }catch(e){ return null; }
+  };
+
+  const run=async()=>{
+    cancelRef.current=false; setRows(null); setNote("");
+    let syms=NIFTY;
+    if(universe==="full"){
+      setNote("Loading full NSE list from Zerodha\u2026");
+      const full=await getFullList();
+      if(!full){ setNote("\u274C Full scan needs a Zerodha token. Connect below, or run the Nifty 50 scan."); return; }
+      syms=full;
+    }
+    setRunning(true);
+    const total=syms.length;
+    setProg({done:0,total,kept:0,gated:0});
+
+    const keep=[]; const reasons={};
+    let done=0,gated=0;
+
+    for(let i=0;i<total;i+=12){
+      if(cancelRef.current) break;
+      const batch=syms.slice(i,i+12);
+      const out=await Promise.all(batch.map(s=>fetchHist(s).then(d=>({s,d}))));
+      out.forEach(({s,d})=>{
+        done++;
+        if(!d||d.closes.length<60) return;
+        const m=metrics(d.closes,d.vols);
+        const fail=gate(m);
+        if(fail){ gated++; reasons[fail]=(reasons[fail]||0)+1; return; }
+        keep.push(Object.assign({sym:s},m,{score:score(m)}));
+      });
+      setProg({done,total,kept:keep.length,gated});
+      await new Promise(r=>setTimeout(r,220));
+    }
+
+    keep.sort((a,b)=>b.score-a.score);
+    setRows(keep);
+    setRunning(false);
+    const parts=Object.keys(reasons).sort((a,b)=>reasons[b]-reasons[a]).map(k=>reasons[k]+" "+k);
+    setNote((cancelRef.current?"Stopped early. ":"")+keep.length+" passed the gate, "+gated+" rejected \u2014 "+parts.join(", "));
+  };
+
+  const csv=()=>{
+    if(!rows||!rows.length) return;
+    let s="Rank,Symbol,LTP,PctBelow52wHigh,PosInRange,AnnVolPct,BounceBackPct,DrawdownsSeen,TurnoverCr,Above200DMA,Score\n";
+    rows.forEach((r,i)=>{
+      s+=[i+1,r.sym,r.ltp.toFixed(2),r.drawdown.toFixed(1),r.posPct.toFixed(1),r.volAnn.toFixed(1),
+          r.bouncePct===null?"":r.bouncePct.toFixed(0),r.ddCount,r.turn===null?"":r.turn.toFixed(2),
+          (r.ma200!==null&&r.ltp>=r.ma200)?"Y":"N",Math.round(r.score)].join(",")+"\n";
+    });
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([s],{type:"text/csv"}));
+    a.download="AIM-Gated-Screener-"+new Date().toISOString().slice(0,10)+".csv";
+    a.click();
+  };
+
+  const card={background:"#fff",border:"1px solid #e0d5c0",borderRadius:8,padding:10,marginBottom:8};
+  const btn={padding:"8px 12px",borderRadius:6,border:"none",cursor:"pointer",fontSize:12,fontWeight:700};
+  const inp={width:"100%",padding:"7px 9px",borderRadius:6,border:"1px solid #ccc",fontSize:13,boxSizing:"border-box",marginBottom:6};
+
+  return <div>
+    <div style={{fontSize:11,color:"#888",marginBottom:8,lineHeight:1.5}}>
+      The quality gate runs <b>before</b> scoring, so a stock that fails is discarded rather than ranked.
+      Price factors only \u2014 ROE, debt and pledge still need the Gate check tab.
+    </div>
+
+    <div style={card}>
+      <div style={{fontSize:10.5,color:"#888",marginBottom:3}}>Universe</div>
+      <select value={universe} onChange={e=>setUniverse(e.target.value)} style={inp}>
+        <option value="nifty">Nifty 50 \u2014 quick, about a minute</option>
+        <option value="full">Full NSE \u2014 all listed stocks, needs Zerodha</option>
+      </select>
+
+      <div style={{fontSize:10.5,color:"#888",marginBottom:3}}>History window</div>
+      <select value={lookback} onChange={e=>setLookback(e.target.value)} style={inp}>
+        <option value="1y">1 year</option>
+        <option value="2y">2 years</option>
+        <option value="5y">5 years \u2014 best bounce-back evidence</option>
+      </select>
+      <div style={{fontSize:10.5,color:"#8a6a1a",marginBottom:6}}>
+        Bounce-back needs several cycles to mean anything. Over 1 year most stocks show one drawdown or none.
+      </div>
+
+      {universe==="full"&&<div>
+        <div style={{fontSize:10.5,color:"#888",marginBottom:3}}>Zerodha access token (expires daily)</div>
+        <input value={token} onChange={e=>{setToken(e.target.value); try{localStorage.setItem("aim_kite_token",e.target.value);}catch(err){}}}
+          placeholder="paste Kite access token" style={inp}/>
+      </div>}
+
+      {!running
+        ? <button onClick={run} style={{...btn,background:"#5a3a1a",color:"#fff",width:"100%"}}>\uD83D\uDD0D Scan</button>
+        : <button onClick={()=>{cancelRef.current=true;}} style={{...btn,background:"#c62828",color:"#fff",width:"100%"}}>\u25A0 Stop</button>}
+    </div>
+
+    {running&&<div style={{...card,background:"#f8f8f4"}}>
+      <div style={{fontSize:12,fontWeight:700}}>Scanned {prog.done} of {prog.total}</div>
+      <div style={{fontSize:11,color:"#666",marginTop:3}}>{prog.kept} passed the gate \u00B7 {prog.gated} rejected</div>
+      <div style={{height:6,background:"#e8e4dc",borderRadius:3,marginTop:6,overflow:"hidden"}}>
+        <div style={{height:"100%",width:(prog.total?prog.done/prog.total*100:0)+"%",background:"#5a3a1a"}}/>
+      </div>
+    </div>}
+
+    {note&&<div style={{...card,background:"#fffdf5",fontSize:11.5,color:"#6a5a3a",lineHeight:1.5}}>{note}</div>}
+
+    {rows&&rows.length>0&&<div>
+      <button onClick={csv} style={{...btn,background:"#eee",color:"#333",width:"100%",marginBottom:8}}>\u2B07 CSV (all {rows.length})</button>
+      {rows.slice(0,60).map((r,i)=><div key={r.sym} style={card}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><b style={{fontSize:13}}>{i+1}. {r.sym}</b>
+            <span style={{fontSize:11,color:"#888",marginLeft:6}}>Rs.{r.ltp.toFixed(0)}</span></div>
+          <b style={{fontSize:14,color:"#5a3a1a"}}>{Math.round(r.score)}</b>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:2,marginTop:5,fontSize:11,color:"#555"}}>
+          <div>{r.drawdown.toFixed(0)}% below high</div>
+          <div>vol {r.volAnn.toFixed(0)}%</div>
+          <div>{r.bouncePct===null?"no drawdowns seen":r.bouncePct.toFixed(0)+"% bounced back ("+r.ddCount+")"}</div>
+          <div>{r.turn===null?"":"Rs."+r.turn.toFixed(1)+"cr/day"}</div>
+        </div>
+      </div>)}
+      {rows.length>60&&<div style={{fontSize:11,color:"#888",textAlign:"center",padding:8}}>
+        Showing top 60 \u00B7 CSV has all {rows.length}
+      </div>}
+    </div>}
+
+    {rows&&rows.length===0&&<div style={{...card,textAlign:"center",color:"#888",fontSize:12}}>
+      Nothing passed the gate.
+    </div>}
+  </div>;
+}
+
 function AIMTrading({ onClose }) {
   const [book,setBook]=useState("INDIA");
   const [tab,setTab]=useState("dash");        // dash | ledger | audit | gate
@@ -7655,7 +7918,7 @@ function AIMTrading({ onClose }) {
     </div>
 
     <div style={{display:"flex",gap:4,marginBottom:10,flexWrap:"wrap"}}>
-      {[["dash","\uD83D\uDCCA Signals"],["compare","\u2696 Compare"],["ledger","\uD83D\uDCD2 Ledger"],["audit","\uD83D\uDD0D Audit"],["gate","\u2705 Gate check"]].map(([k,l])=>
+      {[["dash","\uD83D\uDCCA Signals"],["screener","\uD83D\uDD0D Screener"],["compare","\u2696 Compare"],["ledger","\uD83D\uDCD2 Ledger"],["audit","\uD83D\uDD0D Audit"],["gate","\u2705 Gate check"]].map(([k,l])=>
         <button key={k} onClick={()=>setTab(k)} style={{...btn,padding:"6px 10px",fontSize:11,
           background:tab===k?"#5a3a1a":"#f0f0f0",color:tab===k?"#fff":"#555"}}>{l}</button>)}
     </div>
@@ -7809,6 +8072,8 @@ function AIMTrading({ onClose }) {
         </div>
       </div>}
     </div>}
+
+    {tab==="screener"&&<AIMScreener/>}
 
     {/* COMPARE */}
     {tab==="compare"&&<div>
