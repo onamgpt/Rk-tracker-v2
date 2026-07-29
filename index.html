@@ -7529,6 +7529,177 @@ function Orders({ onClose }) {
 //  Price-based factors only. ROE, debt, cash flow and promoter pledge need a
 //  fundamentals feed and are left to the Gate check tab, by hand.
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+//  AIM BACKTEST — one stock, your choice of window. Gross of costs by request.
+//  Every decision uses only the prior close, so there is no look-ahead.
+// ─────────────────────────────────────────────────────────────────────────────
+function AIMBacktest() {
+  const [sym,setSym]=useState("");
+  const [range,setRange]=useState("5y");
+  const [capital,setCapital]=useState("100000");
+  const [stockPct,setStockPct]=useState("70");
+  const [every,setEvery]=useState("21");
+  const [busy,setBusy]=useState(false);
+  const [res,setRes]=useState(null);
+  const [err,setErr]=useState("");
+
+  const run=async()=>{
+    const s=sym.trim().toUpperCase();
+    if(!s){ setErr("Enter a symbol"); return; }
+    setBusy(true); setErr(""); setRes(null);
+    try{
+      const r=await fetch("/.netlify/functions/yahoo?action=history&symbol="+encodeURIComponent(s+".NS")+"&range="+range);
+      const d=await r.json();
+      const q=d&&d.chart&&d.chart.result&&d.chart.result[0];
+      const raw=q&&q.indicators&&q.indicators.quote&&q.indicators.quote[0];
+      if(!raw) throw new Error("no history for "+s);
+      const closes=(raw.close||[]).filter(c=>c!==null&&c!==undefined);
+      if(closes.length<120) throw new Error("only "+closes.length+" days of data — too short");
+
+      const cap=parseFloat(capital)||100000;
+      const pct=(parseFloat(stockPct)||70)/100;
+      const step=Math.max(5,parseInt(every)||21);
+
+      let cash=cap*(1-pct);
+      let shares=(cap*pct)/closes[0];
+      let pc=cap*pct;                      // opening purchase sets Portfolio Control
+      const trades=[];
+      let peak=cap, maxDD=0, starved=0;
+
+      for(let i=step;i<closes.length;i+=step){
+        const p=closes[i];
+        const mv=shares*p;
+        const safe=0.10*mv;
+        const advice=pc-mv;
+
+        if(advice-safe>0){
+          let buy=advice-safe;
+          if(buy>cash){ buy=cash; starved++; }
+          if(buy>0.5){
+            shares+=buy/p; cash-=buy; pc+=buy/2;
+            trades.push({d:i,t:"BUY",amt:buy,p:p});
+          }
+        } else if(mv-pc-safe>0){
+          const sell=mv-pc-safe;
+          shares-=sell/p; cash+=sell;      // PC deliberately unchanged
+          trades.push({d:i,t:"SELL",amt:sell,p:p});
+        }
+
+        const tot=shares*p+cash;
+        if(tot>peak) peak=tot;
+        const dd=(peak-tot)/peak*100;
+        if(dd>maxDD) maxDD=dd;
+      }
+
+      const last=closes[closes.length-1];
+      const final=shares*last+cash;
+      const bh=cap/closes[0]*last;         // full capital bought and held
+      const years=closes.length/252;
+
+      setRes({
+        sym:s, days:closes.length, years,
+        first:closes[0], last,
+        final, bh,
+        aimRet:(final-cap)/cap*100,
+        bhRet:(bh-cap)/cap*100,
+        cagr:(Math.pow(final/cap,1/years)-1)*100,
+        bhCagr:(Math.pow(bh/cap,1/years)-1)*100,
+        buys:trades.filter(t=>t.t==="BUY").length,
+        sells:trades.filter(t=>t.t==="SELL").length,
+        cash, shares, pc, maxDD, starved,
+        trades:trades.slice(-12)
+      });
+    }catch(e){ setErr(String(e.message||e)); }
+    setBusy(false);
+  };
+
+  const card={background:"#fff",border:"1px solid #e0d5c0",borderRadius:8,padding:10,marginBottom:8};
+  const btn={padding:"8px 12px",borderRadius:6,border:"none",cursor:"pointer",fontSize:12,fontWeight:700};
+  const inp={width:"100%",padding:"7px 9px",borderRadius:6,border:"1px solid #ccc",fontSize:13,boxSizing:"border-box",marginBottom:6};
+  const fmt=(v)=>Number(v).toLocaleString("en-IN",{maximumFractionDigits:0});
+  const row=(l,a,b,hi)=><div style={{display:"flex",justifyContent:"space-between",padding:"3px 0",fontSize:12}}>
+    <span style={{color:"#666"}}>{l}</span>
+    <span><b style={{color:hi?(a>=b?"#2e7d32":"#c62828"):"#333"}}>{a}</b>
+      {b!==undefined&&<span style={{color:"#888"}}> vs {b}</span>}</span></div>;
+
+  return <div>
+    <div style={{fontSize:11,color:"#888",marginBottom:8,lineHeight:1.5}}>
+      Runs the real AIM rules over history — Portfolio Control rising by half of every buy, never
+      falling on a sale. Each decision uses only the prior close.
+    </div>
+
+    <div style={card}>
+      <input value={sym} onChange={e=>setSym(e.target.value)} placeholder="NSE symbol, e.g. HINDALCO" style={inp}/>
+      <div style={{display:"flex",gap:6}}>
+        <select value={range} onChange={e=>setRange(e.target.value)} style={{...inp,flex:1}}>
+          <option value="1y">1 year</option><option value="2y">2 years</option>
+          <option value="5y">5 years</option><option value="10y">10 years</option>
+        </select>
+        <select value={every} onChange={e=>setEvery(e.target.value)} style={{...inp,flex:1}}>
+          <option value="21">Monthly review</option>
+          <option value="63">Quarterly review</option>
+          <option value="10">Fortnightly review</option>
+        </select>
+      </div>
+      <div style={{display:"flex",gap:6}}>
+        <input value={capital} onChange={e=>setCapital(e.target.value)} placeholder="Capital" inputMode="decimal" style={{...inp,flex:1}}/>
+        <input value={stockPct} onChange={e=>setStockPct(e.target.value)} placeholder="% in stock" inputMode="decimal" style={{...inp,flex:1}}/>
+      </div>
+      <button onClick={run} disabled={busy} style={{...btn,background:"#5a3a1a",color:"#fff",width:"100%"}}>
+        {busy?"Running…":"⏮ Run backtest"}</button>
+    </div>
+
+    {err&&<div style={{padding:10,background:"#ffebee",color:"#c62828",borderRadius:6,fontSize:12,marginBottom:8}}>{err}</div>}
+
+    {res&&<div>
+      <div style={{...card,background:res.final>=res.bh?"#e8f5e9":"#fff4f4",
+        borderColor:res.final>=res.bh?"#a0d0a0":"#e0a0a0"}}>
+        <div style={{fontSize:15,fontWeight:800,color:res.final>=res.bh?"#2e7d32":"#c62828"}}>
+          {res.final>=res.bh?"AIM beat buy-and-hold":"Buy-and-hold beat AIM"}
+        </div>
+        <div style={{fontSize:11.5,color:"#666",marginTop:3}}>
+          {res.sym} · {res.years.toFixed(1)} years · {res.days} trading days
+        </div>
+      </div>
+
+      <div style={card}>
+        {row("Final value","Rs."+fmt(res.final),"Rs."+fmt(res.bh),true)}
+        {row("Total return",res.aimRet.toFixed(1)+"%",res.bhRet.toFixed(1)+"%",true)}
+        {row("Annualised",res.cagr.toFixed(1)+"%",res.bhCagr.toFixed(1)+"%",true)}
+        {row("Worst drawdown",res.maxDD.toFixed(1)+"%")}
+        {row("Trades",res.buys+" buys, "+res.sells+" sells")}
+        {row("Ended holding","Rs."+fmt(res.shares*res.last)+" stock, Rs."+fmt(res.cash)+" cash")}
+        {row("Price moved","Rs."+fmt(res.first)+" → Rs."+fmt(res.last))}
+      </div>
+
+      {res.starved>0&&<div style={{...card,background:"#fff8e1",borderColor:"#e0c080"}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#8a6a1a"}}>Cash ran out {res.starved} time(s)</div>
+        <div style={{fontSize:11,color:"#7a6a4a",marginTop:3,lineHeight:1.45}}>
+          AIM called for a bigger buy than the reserve could fund, so the trade was truncated. This is
+          the exact risk of starting at {stockPct}% in stock rather than 50%.
+        </div>
+      </div>}
+
+      <div style={{...card,background:"#f8f8f4"}}>
+        <div style={{fontSize:11,color:"#666",lineHeight:1.6}}>
+          <b>Gross of costs, as you asked.</b> Real brokerage, STT, stamp duty and slippage would reduce
+          the AIM figure but not buy-and-hold, because AIM trades {res.buys+res.sells} times and holding
+          trades once. Treat the gap as narrower than shown. Dividends are excluded from both.
+          One stock over one period is also a single sample — run several before drawing conclusions.
+        </div>
+      </div>
+
+      {res.trades.length>0&&<div style={card}>
+        <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:5}}>LAST TRADES</div>
+        {res.trades.map((t,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"2px 0"}}>
+          <span style={{color:t.t==="BUY"?"#1565c0":"#2e7d32",fontWeight:700}}>{t.t}</span>
+          <span>Rs.{fmt(t.amt)} @ Rs.{t.p.toFixed(1)}</span>
+        </div>)}
+      </div>}
+    </div>}
+  </div>;
+}
+
 function AIMScreener() {
   const [universe,setUniverse]=useState("nifty");
   const [lookback,setLookback]=useState("2y");
@@ -7830,6 +8001,10 @@ function AIMTrading({ onClose }) {
   const [cmp,setCmp]=useState(null);
   const [taxCalc,setTaxCalc]=useState({proceeds:"",costBasis:""});
   const [taxRes,setTaxRes]=useState(null);
+  const [kite,setKite]=useState(()=>{ try{ return localStorage.getItem("aim_kite_token")||""; }catch(e){ return ""; } });
+  const [reqTok,setReqTok]=useState("");
+  const [fills,setFills]=useState(null);
+  const [picked,setPicked]=useState({});
 
   const isCrypto=book==="CRYPTO";
   const cur=book==="USA"?"$":isCrypto?"Rs.":"Rs.";
@@ -7913,6 +8088,90 @@ function AIMTrading({ onClose }) {
     setBusy("");
   };
 
+  const saveKite=(t)=>{ setKite(t); try{ localStorage.setItem("aim_kite_token",t); }catch(e){} };
+
+  const kiteCall=(payload)=>fetch("/.netlify/functions/kite",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(r=>r.json());
+
+  const kiteLogin=async()=>{
+    const d=await kiteCall({action:"loginUrl"});
+    if(d&&d.url) window.open(d.url,"_blank");
+    setMsg("Log in, then copy the request_token from the address bar and paste it below.");
+  };
+
+  const exchangeToken=async()=>{
+    if(!reqTok.trim()) return;
+    setBusy("kite"); setMsg("");
+    try{
+      const d=await kiteCall({action:"getToken",request_token:reqTok.trim()});
+      const t=d&&d.data&&d.data.access_token;
+      if(!t) throw new Error((d&&d.message)||"could not exchange token");
+      saveKite(t); setReqTok(""); setMsg("✓ Zerodha connected for today");
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  // Live prices -> every AIM signal recomputes without any typing
+  const refreshPrices=async()=>{
+    if(!data||!data.holdings.length){ setMsg("✗ No holdings to price"); return; }
+    if(book!=="INDIA"){ setMsg("✗ Zerodha prices cover the India book only"); return; }
+    if(!kite){ setMsg("✗ Connect Zerodha first"); return; }
+    setBusy("prices"); setMsg("");
+    try{
+      const syms=data.holdings.map(h=>h.symbol);
+      const q=await kiteCall({action:"quote",symbols:syms,access_token:kite});
+      const d=q&&q.data;
+      if(!d) throw new Error((q&&q.message)||"no quote data - token may have expired");
+      let n=0;
+      for(const h of data.holdings){
+        const row=d["NSE:"+h.symbol];
+        const p=row&&row.last_price;
+        if(p){ await api({action:"updatePrice",symbol:h.symbol,price:p}); n++; }
+      }
+      setMsg("✓ "+n+" price(s) updated · signals recomputed");
+      load();
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  // Today's Zerodha fills, shown for review. Nothing enters the ledger unticked:
+  // Portfolio Control is cumulative, so a stray non-AIM trade corrupts it permanently.
+  const loadFills=async()=>{
+    if(!kite){ setMsg("✗ Connect Zerodha first"); return; }
+    setBusy("fills"); setMsg(""); setFills(null);
+    try{
+      const d=await kiteCall({action:"orders",access_token:kite});
+      const rows=(d&&d.data)||[];
+      const done=rows.filter(o=>String(o.status).toUpperCase()==="COMPLETE");
+      const held={}; (data?data.holdings:[]).forEach(h=>held[h.symbol]=1);
+      const mine=done.filter(o=>held[String(o.tradingsymbol).toUpperCase()]);
+      setFills(mine);
+      const sel={}; mine.forEach((o,i)=>sel[i]=true);
+      setPicked(sel);
+      setMsg(mine.length?("Found "+mine.length+" fill(s) in stocks you hold"):"No fills today in stocks you hold");
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const importFills=async()=>{
+    if(!fills) return;
+    setBusy("import"); let n=0;
+    try{
+      for(let i=0;i<fills.length;i++){
+        if(!picked[i]) continue;
+        const o=fills[i];
+        const r=await api({action:"recordTrade",symbol:o.tradingsymbol,
+          tradeAction:String(o.transaction_type).toUpperCase()==="BUY"?"BUY":"SELL",
+          shares:Number(o.filled_quantity||o.quantity),price:Number(o.average_price),
+          note:"imported from Zerodha order "+o.order_id});
+        if(r.ok) n++;
+      }
+      setMsg("✓ "+n+" trade(s) written to the ledger");
+      setFills(null); load();
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
   const runCompare=async()=>{
     setLoading(true);setCmp(null);
     try{ const r=await api({action:"compare"}); if(r.ok) setCmp(r.books); else setErr(r.error||"compare failed"); }
@@ -7956,7 +8215,7 @@ function AIMTrading({ onClose }) {
     </div>
 
     <div style={{display:"flex",gap:4,marginBottom:10,flexWrap:"wrap"}}>
-      {[["dash","📊 Signals"],["screener","🔍 Screener"],["compare","⚖ Compare"],["ledger","📒 Ledger"],["audit","🔍 Audit"],["gate","✅ Gate check"]].map(([k,l])=>
+      {[["dash","📊 Signals"],["screener","🔍 Screener"],["backtest","⏮ Backtest"],["compare","⚖ Compare"],["ledger","📒 Ledger"],["audit","🔍 Audit"],["gate","✅ Gate check"]].map(([k,l])=>
         <button key={k} onClick={()=>setTab(k)} style={{...btn,padding:"6px 10px",fontSize:11,
           background:tab===k?"#5a3a1a":"#f0f0f0",color:tab===k?"#fff":"#555"}}>{l}</button>)}
     </div>
@@ -8017,6 +8276,52 @@ function AIMTrading({ onClose }) {
         <div style={{fontSize:12,fontWeight:700,color:"#8a6a1a"}}>⚠ Cash reserve is thin</div>
         <div style={{fontSize:11,color:"#7a6a4a",marginTop:3}}>
           Below about 15% the system has little ammunition left. Further buy signals may not be fundable.
+        </div>
+      </div>}
+
+      {book==="INDIA"&&<div style={card}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontSize:11,color:"#888",fontWeight:700}}>ZERODHA</div>
+          <span style={{fontSize:10.5,fontWeight:700,color:kite?"#2e7d32":"#c62828"}}>
+            {kite?"connected":"not connected"}</span>
+        </div>
+        {!kite
+          ? <div style={{marginTop:6}}>
+              <button onClick={kiteLogin} style={{...btn,background:"#5a3a1a",color:"#fff",width:"100%",marginBottom:6}}>
+                Open Zerodha login</button>
+              <div style={{display:"flex",gap:5}}>
+                <input value={reqTok} onChange={e=>setReqTok(e.target.value)} placeholder="paste request_token" style={{...inp,marginBottom:0}}/>
+                <button onClick={exchangeToken} disabled={!!busy} style={{...btn,background:"#555",color:"#fff",flexShrink:0}}>
+                  {busy==="kite"?"…":"Connect"}</button>
+              </div>
+              <div style={{fontSize:10.5,color:"#888",marginTop:5}}>
+                Sessions expire daily, so this is a once-a-day step.</div>
+            </div>
+          : <div style={{display:"flex",gap:5,marginTop:6}}>
+              <button onClick={refreshPrices} disabled={!!busy} style={{...btn,background:"#5a3a1a",color:"#fff",flex:1}}>
+                {busy==="prices"?"…":"🔄 Live prices"}</button>
+              <button onClick={loadFills} disabled={!!busy} style={{...btn,background:"#eee",color:"#333",flex:1}}>
+                {busy==="fills"?"…":"⚡ Today's trades"}</button>
+            </div>}
+      </div>}
+
+      {fills&&fills.length>0&&<div style={{...card,background:"#fffdf5",borderColor:"#e0c080"}}>
+        <div style={{fontSize:12,fontWeight:800,marginBottom:4}}>Zerodha fills — tick the AIM ones</div>
+        <div style={{fontSize:10.5,color:"#8a6a1a",marginBottom:6,lineHeight:1.45}}>
+          Only tick trades that belong to this AIM book. Portfolio Control is cumulative, so an
+          unrelated trade imported here would distort every later signal.
+        </div>
+        {fills.map((o,i)=><label key={i} style={{display:"flex",gap:7,alignItems:"flex-start",padding:"5px 0",borderBottom:i<fills.length-1?"1px solid #f0e8d8":"none",cursor:"pointer"}}>
+          <input type="checkbox" checked={!!picked[i]} onChange={e=>setPicked({...picked,[i]:e.target.checked})} style={{marginTop:2}}/>
+          <span style={{fontSize:11.5}}>
+            <b>{o.transaction_type} {o.tradingsymbol}</b><br/>
+            <span style={{color:"#666"}}>{o.filled_quantity||o.quantity} @ Rs.{Number(o.average_price).toFixed(2)}</span>
+          </span>
+        </label>)}
+        <div style={{display:"flex",gap:6,marginTop:8}}>
+          <button onClick={importFills} disabled={!!busy} style={{...btn,background:"#5a3a1a",color:"#fff",flex:1}}>
+            {busy==="import"?"…":"Import ticked"}</button>
+          <button onClick={()=>setFills(null)} style={{...btn,background:"#eee",color:"#333"}}>Cancel</button>
         </div>
       </div>}
 
@@ -8112,6 +8417,8 @@ function AIMTrading({ onClose }) {
     </div>}
 
     {tab==="screener"&&<AIMScreener/>}
+
+    {tab==="backtest"&&<AIMBacktest/>}
 
     {/* COMPARE */}
     {tab==="compare"&&<div>
