@@ -8005,6 +8005,7 @@ function AIMTrading({ onClose }) {
   const [reqTok,setReqTok]=useState("");
   const [fills,setFills]=useState(null);
   const [zh,setZh]=useState(null);
+  const [openSym,setOpenSym]=useState(null);
   const [zhPick,setZhPick]=useState({});
   const [picked,setPicked]=useState({});
 
@@ -8041,7 +8042,7 @@ function AIMTrading({ onClose }) {
     setLoading(false);
   };
 
-  useEffect(()=>{ if(tab==="dash") load(); if(tab==="ledger") loadLedger(); if(tab==="audit") runAudit(); if(tab==="compare") runCompare(); },[book,tab]);
+  useEffect(()=>{ if(tab==="dash"){ load(); loadLedger(); } if(tab==="ledger") loadLedger(); if(tab==="audit") runAudit(); if(tab==="compare") runCompare(); },[book,tab]);
 
   // An off-database copy. Supabase is durable but there is no point-in-time
   // recovery on this plan, so the ledger should exist somewhere you control too.
@@ -8056,6 +8057,20 @@ function AIMTrading({ onClose }) {
     a.href=URL.createObjectURL(new Blob([s],{type:"text/csv"}));
     a.download="AIM-ledger-"+book+"-"+new Date().toISOString().slice(0,10)+".csv";
     a.click();
+  };
+
+  // Removing a share stops AIM managing it. The ledger is untouched — history
+  // is never deleted, only the position is marked closed.
+  const removeShare=async(sym)=>{
+    if(!window.confirm("Remove "+sym+" from the "+book+" book?\n\nAIM stops managing it. Ledger history is kept.")) return;
+    setBusy("rm"); setMsg("");
+    try{
+      const r=await api({action:"closePosition",symbol:sym});
+      if(!r.ok) throw new Error(r.error||"could not remove");
+      setMsg("✓ "+sym+" removed · ledger history kept");
+      setOpenSym(null); load();
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
   };
 
   const saveCash=async()=>{
@@ -8450,8 +8465,20 @@ function AIMTrading({ onClose }) {
         return d!==0?d:Math.abs(((b.signal||{}).advice)||0)-Math.abs(((a.signal||{}).advice)||0);
       }).map(h=>{
         const s=h.signal||{};
+        // AIM triggers, solved for price:
+        //   SELL when MV - PC - 0.1MV > 0  ->  price > PC / (0.9 x shares)
+        //   BUY  when PC - MV - 0.1MV > 0  ->  price < PC / (1.1 x shares)
+        const pc=Number(h.portfolio_control)||0, sh=Number(h.shares)||0;
+        const sellAt=sh>0?pc/(0.9*sh):null;
+        const buyAt =sh>0?pc/(1.1*sh):null;
+        // indicative size once price is 10% beyond the trigger
+        const bp=buyAt?buyAt*0.9:null, sp=sellAt?sellAt*1.1:null;
+        const buyAmt =bp?Math.max(0,pc-1.1*bp*sh):0;
+        const sellAmt=sp?Math.max(0,0.9*sp*sh-pc):0;
+        const mine=(ledger||[]).filter(t=>String(t.symbol).toUpperCase()===String(h.symbol).toUpperCase());
+        const isOpen=openSym===h.symbol;
         return <div key={h.id} style={card}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+          <div onClick={()=>setOpenSym(isOpen?null:h.symbol)} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,cursor:"pointer"}}>
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontWeight:800,fontSize:14}}>{h.symbol}</div>
               <div style={{fontSize:11,color:"#888"}}>{h.name||""}</div>
@@ -8475,6 +8502,43 @@ function AIMTrading({ onClose }) {
             <div style={{fontSize:12,fontWeight:800,color:sigColor(s.action)}}>
               {s.action} {cur}{fmtN(s.amount)} · about {s.qty} shares
             </div>
+          </div>}
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:6}}>
+            <div style={{background:"#e8f5e9",borderRadius:6,padding:"6px 8px"}}>
+              <div style={{fontSize:9.5,color:"#2e7d32",fontWeight:700}}>NEXT SELL AT</div>
+              <div style={{fontSize:12.5,fontWeight:800}}>{sellAt?cur+fmtN(sellAt):"—"}</div>
+              <div style={{fontSize:9.5,color:"#666"}}>{sellAmt>0?"~"+cur+fmtN(sellAmt)+" if +10%":""}</div>
+            </div>
+            <div style={{background:"#e3f2fd",borderRadius:6,padding:"6px 8px"}}>
+              <div style={{fontSize:9.5,color:"#1565c0",fontWeight:700}}>NEXT BUY AT</div>
+              <div style={{fontSize:12.5,fontWeight:800}}>{buyAt?cur+fmtN(buyAt):"—"}</div>
+              <div style={{fontSize:9.5,color:"#666"}}>{buyAmt>0?"~"+cur+fmtN(buyAmt)+" if -10%":""}</div>
+            </div>
+          </div>
+
+          {isOpen&&<div style={{marginTop:8,paddingTop:7,borderTop:"1px solid #f0f0f0"}}>
+            <div style={{fontSize:10.5,color:"#888",fontWeight:700,marginBottom:5}}>
+              HISTORY · {mine.length} transaction(s)</div>
+            {mine.length===0
+              ? <div style={{fontSize:11,color:"#999"}}>Nothing recorded for {h.symbol} yet.</div>
+              : mine.slice().reverse().map((t,i)=><div key={i} style={{fontSize:11,padding:"4px 0",borderBottom:i<mine.length-1?"1px solid #f6f6f6":"none"}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}>
+                    <b style={{color:String(t.action).toUpperCase().indexOf("SELL")>=0?"#2e7d32":"#1565c0"}}>{t.action}</b>
+                    <span style={{color:"#888"}}>{t.txn_date}</span>
+                  </div>
+                  <div style={{color:"#555"}}>
+                    {fmtN(t.shares)} sh @ {cur}{fmtN(t.price)} = {cur}{fmtN(t.amount)}
+                  </div>
+                  <div style={{color:"#999",fontSize:10}}>
+                    PC {cur}{fmtN(t.pc_before)} → {cur}{fmtN(t.pc_after)} · cash {cur}{fmtN(t.cash_after)}
+                  </div>
+                </div>)}
+            <button onClick={()=>removeShare(h.symbol)} disabled={!!busy}
+              style={{...btn,background:"#fff",color:"#c62828",border:"1px solid #e0a0a0",width:"100%",marginTop:8}}>
+              {busy==="rm"?"…":"Remove "+h.symbol+" from this book"}</button>
+            <div style={{fontSize:10,color:"#999",marginTop:4,textAlign:"center"}}>
+              Ledger history is kept — only the position closes.</div>
           </div>}
 
           <div style={{display:"flex",gap:5,marginTop:8}}>
