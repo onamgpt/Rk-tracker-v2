@@ -8185,7 +8185,7 @@ function AIMTrading({ onClose }) {
       const have={}; (data?data.holdings:[]).forEach(h=>have[h.symbol]=1);
       const fresh=live.filter(h=>!have[String(h.tradingsymbol).toUpperCase()]);
       setZh(fresh);
-      const s={}; fresh.forEach((h,i)=>s[i]=false);
+      const s={}; fresh.forEach((h,i)=>s[i]=true);   // adopt everything by default
       setZhPick(s);
       setMsg(fresh.length?("Found "+fresh.length+" holding(s) not yet in this book"):
         (live.length?"All "+live.length+" Zerodha holding(s) are already in this book":"No holdings in your Zerodha account"));
@@ -8386,7 +8386,13 @@ function AIMTrading({ onClose }) {
       </div>}
 
       {zh&&zh.length>0&&<div style={{...card,background:"#fffdf5",borderColor:"#e0c080"}}>
-        <div style={{fontSize:12,fontWeight:800,marginBottom:4}}>Your Zerodha holdings</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+          <div style={{fontSize:12,fontWeight:800}}>Your Zerodha holdings</div>
+          <span style={{fontSize:11,color:"#5a3a1a",fontWeight:700,cursor:"pointer"}}
+            onClick={()=>{const all=Object.values(zhPick).every(Boolean);
+              const s={}; zh.forEach((h,i)=>s[i]=!all); setZhPick(s);}}>
+            {Object.values(zhPick).every(Boolean)?"Clear all":"Select all"}</span>
+        </div>
         <div style={{fontSize:10.5,color:"#8a6a1a",marginBottom:6,lineHeight:1.45}}>
           Tick only the ones you want AIM to manage. Portfolio Control is set to today's market
           value, so AIM starts from here rather than acting on gains it never took part in.
