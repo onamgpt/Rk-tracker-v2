@@ -8004,6 +8004,8 @@ function AIMTrading({ onClose }) {
   const [kite,setKite]=useState(()=>{ try{ return localStorage.getItem("aim_kite_token")||""; }catch(e){ return ""; } });
   const [reqTok,setReqTok]=useState("");
   const [fills,setFills]=useState(null);
+  const [zh,setZh]=useState(null);
+  const [zhPick,setZhPick]=useState({});
   const [picked,setPicked]=useState({});
 
   const isCrypto=book==="CRYPTO";
@@ -8153,6 +8155,44 @@ function AIMTrading({ onClose }) {
       }
       setMsg("✓ "+n+" price(s) updated · signals recomputed");
       load();
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  // Your real Zerodha holdings, offered for adoption into the AIM book.
+  const loadHoldings=async()=>{
+    if(!kite){ setMsg("✗ Connect Zerodha first"); return; }
+    setBusy("zh"); setMsg(""); setZh(null);
+    try{
+      const d=await kiteCall({action:"holdings",access_token:kite});
+      const rows=(d&&d.data)||[];
+      const live=rows.filter(h=>Number(h.quantity)>0);
+      const have={}; (data?data.holdings:[]).forEach(h=>have[h.symbol]=1);
+      const fresh=live.filter(h=>!have[String(h.tradingsymbol).toUpperCase()]);
+      setZh(fresh);
+      const s={}; fresh.forEach((h,i)=>s[i]=false);
+      setZhPick(s);
+      setMsg(fresh.length?("Found "+fresh.length+" holding(s) not yet in this book"):
+        (live.length?"All "+live.length+" Zerodha holding(s) are already in this book":"No holdings in your Zerodha account"));
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const importHoldings=async()=>{
+    if(!zh) return;
+    setBusy("zhimp"); let n=0;
+    try{
+      for(let i=0;i<zh.length;i++){
+        if(!zhPick[i]) continue;
+        const h=zh[i];
+        const px=Number(h.last_price)||Number(h.average_price);
+        const r=await api({action:"openPosition",symbol:String(h.tradingsymbol).toUpperCase(),
+          shares:Number(h.quantity),price:px,costs:0,
+          name:String(h.tradingsymbol).toUpperCase()});
+        if(r.ok) n++;
+      }
+      setMsg("✓ "+n+" holding(s) adopted · now set your cash reserve below");
+      setZh(null); load();
     }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
@@ -8326,6 +8366,29 @@ function AIMTrading({ onClose }) {
               <button onClick={loadFills} disabled={!!busy} style={{...btn,background:"#eee",color:"#333",flex:1}}>
                 {busy==="fills"?"…":"⚡ Today's trades"}</button>
             </div>}
+          {kite&&<button onClick={loadHoldings} disabled={!!busy} style={{...btn,background:"#eee",color:"#333",width:"100%",marginTop:5}}>
+            {busy==="zh"?"…":"📥 Import holdings from Zerodha"}</button>}
+      </div>}
+
+      {zh&&zh.length>0&&<div style={{...card,background:"#fffdf5",borderColor:"#e0c080"}}>
+        <div style={{fontSize:12,fontWeight:800,marginBottom:4}}>Your Zerodha holdings</div>
+        <div style={{fontSize:10.5,color:"#8a6a1a",marginBottom:6,lineHeight:1.45}}>
+          Tick only the ones you want AIM to manage. Portfolio Control is set to today's market
+          value, so AIM starts from here rather than acting on gains it never took part in.
+        </div>
+        {zh.map((h,i)=><label key={i} style={{display:"flex",gap:7,alignItems:"flex-start",padding:"5px 0",borderBottom:i<zh.length-1?"1px solid #f0e8d8":"none",cursor:"pointer"}}>
+          <input type="checkbox" checked={!!zhPick[i]} onChange={e=>setZhPick({...zhPick,[i]:e.target.checked})} style={{marginTop:2}}/>
+          <span style={{fontSize:11.5,flex:1}}>
+            <b>{h.tradingsymbol}</b> · {h.quantity} sh<br/>
+            <span style={{color:"#666"}}>now Rs.{Number(h.last_price||0).toFixed(2)} · avg Rs.{Number(h.average_price||0).toFixed(2)}
+              {" · value Rs."+Math.round(Number(h.quantity)*Number(h.last_price||h.average_price)).toLocaleString("en-IN")}</span>
+          </span>
+        </label>)}
+        <div style={{display:"flex",gap:6,marginTop:8}}>
+          <button onClick={importHoldings} disabled={!!busy} style={{...btn,background:"#5a3a1a",color:"#fff",flex:1}}>
+            {busy==="zhimp"?"…":"Adopt ticked"}</button>
+          <button onClick={()=>setZh(null)} style={{...btn,background:"#eee",color:"#333"}}>Cancel</button>
+        </div>
       </div>}
 
       {fills&&fills.length>0&&<div style={{...card,background:"#fffdf5",borderColor:"#e0c080"}}>
