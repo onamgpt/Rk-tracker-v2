@@ -360,10 +360,15 @@ exports.handler = async (event) => {
     if (action === "closePosition") {
       const symbol = String(body.symbol || "").trim().toUpperCase();
       const id = book + "|" + symbol;
+      // verify it exists first
+      const check = await sb("GET", "/rest/v1/aim_holdings?select=id&id=eq." + encodeURIComponent(id));
+      if (check.status >= 300 || !check.body || !check.body.length) {
+        return FAIL("holding " + symbol + " not found in " + book + " — it may already be closed");
+      }
       const r = await sb("PATCH", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(id),
         { active: false, updated_at: new Date().toISOString() });
       if (r.status >= 300) {
-        console.log("closePosition FAIL: id=" + id + " status=" + r.status + " body=" + JSON.stringify(r.body));
+        console.log("closePosition PATCH FAIL: id=" + id + " status=" + r.status + " body=" + JSON.stringify(r.body));
         return FAIL("close failed: " + (r.body && r.body.message ? r.body.message : "status " + r.status));
       }
       return OK({ ok: true });
