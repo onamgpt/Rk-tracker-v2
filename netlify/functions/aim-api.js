@@ -358,10 +358,14 @@ exports.handler = async (event) => {
 
     // ------------------------------------------------------- CLOSE / DEACTIVATE
     if (action === "closePosition") {
-      const id = book + "|" + String(body.symbol || "").trim().toUpperCase();
+      const symbol = String(body.symbol || "").trim().toUpperCase();
+      const id = book + "|" + symbol;
       const r = await sb("PATCH", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(id),
         { active: false, updated_at: new Date().toISOString() });
-      if (r.status >= 300) return FAIL("close failed");
+      if (r.status >= 300) {
+        console.log("closePosition FAIL: id=" + id + " status=" + r.status + " body=" + JSON.stringify(r.body));
+        return FAIL("close failed: " + (r.body && r.body.message ? r.body.message : "status " + r.status));
+      }
       return OK({ ok: true });
     }
 
