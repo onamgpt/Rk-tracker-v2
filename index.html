@@ -8043,6 +8043,21 @@ function AIMTrading({ onClose }) {
 
   useEffect(()=>{ if(tab==="dash") load(); if(tab==="ledger") loadLedger(); if(tab==="audit") runAudit(); if(tab==="compare") runCompare(); },[book,tab]);
 
+  // An off-database copy. Supabase is durable but there is no point-in-time
+  // recovery on this plan, so the ledger should exist somewhere you control too.
+  const exportLedger=()=>{
+    if(!ledger||!ledger.length){ setMsg("✗ Nothing in the ledger to export"); return; }
+    let s="Book,Date,Symbol,Action,Shares,Price,Amount,Costs,PC_before,PC_after,Cash_after,Note\n";
+    ledger.forEach(t=>{
+      s+=[book,t.txn_date,t.symbol,t.action,t.shares,t.price,t.amount,t.costs,
+          t.pc_before,t.pc_after,t.cash_after,'"'+String(t.note||"").replace(/"/g,'""')+'"'].join(",")+"\n";
+    });
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([s],{type:"text/csv"}));
+    a.download="AIM-ledger-"+book+"-"+new Date().toISOString().slice(0,10)+".csv";
+    a.click();
+  };
+
   const saveCash=async()=>{
     setBusy("cash");setMsg("");
     try{
@@ -8559,6 +8574,9 @@ function AIMTrading({ onClose }) {
       <div style={{fontSize:11,color:"#888",marginBottom:8}}>
         Append-only. Corrections are entered as new adjusting rows, never by editing history.
       </div>
+      <button onClick={exportLedger} style={{padding:"8px 12px",borderRadius:6,border:"none",
+        background:"#eee",color:"#333",fontSize:12,fontWeight:700,cursor:"pointer",width:"100%",marginBottom:8}}>
+        ⬇ Export ledger to CSV</button>
       {!ledger.length&&!loading&&<div style={{padding:20,textAlign:"center",color:"#888",fontSize:13}}>No transactions yet.</div>}
       {ledger.map(t=><div key={t.id} style={card}>
         <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
