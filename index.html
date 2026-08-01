@@ -8436,7 +8436,13 @@ function AIMTrading({ onClose }) {
         </div>
       </div>
 
-      {(data.holdings||[]).map(h=>{
+      {(data.holdings||[]).slice().sort((a,b)=>{
+        // Sells first: a sale releases the cash that funds the buys below it.
+        const rank=(h)=>{const t=String((h.signal||{}).action||"").toUpperCase();
+          return t.indexOf("SELL")>=0?0:(t.indexOf("BUY")>=0?1:2);};
+        const d=rank(a)-rank(b);
+        return d!==0?d:Math.abs(((b.signal||{}).advice)||0)-Math.abs(((a.signal||{}).advice)||0);
+      }).map(h=>{
         const s=h.signal||{};
         return <div key={h.id} style={card}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
