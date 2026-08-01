@@ -8099,6 +8099,29 @@ function AIMTrading({ onClose }) {
     setMsg("Log in, then copy the request_token from the address bar and paste it below.");
   };
 
+  // Zerodha request tokens are single-use. If the redirect lands anywhere that
+  // auto-exchanges, the token is dead before it can be copied — so capture it
+  // here the moment we land, rather than relying on copy-paste.
+  useEffect(()=>{
+    try{
+      const p=new URLSearchParams(window.location.search);
+      const rt=p.get("request_token");
+      if(rt && p.get("status")==="success"){
+        window.history.replaceState({},document.title,window.location.pathname);
+        (async()=>{
+          setBusy("kite"); setMsg("Zerodha redirected — exchanging token…");
+          try{
+            const d=await kiteCall({action:"getToken",request_token:rt});
+            const t=d&&d.data&&d.data.access_token;
+            if(!t) throw new Error((d&&d.message)||"exchange failed");
+            saveKite(t); setMsg("✓ Zerodha connected for today");
+          }catch(e){ setMsg("✗ "+String(e.message||e)); }
+          setBusy("");
+        })();
+      }
+    }catch(e){}
+  },[]);
+
   const exchangeToken=async()=>{
     if(!reqTok.trim()) return;
     setBusy("kite"); setMsg("");
