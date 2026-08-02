@@ -2401,6 +2401,538 @@ function FieldReport({ onClose }) {
   );
 }
 
+// ============================================================
+// FIELD CONSOLE — the sales team's own screen.
+// Deliberately shows NO cost, GP or margin anywhere. Rates are
+// selling rates only. Everything submitted is marked unverified
+// until the office reconciles it.
+// ============================================================
+function FieldConsole({ onClose }) {
+  const me = (typeof URL_USER!=="undefined"?URL_USER:"main");
+  const officer = me.charAt(0).toUpperCase()+me.slice(1);
+  const isOwner = (typeof IS_OWNER!=="undefined") ? IS_OWNER : (me==="main");
+  const today = new Date().toISOString().slice(0,10);
+
+  const [tab,setTab]=useState("order");
+  const [busy,setBusy]=useState("");
+  const [msg,setMsg]=useState("");
+
+  const [rates,setRates]=useState([]);        // [{name, rate}] selling rate per dozen
+  const [target,setTarget]=useState(null);    // {user: dailyTarget}
+  const [feed,setFeed]=useState([]);          // recent team activity
+
+  // ---- order entry
+  const [party,setParty]=useState("");
+  const [town,setTown]=useState("");
+  const [lines,setLines]=useState([{item:"",qty:"",unit:"cases"}]);
+  const [paid,setPaid]=useState("");
+  const [orderNote,setOrderNote]=useState("");
+
+  // ---- day figures
+  const [sales,setSales]=useState("");
+  const [expenses,setExpenses]=useState("");
+  const [collections,setCollections]=useState("");
+
+  // ---- new party
+  const [npName,setNpName]=useState(""), [npTown,setNpTown]=useState(""),
+        [npPhone,setNpPhone]=useState(""), [npStocks,setNpStocks]=useState(""),
+        [npPot,setNpPot]=useState("");
+
+  // ---- competitor
+  const [cpParty,setCpParty]=useState(""), [cpBrand,setCpBrand]=useState(""),
+        [cpLifting,setCpLifting]=useState(""), [cpOurBrand,setCpOurBrand]=useState(""),
+        [cpCommit,setCpCommit]=useState("");
+
+  // ---- suggestion
+  const [sgBrand,setSgBrand]=useState(""), [sgWhy,setSgWhy]=useState(""),
+        [sgCommit,setSgCommit]=useState("");
+
+  // ---- recruitment
+  const [rcName,setRcName]=useState(""), [rcArea,setRcArea]=useState(""),
+        [rcStage,setRcStage]=useState("Identified");
+
+  const store = async (key, rec) => {
+    let cur=[];
+    try{ const r=await sheetsAPI("getPortfolio",{key:key,user:"main"}); if(r&&r.data&&Array.isArray(r.data)) cur=r.data; }catch(e){}
+    cur.unshift(rec);
+    await sheetsAPI("savePortfolio",{key:key,user:"main",data:cur});
+    return cur;
+  };
+
+  const broadcast = async (text) => {
+    try{
+      await fetch("/.netlify/functions/telegram",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"send",chatId:"-5372910186",message:text})});
+    }catch(e){}
+  };
+
+  useEffect(()=>{ (async()=>{
+    try{ const r=await sheetsAPI("getPortfolio",{key:"field_rates",user:"main"}); if(r&&r.data&&Array.isArray(r.data)) setRates(r.data); }catch(e){}
+    try{ const t=await sheetsAPI("getPortfolio",{key:"field_targets",user:"main"}); if(t&&t.data) setTarget(t.data); }catch(e){}
+    try{ const f=await sheetsAPI("getPortfolio",{key:"field_orders",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFeed(f.data.slice(0,25)); }catch(e){}
+  })(); },[]);
+
+  const rateOf = n => { const r=rates.find(x=>x.name===n); return r?Number(r.rate)||0:0; };
+  const lineVal = l => rateOf(l.item)*(Number(l.qty)||0);
+  const orderTotal = lines.reduce((s,l)=>s+lineVal(l),0);
+
+  const submitOrder=async()=>{
+    if(!party.trim()) { setMsg("✗ Party name needed"); return; }
+    const good=lines.filter(l=>l.item&&Number(l.qty)>0);
+    if(!good.length){ setMsg("✗ Add at least one item"); return; }
+    setBusy("order"); setMsg("");
+    try{
+      const rec={ id:"fo_"+Date.now(), officer:officer, user:me, date:today, time:new Date().toISOString(),
+        party:party.trim(), town:town.trim(), lines:good, value:orderTotal,
+        paid:Number(paid)||0, note:orderNote, status:"Placed", verified:false };
+      await store("field_orders", rec);
+      const items=good.map(l=>l.qty+" "+l.unit+" "+l.item).join(", ");
+      await broadcast("🛒 <b>"+officer+"</b> booked an order\n"+
+        party.trim()+(town.trim()?(" · "+town.trim()):"")+"\n"+items+
+        "\nValue ₹"+orderTotal.toLocaleString("en-IN")+
+        (Number(paid)>0?("\nCollected ₹"+Number(paid).toLocaleString("en-IN")):""));
+      setMsg("✓ Order booked and sent to the group");
+      setParty("");setTown("");setLines([{item:"",qty:"",unit:"cases"}]);setPaid("");setOrderNote("");
+      try{ const f=await sheetsAPI("getPortfolio",{key:"field_orders",user:"main"}); if(f&&f.data) setFeed(f.data.slice(0,25)); }catch(e){}
+    }catch(e){ setMsg("✗ Could not submit — try again"); }
+    setBusy("");
+  };
+
+  const myTarget = target && target[me] ? Number(target[me]) : 0;
+  const variance = (Number(sales)||0) - myTarget;
+
+  const submitDay=async()=>{
+    setBusy("day"); setMsg("");
+    try{
+      await store("field_reports", { id:"fr_"+Date.now(), officer:officer, user:me, date:today,
+        time:new Date().toISOString(), location:town.trim(), sales:sales, expenses:expenses,
+        collections:collections, target:myTarget, variance:variance, verified:false });
+      setMsg("✓ Day figures submitted");
+      setSales("");setExpenses("");setCollections("");
+    }catch(e){ setMsg("✗ Could not submit"); }
+    setBusy("");
+  };
+
+  const submitNewParty=async()=>{
+    if(!npName.trim()){ setMsg("✗ Name needed"); return; }
+    setBusy("np"); setMsg("");
+    try{
+      await store("field_newparties", { id:"np_"+Date.now(), officer:officer, user:me, date:today,
+        name:npName.trim(), town:npTown.trim(), phone:npPhone.trim(),
+        stocks:npStocks.trim(), potential:npPot, converted:false });
+      await broadcast("🆕 <b>"+officer+"</b> met a new party\n"+npName.trim()+(npTown.trim()?(" · "+npTown.trim()):""));
+      setMsg("✓ New party recorded");
+      setNpName("");setNpTown("");setNpPhone("");setNpStocks("");setNpPot("");
+    }catch(e){ setMsg("✗ Could not submit"); }
+    setBusy("");
+  };
+
+  const submitCompetitor=async()=>{
+    if(!cpParty.trim()||!cpBrand.trim()){ setMsg("✗ Party and competitor brand needed"); return; }
+    setBusy("cp"); setMsg("");
+    try{
+      await store("field_competitor", { id:"cp_"+Date.now(), officer:officer, user:me, date:today,
+        party:cpParty.trim(), competitorBrand:cpBrand.trim(), theirLifting:cpLifting,
+        ourBrand:cpOurBrand.trim(), commitment:cpCommit, delivered:null, closed:false });
+      setMsg("✓ Recorded — commitment will be tracked");
+      setCpParty("");setCpBrand("");setCpLifting("");setCpOurBrand("");setCpCommit("");
+    }catch(e){ setMsg("✗ Could not submit"); }
+    setBusy("");
+  };
+
+  const submitSuggestion=async()=>{
+    if(!sgBrand.trim()){ setMsg("✗ Brand idea needed"); return; }
+    if(!(Number(sgCommit)>0)){ setMsg("✗ State how many dozens a month you will move"); return; }
+    setBusy("sg"); setMsg("");
+    try{
+      await store("field_suggestions", { id:"sg_"+Date.now(), officer:officer, user:me, date:today,
+        brand:sgBrand.trim(), why:sgWhy.trim(), commitPerMonth:Number(sgCommit),
+        status:"Proposed", launchedOn:null, actualToDate:0, closed:false });
+      await broadcast("💡 <b>"+officer+"</b> proposes a new brand: "+sgBrand.trim()+
+        "\nCommitted to move "+sgCommit+" doz/month if introduced");
+      setMsg("✓ Suggestion recorded with your commitment");
+      setSgBrand("");setSgWhy("");setSgCommit("");
+    }catch(e){ setMsg("✗ Could not submit"); }
+    setBusy("");
+  };
+
+  const submitRecruit=async()=>{
+    if(!rcName.trim()){ setMsg("✗ Candidate name needed"); return; }
+    setBusy("rc"); setMsg("");
+    try{
+      await store("field_recruits", { id:"rc_"+Date.now(), officer:officer, user:me, date:today,
+        candidate:rcName.trim(), area:rcArea.trim(), stage:rcStage, joined:false });
+      setMsg("✓ Candidate recorded");
+      setRcName("");setRcArea("");setRcStage("Identified");
+    }catch(e){ setMsg("✗ Could not submit"); }
+    setBusy("");
+  };
+
+  const inp={width:"100%",padding:"10px",borderRadius:8,border:"1.5px solid #cfd8cf",fontSize:14,marginBottom:9,boxSizing:"border-box"};
+  const lab={fontSize:11.5,fontWeight:700,color:"#1a5a3a",display:"block",marginBottom:3};
+  const btn={width:"100%",padding:"12px",borderRadius:10,border:"none",
+    background:"linear-gradient(135deg,#1a7a4a,#0a5a2a)",color:"#fff",fontWeight:700,fontSize:15,cursor:"pointer"};
+  const tabBtn=(k,l)=>(<button key={k} onClick={()=>{setTab(k);setMsg("");}} style={{padding:"7px 11px",borderRadius:8,border:"none",
+    background:tab===k?"#1a5a3a":"#e8f0e8",color:tab===k?"#fff":"#3a5a3a",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>{l}</button>);
+
+  return (
+    <div style={{padding:4}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+        <span style={{fontSize:26}}>🧭</span>
+        <div><h2 style={{margin:0,fontSize:18,color:"#1a5a3a"}}>Field Console</h2>
+        <div style={{fontSize:11,color:"#6a7a6a"}}>{officer} · {new Date().toLocaleDateString()}</div></div>
+      </div>
+
+      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:11}}>
+        {tabBtn("order","🛒 Order")}
+        {tabBtn("day","📊 My day")}
+        {tabBtn("party","🆕 New party")}
+        {tabBtn("market","🔍 Market")}
+        {tabBtn("idea","💡 Brand idea")}
+        {tabBtn("team","👥 Recruit")}
+        {tabBtn("feed","📣 Team")}
+      </div>
+
+      {msg && <div style={{fontSize:13,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:9,
+        background:msg[0]==="✓"?"#e8f5e9":"#fdecea",padding:"8px 10px",borderRadius:8}}>{msg}</div>}
+
+      {tab==="order"&&<div>
+        <label style={lab}>Party name</label>
+        <input value={party} onChange={e=>setParty(e.target.value)} placeholder="shop / distributor" style={inp}/>
+        <label style={lab}>Town / location</label>
+        <input value={town} onChange={e=>setTown(e.target.value)} placeholder="where you are today" style={inp}/>
+
+        <div style={{fontSize:11.5,fontWeight:700,color:"#1a5a3a",marginBottom:5}}>Items — today's rates</div>
+        {rates.length===0 && <div style={{fontSize:11.5,color:"#a33",background:"#fdecea",padding:"9px 11px",borderRadius:8,marginBottom:9}}>
+          No rate list has been published yet. Ask the office to set today's rates before booking orders.</div>}
+        {lines.map((l,i)=><div key={i} style={{display:"flex",gap:5,marginBottom:6,alignItems:"center"}}>
+          <select value={l.item} onChange={e=>{const n=[...lines];n[i].item=e.target.value;setLines(n);}}
+            style={{flex:2,padding:"9px",borderRadius:8,border:"1.5px solid #cfd8cf",fontSize:12.5,minWidth:0}}>
+            <option value="">choose item…</option>
+            {rates.map(r=><option key={r.name} value={r.name}>{r.name}</option>)}
+          </select>
+          <input type="number" value={l.qty} onChange={e=>{const n=[...lines];n[i].qty=e.target.value;setLines(n);}}
+            placeholder="qty" inputMode="numeric" style={{width:62,padding:"9px",borderRadius:8,border:"1.5px solid #cfd8cf",fontSize:13,boxSizing:"border-box"}}/>
+          <select value={l.unit} onChange={e=>{const n=[...lines];n[i].unit=e.target.value;setLines(n);}}
+            style={{width:74,padding:"9px",borderRadius:8,border:"1.5px solid #cfd8cf",fontSize:11.5,boxSizing:"border-box"}}>
+            <option value="cases">cases</option><option value="doz">doz</option>
+          </select>
+          {lines.length>1&&<span onClick={()=>setLines(lines.filter((_,j)=>j!==i))}
+            style={{color:"#c33",fontWeight:700,cursor:"pointer",padding:"0 3px"}}>✕</span>}
+        </div>)}
+        {lines.map((l,i)=>l.item&&Number(l.qty)>0?
+          <div key={"v"+i} style={{fontSize:11,color:"#5a7a5a",marginBottom:3}}>
+            {l.item} · ₹{rateOf(l.item).toLocaleString("en-IN")} × {l.qty} = ₹{lineVal(l).toLocaleString("en-IN")}</div>:null)}
+        <button onClick={()=>setLines([...lines,{item:"",qty:"",unit:"cases"}])}
+          style={{padding:"7px 12px",borderRadius:8,border:"1px dashed #8aaa8a",background:"#f6fbf6",
+          color:"#3a6a3a",fontWeight:700,fontSize:12,cursor:"pointer",width:"100%",marginBottom:9}}>+ Add item</button>
+
+        {orderTotal>0&&<div style={{background:"#e8f5e9",borderRadius:8,padding:"9px 11px",marginBottom:9}}>
+          <div style={{fontSize:11,color:"#3a6a3a"}}>ORDER VALUE</div>
+          <div style={{fontSize:19,fontWeight:800,color:"#1a5a3a"}}>₹{orderTotal.toLocaleString("en-IN")}</div>
+        </div>}
+
+        <label style={lab}>Payment received now (₹)</label>
+        <input type="number" value={paid} onChange={e=>setPaid(e.target.value)} placeholder="0 if none" inputMode="decimal" style={inp}/>
+        <label style={lab}>Note (optional)</label>
+        <input value={orderNote} onChange={e=>setOrderNote(e.target.value)} placeholder="delivery date, remarks…" style={inp}/>
+        <button onClick={submitOrder} disabled={!!busy} style={btn}>{busy==="order"?"Submitting…":"🛒 Book order"}</button>
+      </div>}
+
+      {tab==="day"&&<div>
+        {myTarget>0
+          ? <div style={{background:"#eef4ff",borderRadius:8,padding:"9px 11px",marginBottom:10}}>
+              <div style={{fontSize:11,color:"#3a5a8a"}}>TODAY'S TARGET</div>
+              <div style={{fontSize:19,fontWeight:800,color:"#1a3a7a"}}>₹{myTarget.toLocaleString("en-IN")}</div>
+            </div>
+          : <div style={{fontSize:11.5,color:"#8a7a3a",background:"#fdf8e8",padding:"9px 11px",borderRadius:8,marginBottom:10}}>
+              No target set for you yet.</div>}
+        <label style={lab}>Actual sales today (₹)</label>
+        <input type="number" value={sales} onChange={e=>setSales(e.target.value)} placeholder="amount sold" inputMode="decimal" style={inp}/>
+        {myTarget>0&&sales!==""&&<div style={{background:variance>=0?"#e8f5e9":"#fdecea",borderRadius:8,padding:"8px 11px",marginBottom:9}}>
+          <span style={{fontSize:11,color:"#666"}}>VARIANCE </span>
+          <b style={{fontSize:15,color:variance>=0?"#1a7a3a":"#c33"}}>
+            {variance>=0?"+":""}₹{Math.abs(variance).toLocaleString("en-IN")}</b>
+        </div>}
+        <label style={lab}>Expenses today (₹)</label>
+        <input type="number" value={expenses} onChange={e=>setExpenses(e.target.value)} placeholder="travel, DA, etc." inputMode="decimal" style={inp}/>
+        <label style={lab}>Collections today (₹)</label>
+        <input type="number" value={collections} onChange={e=>setCollections(e.target.value)} placeholder="payments received" inputMode="decimal" style={inp}/>
+        <label style={lab}>Where are you today?</label>
+        <input value={town} onChange={e=>setTown(e.target.value)} placeholder="town / area" style={inp}/>
+        <button onClick={submitDay} disabled={!!busy} style={btn}>{busy==="day"?"Submitting…":"📤 Submit day"}</button>
+        <div style={{fontSize:10,color:"#8a9a8a",marginTop:9,fontStyle:"italic"}}>
+          Field-reported and marked unverified until reconciled against orders and bank collections.</div>
+      </div>}
+
+      {tab==="party"&&<div>
+        <label style={lab}>New party name</label>
+        <input value={npName} onChange={e=>setNpName(e.target.value)} placeholder="shop / firm name" style={inp}/>
+        <label style={lab}>Town</label>
+        <input value={npTown} onChange={e=>setNpTown(e.target.value)} style={inp}/>
+        <label style={lab}>Phone</label>
+        <input value={npPhone} onChange={e=>setNpPhone(e.target.value)} inputMode="tel" style={inp}/>
+        <label style={lab}>Which brands do they stock now?</label>
+        <input value={npStocks} onChange={e=>setNpStocks(e.target.value)} placeholder="competitor brands seen" style={inp}/>
+        <label style={lab}>Monthly potential (doz)</label>
+        <input type="number" value={npPot} onChange={e=>setNpPot(e.target.value)} inputMode="numeric" style={inp}/>
+        <button onClick={submitNewParty} disabled={!!busy} style={btn}>{busy==="np"?"Saving…":"🆕 Record new party"}</button>
+      </div>}
+
+      {tab==="market"&&<div>
+        <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9}}>
+          What the competition is doing at a party, and what that party has committed to lift from us.</div>
+        <label style={lab}>Party</label>
+        <input value={cpParty} onChange={e=>setCpParty(e.target.value)} style={inp}/>
+        <label style={lab}>Competitor brand</label>
+        <input value={cpBrand} onChange={e=>setCpBrand(e.target.value)} placeholder="brand they push" style={inp}/>
+        <label style={lab}>Their lifting (doz/month)</label>
+        <input type="number" value={cpLifting} onChange={e=>setCpLifting(e.target.value)} inputMode="numeric" style={inp}/>
+        <label style={lab}>Our brand they will take</label>
+        <input value={cpOurBrand} onChange={e=>setCpOurBrand(e.target.value)} placeholder="which of ours" style={inp}/>
+        <label style={lab}>Their commitment (doz/month)</label>
+        <input type="number" value={cpCommit} onChange={e=>setCpCommit(e.target.value)} inputMode="numeric" style={inp}/>
+        <button onClick={submitCompetitor} disabled={!!busy} style={btn}>{busy==="cp"?"Saving…":"🔍 Record"}</button>
+      </div>}
+
+      {tab==="idea"&&<div>
+        <div style={{fontSize:11.5,color:"#8a6a2a",background:"#fdf8e8",padding:"9px 11px",borderRadius:8,marginBottom:10}}>
+          Suggest a brand for the company to introduce. Your monthly commitment is recorded with it —
+          if we make it, this is what you have undertaken to move.</div>
+        <label style={lab}>Brand / product to introduce</label>
+        <input value={sgBrand} onChange={e=>setSgBrand(e.target.value)} style={inp}/>
+        <label style={lab}>Why — what gap does it fill?</label>
+        <input value={sgWhy} onChange={e=>setSgWhy(e.target.value)} placeholder="which parties, against which competitor" style={inp}/>
+        <label style={lab}>You will move (doz/month)</label>
+        <input type="number" value={sgCommit} onChange={e=>setSgCommit(e.target.value)} inputMode="numeric" style={inp}/>
+        <button onClick={submitSuggestion} disabled={!!busy} style={btn}>{busy==="sg"?"Saving…":"💡 Submit with commitment"}</button>
+      </div>}
+
+      {tab==="team"&&<div>
+        <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9}}>
+          Building your own team. Record candidates you are developing under you.</div>
+        <label style={lab}>Candidate name</label>
+        <input value={rcName} onChange={e=>setRcName(e.target.value)} style={inp}/>
+        <label style={lab}>Area he would cover</label>
+        <input value={rcArea} onChange={e=>setRcArea(e.target.value)} style={inp}/>
+        <label style={lab}>Stage</label>
+        <select value={rcStage} onChange={e=>setRcStage(e.target.value)} style={inp}>
+          <option>Identified</option><option>Met</option><option>Trial ride</option>
+          <option>Offered</option><option>Joined</option><option>Dropped</option>
+        </select>
+        <button onClick={submitRecruit} disabled={!!busy} style={btn}>{busy==="rc"?"Saving…":"👥 Record candidate"}</button>
+      </div>}
+
+      {tab==="feed"&&<div>
+        <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9}}>What the team has booked recently.</div>
+        {feed.length===0
+          ? <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"18px 0"}}>Nothing booked yet.</div>
+          : feed.map((o,i)=><div key={o.id||i} style={{padding:"9px 0",borderBottom:i<feed.length-1?"1px solid #eef2ee":"none"}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                <b style={{fontSize:13,color:"#1a5a3a"}}>{o.officer}</b>
+                <span style={{fontSize:10.5,color:"#999"}}>{o.date}</span>
+              </div>
+              <div style={{fontSize:12,color:"#444"}}>{o.party}{o.town?(" · "+o.town):""}</div>
+              <div style={{fontSize:11.5,color:"#666"}}>
+                {(o.lines||[]).map(l=>l.qty+" "+l.unit+" "+l.item).join(", ")}</div>
+              <div style={{fontSize:11.5,color:"#1a5a3a",fontWeight:700}}>
+                ₹{Number(o.value||0).toLocaleString("en-IN")}
+                {o.paid>0?<span style={{color:"#3a6a3a",fontWeight:400}}> · collected ₹{Number(o.paid).toLocaleString("en-IN")}</span>:null}
+                <span style={{color:"#888",fontWeight:400}}> · {o.status||"Placed"}</span>
+              </div>
+            </div>)}
+      </div>}
+    </div>
+  );
+}
+
+// ============================================================
+// FIELD ADMIN — owner side. Publish the day's rates and each
+// person's target, and hold the commitments to account.
+// ============================================================
+function FieldAdmin({ onClose }) {
+  const [tab,setTab]=useState("rates");
+  const [rates,setRates]=useState([]);
+  const [targets,setTargets]=useState({});
+  const [orders,setOrders]=useState([]);
+  const [sugg,setSugg]=useState([]);
+  const [comp,setComp]=useState([]);
+  const [parties,setParties]=useState([]);
+  const [recruits,setRecruits]=useState([]);
+  const [busy,setBusy]=useState(""); const [msg,setMsg]=useState("");
+  const TEAM=["sunil","sadasivan","sebi","biju","satish","vinod","sooraj","prakash"];
+
+  const get=async(k,d)=>{ try{ const r=await sheetsAPI("getPortfolio",{key:k,user:"main"}); return (r&&r.data)?r.data:d; }catch(e){ return d; } };
+  const put=async(k,v)=>{ await sheetsAPI("savePortfolio",{key:k,user:"main",data:v}); };
+
+  useEffect(()=>{ (async()=>{
+    setRates(await get("field_rates",[]));
+    setTargets(await get("field_targets",{}));
+    setOrders(await get("field_orders",[]));
+    setSugg(await get("field_suggestions",[]));
+    setComp(await get("field_competitor",[]));
+    setParties(await get("field_newparties",[]));
+    setRecruits(await get("field_recruits",[]));
+  })(); },[]);
+
+  const saveRates=async()=>{ setBusy("r"); try{ await put("field_rates",rates.filter(r=>r.name&&r.name.trim())); setMsg("✓ Rates published to the team"); }catch(e){ setMsg("✗ failed"); } setBusy(""); };
+  const saveTargets=async()=>{ setBusy("t"); try{ await put("field_targets",targets); setMsg("✓ Targets saved"); }catch(e){ setMsg("✗ failed"); } setBusy(""); };
+
+  const setSuggStatus=async(id,status)=>{
+    const n=sugg.map(s=>s.id===id?{...s,status:status,launchedOn:(status==="Launched"&&!s.launchedOn)?new Date().toISOString().slice(0,10):s.launchedOn}:s);
+    setSugg(n); await put("field_suggestions",n);
+  };
+  const setSuggActual=async(id,v)=>{
+    const n=sugg.map(s=>s.id===id?{...s,actualToDate:Number(v)||0}:s);
+    setSugg(n); await put("field_suggestions",n);
+  };
+  const setOrderStatus=async(id,status)=>{
+    const n=orders.map(o=>o.id===id?{...o,status:status}:o);
+    setOrders(n); await put("field_orders",n);
+    const o=n.find(x=>x.id===id);
+    try{ await fetch("/.netlify/functions/telegram",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"send",chatId:"-5372910186",
+        message:"📦 <b>"+(o.party||"")+"</b> — "+status+"\n("+(o.officer||"")+"'s order · ₹"+Number(o.value||0).toLocaleString("en-IN")+")"})}); }catch(e){}
+  };
+
+  const inp={width:"100%",padding:"8px",borderRadius:7,border:"1.5px solid #cfd8cf",fontSize:13,boxSizing:"border-box"};
+  const lab={fontSize:11,fontWeight:700,color:"#1a5a3a",display:"block",marginBottom:3};
+  const tabBtn=(k,l)=>(<button key={k} onClick={()=>{setTab(k);setMsg("");}} style={{padding:"7px 11px",borderRadius:8,border:"none",
+    background:tab===k?"#1a5a3a":"#e8f0e8",color:tab===k?"#fff":"#3a5a3a",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>{l}</button>);
+  const STATUSES=["Placed","Confirmed","Packed","Dispatched","Delivered"];
+
+  return (
+    <div style={{padding:4}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+        <span style={{fontSize:26}}>🗂️</span>
+        <div><h2 style={{margin:0,fontSize:18,color:"#1a5a3a"}}>Field Admin</h2>
+        <div style={{fontSize:11,color:"#6a7a6a"}}>Rates, targets and commitments</div></div>
+      </div>
+      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:11}}>
+        {tabBtn("rates","💵 Rates")}{tabBtn("targets","🎯 Targets")}{tabBtn("orders","📦 Orders")}
+        {tabBtn("sugg","💡 Commitments")}{tabBtn("market","🔍 Market")}{tabBtn("parties","🆕 Parties")}{tabBtn("team","👥 Recruits")}
+      </div>
+      {msg&&<div style={{fontSize:13,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:9,
+        background:msg[0]==="✓"?"#e8f5e9":"#fdecea",padding:"8px 10px",borderRadius:8}}>{msg}</div>}
+
+      {tab==="rates"&&<div>
+        <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9}}>
+          Selling rate per unit as the team should quote it. They never see cost or margin.</div>
+        {rates.map((r,i)=><div key={i} style={{display:"flex",gap:5,marginBottom:6}}>
+          <input value={r.name||""} onChange={e=>{const n=[...rates];n[i]={...n[i],name:e.target.value};setRates(n);}}
+            placeholder="item name" style={{...inp,flex:2}}/>
+          <input type="number" value={r.rate||""} onChange={e=>{const n=[...rates];n[i]={...n[i],rate:e.target.value};setRates(n);}}
+            placeholder="₹/unit" inputMode="decimal" style={{...inp,width:96,flex:"0 0 96px"}}/>
+          <span onClick={()=>setRates(rates.filter((_,j)=>j!==i))} style={{color:"#c33",fontWeight:700,cursor:"pointer",padding:"6px 3px"}}>✕</span>
+        </div>)}
+        <button onClick={()=>setRates([...rates,{name:"",rate:""}])} style={{padding:"8px",borderRadius:8,border:"1px dashed #8aaa8a",
+          background:"#f6fbf6",color:"#3a6a3a",fontWeight:700,fontSize:12,cursor:"pointer",width:"100%",marginBottom:9}}>+ Add item</button>
+        <button onClick={saveRates} disabled={!!busy} style={{width:"100%",padding:"11px",borderRadius:9,border:"none",
+          background:"#1a5a3a",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}}>{busy==="r"?"Saving…":"💵 Publish rates"}</button>
+      </div>}
+
+      {tab==="targets"&&<div>
+        <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9}}>Daily sales target per person (₹).</div>
+        {TEAM.map(u=><div key={u} style={{display:"flex",gap:7,alignItems:"center",marginBottom:6}}>
+          <span style={{flex:1,fontSize:13,textTransform:"capitalize"}}>{u}</span>
+          <input type="number" value={targets[u]||""} onChange={e=>setTargets({...targets,[u]:e.target.value})}
+            placeholder="₹/day" inputMode="decimal" style={{...inp,width:120,flex:"0 0 120px"}}/>
+        </div>)}
+        <button onClick={saveTargets} disabled={!!busy} style={{width:"100%",padding:"11px",borderRadius:9,border:"none",
+          background:"#1a5a3a",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer",marginTop:5}}>{busy==="t"?"Saving…":"🎯 Save targets"}</button>
+      </div>}
+
+      {tab==="orders"&&<div>
+        {orders.length===0?<div style={{fontSize:12,color:"#999",textAlign:"center",padding:"18px 0"}}>No field orders yet.</div>
+        :orders.slice(0,60).map((o,i)=><div key={o.id||i} style={{padding:"9px 0",borderBottom:"1px solid #eef2ee"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+            <b style={{fontSize:13,color:"#1a5a3a"}}>{o.party}</b>
+            <span style={{fontSize:10.5,color:"#999"}}>{o.date}</span>
+          </div>
+          <div style={{fontSize:11.5,color:"#666"}}>{o.officer}{o.town?(" · "+o.town):""}</div>
+          <div style={{fontSize:11.5,color:"#555"}}>{(o.lines||[]).map(l=>l.qty+" "+l.unit+" "+l.item).join(", ")}</div>
+          <div style={{fontSize:12,fontWeight:700,color:"#1a5a3a",marginBottom:4}}>
+            ₹{Number(o.value||0).toLocaleString("en-IN")}
+            {o.paid>0?<span style={{fontWeight:400,color:"#3a6a3a"}}> · collected ₹{Number(o.paid).toLocaleString("en-IN")}</span>:null}</div>
+          <select value={o.status||"Placed"} onChange={e=>setOrderStatus(o.id,e.target.value)} style={{...inp,fontSize:12,padding:"6px"}}>
+            {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>)}
+      </div>}
+
+      {tab==="sugg"&&<div>
+        <div style={{fontSize:11.5,color:"#8a6a2a",background:"#fdf8e8",padding:"9px 11px",borderRadius:8,marginBottom:10}}>
+          Every suggestion carries the person's own monthly commitment. Once launched, actual against
+          commitment is the accountability.</div>
+        {sugg.length===0?<div style={{fontSize:12,color:"#999",textAlign:"center",padding:"18px 0"}}>No suggestions yet.</div>
+        :sugg.map((s,i)=>{
+          const months=s.launchedOn?Math.max(1,Math.round((Date.now()-new Date(s.launchedOn).getTime())/(30*864e5))):0;
+          const owed=months*(Number(s.commitPerMonth)||0);
+          const gap=(Number(s.actualToDate)||0)-owed;
+          return <div key={s.id||i} style={{padding:"10px 0",borderBottom:"1px solid #eef2ee"}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+              <b style={{fontSize:13.5,color:"#1a5a3a"}}>{s.brand}</b>
+              <span style={{fontSize:10.5,color:"#999"}}>{s.officer} · {s.date}</span>
+            </div>
+            {s.why&&<div style={{fontSize:11.5,color:"#666",marginBottom:3}}>{s.why}</div>}
+            <div style={{fontSize:11.5,color:"#444"}}>Committed <b>{s.commitPerMonth} doz/month</b></div>
+            <div style={{display:"flex",gap:5,marginTop:5,alignItems:"center"}}>
+              <select value={s.status||"Proposed"} onChange={e=>setSuggStatus(s.id,e.target.value)} style={{...inp,fontSize:12,padding:"6px",flex:1}}>
+                <option>Proposed</option><option>Rejected</option><option>Launched</option><option>Closed</option>
+              </select>
+              {s.status==="Launched"&&<input type="number" value={s.actualToDate||""} onChange={e=>setSuggActual(s.id,e.target.value)}
+                placeholder="actual doz" inputMode="numeric" style={{...inp,width:100,flex:"0 0 100px",fontSize:12,padding:"6px"}}/>}
+            </div>
+            {s.status==="Launched"&&months>0&&<div style={{marginTop:5,fontSize:11.5,
+              background:gap>=0?"#e8f5e9":"#fdecea",padding:"6px 9px",borderRadius:7,
+              color:gap>=0?"#1a7a3a":"#c33",fontWeight:700}}>
+              {months} month(s) live · owed {owed} doz · actual {s.actualToDate||0} doz · {gap>=0?"+":""}{gap} doz
+            </div>}
+          </div>;
+        })}
+      </div>}
+
+      {tab==="market"&&<div>
+        {comp.length===0?<div style={{fontSize:12,color:"#999",textAlign:"center",padding:"18px 0"}}>Nothing recorded yet.</div>
+        :comp.map((c,i)=><div key={c.id||i} style={{padding:"9px 0",borderBottom:"1px solid #eef2ee"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+            <b style={{fontSize:13,color:"#1a5a3a"}}>{c.party}</b>
+            <span style={{fontSize:10.5,color:"#999"}}>{c.officer} · {c.date}</span>
+          </div>
+          <div style={{fontSize:11.5,color:"#666"}}>Competitor: <b>{c.competitorBrand}</b>
+            {c.theirLifting?(" · "+c.theirLifting+" doz/mo"):""}</div>
+          {c.ourBrand&&<div style={{fontSize:11.5,color:"#1a5a3a"}}>
+            Committed to us: <b>{c.ourBrand}</b> {c.commitment?("· "+c.commitment+" doz/mo"):""}</div>}
+        </div>)}
+      </div>}
+
+      {tab==="parties"&&<div>
+        {parties.length===0?<div style={{fontSize:12,color:"#999",textAlign:"center",padding:"18px 0"}}>No new parties yet.</div>
+        :parties.map((p,i)=><div key={p.id||i} style={{padding:"9px 0",borderBottom:"1px solid #eef2ee"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+            <b style={{fontSize:13,color:"#1a5a3a"}}>{p.name}</b>
+            <span style={{fontSize:10.5,color:"#999"}}>{p.officer} · {p.date}</span>
+          </div>
+          <div style={{fontSize:11.5,color:"#666"}}>{p.town}{p.phone?(" · "+p.phone):""}</div>
+          {p.stocks&&<div style={{fontSize:11.5,color:"#666"}}>Stocks: {p.stocks}</div>}
+          {p.potential&&<div style={{fontSize:11.5,color:"#1a5a3a"}}>Potential {p.potential} doz/mo</div>}
+        </div>)}
+      </div>}
+
+      {tab==="team"&&<div>
+        {recruits.length===0?<div style={{fontSize:12,color:"#999",textAlign:"center",padding:"18px 0"}}>No candidates recorded yet.</div>
+        :recruits.map((r,i)=><div key={r.id||i} style={{padding:"9px 0",borderBottom:"1px solid #eef2ee"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+            <b style={{fontSize:13,color:"#1a5a3a"}}>{r.candidate}</b>
+            <span style={{fontSize:10.5,color:"#999"}}>under {r.officer}</span>
+          </div>
+          <div style={{fontSize:11.5,color:"#666"}}>{r.area} · {r.stage}</div>
+        </div>)}
+      </div>}
+    </div>
+  );
+}
+
 function PurchaseSalesCapture({ mode, onSaveEntry, onClose }) {
   const isPurchase = mode === "purchase";
   const label = isPurchase ? "Purchase" : "Sales";
@@ -8781,6 +9313,8 @@ function App(){
   const [tgShareEntry,setTgShareEntry]=useState(null);
   const [capMode,setCapMode]=useState(null); // "purchase" | "sales" | null
   const [showFieldReport,setShowFieldReport]=useState(false);
+  const [showFieldConsole,setShowFieldConsole]=useState(false);
+  const [showFieldAdmin,setShowFieldAdmin]=useState(false);
   const [showPins,setShowPins]=useState(false);
   const [quickText,setQuickText]=useState("");
   const [quickOpen,setQuickOpen]=useState(false);
@@ -9205,6 +9739,8 @@ function App(){
                 {l:"🪔 Kerala",fn:()=>setShowKerala(true), ownerOnly:true},
                 {l:"⚖️ Rules",fn:()=>setShowRules(true), ownerOnly:true},
                 {l:"✈️ Telegram",fn:()=>setShowTelegram(true), ownerOnly:true},
+                {l:"🧭 Field Console",fn:()=>setShowFieldConsole(true)},
+                {l:"🗂️ Field Admin",fn:()=>setShowFieldAdmin(true), ownerOnly:true},
                 {l:"📝 Field Report",fn:()=>setShowFieldReport(true)},
                 {l:"🔒 PIN Access",fn:()=>setShowPins(true), ownerOnly:true},
                 {l:"📊 Tally",fn:()=>setShowTally(true), ownerOnly:true},
@@ -9477,6 +10013,8 @@ function App(){
     <Modal open={showAIM && IS_OWNER} onClose={()=>setShowAIM(false)} wide><AIMTrading onClose={()=>setShowAIM(false)}/></Modal>
     <Modal open={!!tgShareEntry} onClose={()=>setTgShareEntry(null)}><TelegramShare entry={tgShareEntry} onClose={()=>setTgShareEntry(null)}/></Modal>
     <Modal open={!!capMode} onClose={()=>setCapMode(null)}><PurchaseSalesCapture mode={capMode} onSaveEntry={saveEntry} onClose={()=>setCapMode(null)}/></Modal>
+    <Modal open={showFieldConsole} onClose={()=>setShowFieldConsole(false)}><FieldConsole onClose={()=>setShowFieldConsole(false)}/></Modal>
+    <Modal open={showFieldAdmin} onClose={()=>setShowFieldAdmin(false)}><FieldAdmin onClose={()=>setShowFieldAdmin(false)}/></Modal>
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
     <Modal open={showPins && IS_OWNER} onClose={()=>setShowPins(false)}><PinManager onClose={()=>setShowPins(false)}/></Modal>
     <Modal open={showFamily} onClose={()=>setShowFamily(false)}><HealthFamilyQuick onClose={()=>setShowFamily(false)} onSaveEntry={saveEntry} mode="family"/></Modal>
