@@ -12,6 +12,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_KEY || "";
 const BOT          = process.env.TELEGRAM_BOT_TOKEN || "";
 const OWNER_CHAT   = process.env.TELEGRAM_OWNER_CHAT_ID || "-5372910186";
+const WEBSITE_ORDERS_CHAT = process.env.TELEGRAM_WEBSITE_ORDERS_ID || "-5479964253";
 
 const H = {
   "Access-Control-Allow-Origin": "*",
@@ -60,7 +61,7 @@ function tgSend(text) {
   return new Promise((resolve) => {
     if (!BOT) return resolve({ ok: false, error: "TELEGRAM_BOT_TOKEN not set" });
     const payload = JSON.stringify({
-      chat_id: String(OWNER_CHAT),
+      chat_id: String(WEBSITE_ORDERS_CHAT),
       text: text,
       parse_mode: "HTML",
       disable_web_page_preview: true
