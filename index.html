@@ -2632,6 +2632,8 @@ function FieldConsole({ onClose }) {
   const [fair,setFair]=useState([]);
   const [claims,setClaims]=useState([]);
   const [incent,setIncent]=useState({rupeesPerPoint:0,minPoints:0});
+  const [locs,setLocs]=useState([]);
+  const [locName,setLocName]=useState(""), [locAddr,setLocAddr]=useState(""), [locCoord,setLocCoord]=useState("");
   const [homeAddr,setHomeAddr]=useState("");
   const [pmaster,setPmaster]=useState([]);
 
@@ -3225,6 +3227,7 @@ function FieldAdmin({ onClose }) {
     setClaims(await get("field_claims",[]));
     setIncent(await get("field_incentive",{rupeesPerPoint:"",minPoints:""}));
     setPmaster(await get("spectrum_master",[]));
+    setLocs(await get("field_locations",[]));
   })(); },[]);
 
   const saveRates=async()=>{ setBusy("r"); try{ await put("field_rates",rates.filter(r=>r.name&&r.name.trim())); setMsg("✓ Rates published to the team"); }catch(e){ setMsg("✗ failed"); } setBusy(""); };
@@ -3266,7 +3269,7 @@ function FieldAdmin({ onClose }) {
         <div style={{fontSize:11,color:"#6a7a6a"}}>Rates, targets and commitments</div></div>
       </div>
       <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:11}}>
-        {tabBtn("report","📈 Report")}{tabBtn("game","🏏 Game")}{tabBtn("rates","💵 Rates")}{tabBtn("targets","🎯 Targets")}{tabBtn("orders","📦 Orders")}
+        {tabBtn("report","📈 Report")}{tabBtn("game","🏏 Game")}{tabBtn("locs","📍 Locations")}{tabBtn("rates","💵 Rates")}{tabBtn("targets","🎯 Targets")}{tabBtn("orders","📦 Orders")}
         {tabBtn("sugg","💡 Commitments")}{tabBtn("market","🔍 Market")}{tabBtn("parties","🆕 Parties")}{tabBtn("team","👥 Recruits")}
       </div>
       {msg&&<div style={{fontSize:13,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:9,
@@ -3463,6 +3466,49 @@ function FieldAdmin({ onClose }) {
                 <select value={c.status} onChange={e=>setClaimStatus(c.id,e.target.value)} style={{...inp,fontSize:12,padding:"6px"}}>
                   <option>Requested</option><option>Approved</option><option>Paid</option><option>Rejected</option>
                 </select>
+              </div>)}
+        </div>;
+      })()}
+
+      {tab==="locs"&&(()=>{
+        const saveLoc=async()=>{
+          if(!locName||(!locAddr&&!locCoord)){ setMsg("✗ Name and at least address or coordinates needed"); return; }
+          setBusy("l"); setMsg("");
+          try{
+            const rec={ id:"loc_"+Date.now(), name:locName.trim(), address:locAddr.trim(), 
+              coordinates:locCoord.trim(), createdOn:new Date().toISOString().slice(0,10) };
+            const n=[rec,...(locs||[])]; await put("field_locations",n); setLocs(n);
+            setMsg("✓ Location saved"); setLocName(""); setLocAddr(""); setLocCoord("");
+          }catch(e){ setMsg("✗ failed"); }
+          setBusy("");
+        };
+        const delLoc=async(id)=>{
+          const n=locs.filter(l=>l.id!==id); await put("field_locations",n); setLocs(n);
+        };
+        return <div>
+          <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9}}>
+            Enter your team members' house/HQ addresses. Use Google Plus Codes (e.g. GXMM+9M9) or decimal coordinates (11.177158,75.830315).
+            Later these will be used to calculate distance-based daily allowance.</div>
+          <label style={lab}>Name (person or HQ)</label>
+          <input value={locName} onChange={e=>setLocName(e.target.value)} placeholder="Sooraj / HQ" style={inp}/>
+          <label style={lab}>Address (optional)</label>
+          <input value={locAddr} onChange={e=>setLocAddr(e.target.value)} placeholder="street, town" style={inp}/>
+          <label style={lab}>Plus Code or coordinates</label>
+          <input value={locCoord} onChange={e=>setLocCoord(e.target.value)} 
+            placeholder="GXMM+9M9 or 11.177158,75.830315" style={inp}/>
+          <button onClick={saveLoc} disabled={!!busy} style={{width:"100%",padding:"10px",borderRadius:9,border:"none",
+            background:"#1a5a3a",color:"#fff",fontWeight:700,fontSize:13.5,cursor:"pointer",marginBottom:9}}>
+            {busy==="l"?"Saving…":"📍 Add location"}</button>
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>Saved locations</div>
+          {locs.length===0
+            ? <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"14px 0"}}>None yet.</div>
+            : locs.map((l,i)=><div key={l.id||i} style={{padding:"9px 0",borderBottom:"1px solid #eef2ee",display:"flex",justifyContent:"space-between",alignItems:"start",gap:8}}>
+                <div style={{flex:1}}>
+                  <b style={{fontSize:12.5,color:"#1a5a3a",display:"block"}}>{l.name}</b>
+                  {l.address&&<div style={{fontSize:11,color:"#666"}}>{l.address}</div>}
+                  {l.coordinates&&<div style={{fontSize:10.5,color:"#888",fontFamily:"monospace"}}>{l.coordinates}</div>}
+                </div>
+                <button onClick={()=>delLoc(l.id)} style={{color:"#c33",background:"none",border:"none",fontWeight:700,cursor:"pointer",padding:"0 3px"}}>✕</button>
               </div>)}
         </div>;
       })()}
