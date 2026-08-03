@@ -33,6 +33,15 @@ input,select,textarea,button{font-family:inherit;}
 .scan-btn{padding:10px 16px;border-radius:8px;border:none;background:linear-gradient(135deg,#2a7a2a,#1a5a1a);color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.5;}}
 .listening{animation:pulse 1s infinite;}
+
+@keyframes rkPop{0%{transform:scale(.82);opacity:0}60%{transform:scale(1.06)}100%{transform:scale(1);opacity:1}}
+@keyframes rkShimmer{0%{background-position:-260px 0}100%{background-position:260px 0}}
+@keyframes rkRise{0%{transform:translateY(9px);opacity:0}100%{transform:translateY(0);opacity:1}}
+@keyframes rkConfetti{0%{transform:translateY(0) rotate(0);opacity:1}100%{transform:translateY(150px) rotate(540deg);opacity:0}}
+.rk-pop{animation:rkPop 480ms cubic-bezier(.22,1,.36,1) both}
+.rk-rise{animation:rkRise 420ms ease-out both}
+.rk-gold{background:linear-gradient(90deg,#f6e6a8,#fff8e0,#f6e6a8);background-size:260px 100%;animation:rkShimmer 2.4s linear infinite}
+.rk-confetti span{position:absolute;width:7px;height:11px;border-radius:2px;animation:rkConfetti 1.5s ease-in forwards}
 </style>
 <style id="rk-mobile-css">
 @media (max-width: 760px){
@@ -2402,6 +2411,84 @@ function FieldReport({ onClose }) {
 }
 
 // ------------------------------------------------------------
+// Points. Deliberately legible — a person must be able to work
+// out their own score in their head, or it stops motivating.
+//   target        1 point per 1% achieved, capped at 150
+//   new party     25 each  (the behaviour we are trying to buy)
+//   order booked  5 each
+//   expense       <=10% +30 | 10-15% +10 | >15% -20
+//   collection    collected >= sales +20
+//   commitment    on track +25 | behind -15
+// ------------------------------------------------------------
+const EXP_IDEAL = 10, EXP_ALERT = 15;
+
+function pointsFor(row, suggestions, user) {
+  const p = [];
+  const ach = row.achPct===null ? 0 : Math.min(150, Math.round(row.achPct));
+  if (row.achPct!==null) p.push({ label:"Target "+Math.round(row.achPct)+"%", pts:ach });
+  if (row.newParties>0)  p.push({ label:row.newParties+" new part"+(row.newParties===1?"y":"ies"), pts:row.newParties*25 });
+  if (row.orders>0)      p.push({ label:row.orders+" order"+(row.orders===1?"":"s"), pts:row.orders*5 });
+  if (row.expPct!==null) {
+    if (row.expPct<=EXP_IDEAL)      p.push({ label:"Expense "+row.expPct.toFixed(1)+"%", pts:30 });
+    else if (row.expPct<=EXP_ALERT) p.push({ label:"Expense "+row.expPct.toFixed(1)+"%", pts:10 });
+    else                            p.push({ label:"Expense "+row.expPct.toFixed(1)+"%", pts:-20 });
+  }
+  if (row.sales>0 && row.collections>=row.sales) p.push({ label:"Collected in full", pts:20 });
+  (suggestions||[]).forEach(s=>{
+    if (s.user!==(user||row.user) || s.status!=="Launched") return;
+    const months = s.launchedOn ? Math.max(1,Math.round((Date.now()-new Date(s.launchedOn).getTime())/(30*864e5))) : 0;
+    if (!months) return;
+    const owed = months*(Number(s.commitPerMonth)||0);
+    const gap  = (Number(s.actualToDate)||0)-owed;
+    p.push({ label:s.brand+(gap>=0?" on track":" behind"), pts: gap>=0?25:-15 });
+  });
+  const total = p.reduce((t,x)=>t+x.pts,0);
+  return { total, parts:p };
+}
+
+// Number that counts up when it changes — the small reward that
+// makes a score feel earned rather than merely displayed.
+function CountUp({ value, prefix, suffix, style }) {
+  const [shown,setShown]=useState(0);
+  const prev=useRef(0);
+  useEffect(()=>{
+    const from=prev.current, to=Number(value)||0, t0=Date.now(), dur=850;
+    let raf;
+    const step=()=>{
+      const k=Math.min(1,(Date.now()-t0)/dur);
+      const e=1-Math.pow(1-k,3);                 // ease-out
+      setShown(Math.round(from+(to-from)*e));
+      if(k<1) raf=requestAnimationFrame(step); else prev.current=to;
+    };
+    raf=requestAnimationFrame(step);
+    return ()=>cancelAnimationFrame(raf);
+  },[value]);
+  return <span style={style}>{prefix||""}{shown.toLocaleString("en-IN")}{suffix||""}</span>;
+}
+
+// Bar that fills on mount.
+function FillBar({ pct, color, height }) {
+  const [w,setW]=useState(0);
+  useEffect(()=>{ const t=setTimeout(()=>setW(Math.max(0,Math.min(100,pct||0))),60); return ()=>clearTimeout(t); },[pct]);
+  return <div style={{background:"#e8eee8",borderRadius:20,height:height||7,overflow:"hidden",width:"100%"}}>
+    <div style={{width:w+"%",height:"100%",background:color||"#1a7a3a",borderRadius:20,
+      transition:"width 900ms cubic-bezier(.22,1,.36,1)"}}/>
+  </div>;
+}
+
+function Confetti({ fire }) {
+  const [on,setOn]=useState(false);
+  useEffect(()=>{ if(fire){ setOn(true); const t=setTimeout(()=>setOn(false),1600); return ()=>clearTimeout(t);} },[fire]);
+  if(!on) return null;
+  const cols=["#d4a017","#1a7a3a","#c33","#3a6ac3","#e08030"];
+  return <div className="rk-confetti" style={{position:"relative",height:0}}>
+    {Array.from({length:16}).map((_,i)=>
+      <span key={i} style={{left:(6+i*6)+"%",background:cols[i%cols.length],
+        animationDelay:(i*45)+"ms"}}/>)}
+  </div>;
+}
+
+// ------------------------------------------------------------
 // Field roll-up. One place that turns raw submissions into the
 // numbers both the owner report and the team's own view use, so
 // the two can never disagree with each other.
@@ -2801,6 +2888,11 @@ function FieldConsole({ onClose }) {
           <div style={{fontSize:17,fontWeight:800,color:c||"#1a5a3a"}}>{v}</div></div>);
         if(!meRow) return <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"22px 0"}}>
           Nothing submitted yet in this window.</div>;
+        const myScore=pointsFor(meRow,mySugg,me);
+        const scored=rows.map(r=>({...r,score:pointsFor(r,mySugg,r.user).total})).sort((a,b)=>b.score-a.score);
+        const ptRank=scored.findIndex(r=>r.user===me)+1;
+        const topScore=scored.length?Math.max(1,scored[0].score):1;
+        const hitTarget=meRow.achPct!==null&&meRow.achPct>=100;
         return <div>
           <div style={{display:"flex",gap:5,marginBottom:10}}>
             {[[7,"7 days"],[30,"30 days"],[90,"90 days"]].map(([d,l])=>
@@ -2808,6 +2900,31 @@ function FieldConsole({ onClose }) {
                 background:mDays===d?"#1a5a3a":"#e8f0e8",color:mDays===d?"#fff":"#3a5a3a",
                 fontWeight:700,fontSize:11,cursor:"pointer"}}>{l}</button>)}
           </div>
+          <Confetti fire={hitTarget}/>
+          <div className={"rk-pop"+(ptRank===1?" rk-gold":"")} style={{borderRadius:12,padding:"13px 14px",marginBottom:11,
+            background:ptRank===1?undefined:"linear-gradient(135deg,#1a5a3a,#0d3a24)",
+            color:ptRank===1?"#5a4010":"#fff",border:ptRank===1?"1px solid #e0c070":"none"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:10,opacity:.85,fontWeight:700,letterSpacing:.4}}>MY POINTS</div>
+                <CountUp value={myScore.total} style={{fontSize:32,fontWeight:800,lineHeight:1.05}}/>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:26}}>{ptRank===1?"🥇":(ptRank===2?"🥈":(ptRank===3?"🥉":"🎯"))}</div>
+                <div style={{fontSize:11,fontWeight:700}}>Rank {ptRank} of {scored.length}</div>
+              </div>
+            </div>
+            <div style={{marginTop:9}}><FillBar pct={myScore.total/topScore*100}
+              color={ptRank===1?"#b8860b":"#7ad0a0"} height={8}/></div>
+            <div style={{marginTop:8,display:"flex",flexWrap:"wrap",gap:5}}>
+              {myScore.parts.map((p,i)=><span key={i} style={{fontSize:10.5,fontWeight:700,
+                background:ptRank===1?"rgba(255,255,255,.55)":"rgba(255,255,255,.13)",
+                padding:"3px 8px",borderRadius:20}}>
+                {p.label} <b style={{color:p.pts>=0?(ptRank===1?"#1a6a3a":"#8ce0a8"):"#ff9a9a"}}>
+                  {p.pts>=0?"+":""}{p.pts}</b></span>)}
+            </div>
+          </div>
+
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:11}}>
             {box("MY SALES","₹"+Math.round(meRow.sales).toLocaleString("en-IN"))}
             {box("OF TARGET", meRow.achPct===null?"—":Math.round(meRow.achPct)+"%",
@@ -2818,9 +2935,22 @@ function FieldConsole({ onClose }) {
             {box("HUNT RANK", huntRank+" of "+hunters.length, huntRank===1?"#1a7a3a":"#1a5a3a")}
             {box("ORDERS", meRow.orders)}
           </div>
-          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>Where everyone stands</div>
-          {ranked.map((r,i)=><div key={r.user} style={{display:"flex",justifyContent:"space-between",
-            alignItems:"center",padding:"7px 9px",borderRadius:7,marginBottom:3,
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>🏆 League</div>
+          {scored.map((r,i)=><div key={r.user} className="rk-rise"
+            style={{padding:"7px 10px",borderRadius:8,marginBottom:3,animationDelay:(i*55)+"ms",
+            background:r.user===me?"#e8f5e9":(i===0?"#fffaf0":"transparent"),
+            border:i===0?"1px solid #e8d090":"1px solid transparent"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+              <span style={{fontSize:12.5,textTransform:"capitalize",fontWeight:r.user===me?800:500}}>
+                {i===0?"🥇":(i===1?"🥈":(i===2?"🥉":(i+1)+"."))} {r.officer}{r.user===me?" (you)":""}</span>
+              <b style={{fontSize:13,color:r.score>=0?"#1a5a3a":"#c33"}}>{r.score} pts</b>
+            </div>
+            <FillBar pct={r.score/topScore*100} color={i===0?"#d4a017":(r.user===me?"#1a7a3a":"#9ab8a4")} height={5}/>
+          </div>)}
+
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",margin:"13px 0 4px"}}>Against target</div>
+          {ranked.map((r,i)=><div key={"t"+r.user} style={{display:"flex",justifyContent:"space-between",
+            alignItems:"center",padding:"6px 9px",borderRadius:7,marginBottom:3,
             background:r.user===me?"#e8f5e9":"transparent"}}>
             <span style={{fontSize:12.5,textTransform:"capitalize",fontWeight:r.user===me?800:500}}>
               {i+1}. {r.officer}{r.user===me?" (you)":""}</span>
@@ -2836,6 +2966,18 @@ function FieldConsole({ onClose }) {
             <b style={{fontSize:13,color:r.newParties>=bench?"#1a7a3a":(r.newParties===0?"#c33":"#8a6a2a")}}>
               {r.newParties}</b>
           </div>)}
+          <details style={{marginTop:12,background:"#f6f9f6",borderRadius:9,padding:"9px 11px"}}>
+            <summary style={{fontSize:11.5,fontWeight:800,color:"#1a5a3a",cursor:"pointer"}}>How points are earned</summary>
+            <div style={{fontSize:11.5,color:"#4a5a4a",lineHeight:1.7,marginTop:6}}>
+              Target — 1 point for every 1% achieved (max 150)<br/>
+              New party — 25 points each<br/>
+              Order booked — 5 points each<br/>
+              Expense {EXP_IDEAL}% or under — +30 · up to {EXP_ALERT}% — +10 · above — −20<br/>
+              Collected everything you sold — +20<br/>
+              Brand commitment on track — +25 · behind — −15
+            </div>
+          </details>
+
           {mine.length>0&&<div style={{marginTop:14}}>
             <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:4}}>💡 My commitments</div>
             {mine.map((s,i)=>{
@@ -2960,7 +3102,7 @@ function FieldAdmin({ onClose }) {
         const todayStr=new Date().toISOString().slice(0,10);
         const silent=rows.filter(r=>r.lastSeen && r.lastSeen<todayStr);
         const noHunt=rows.filter(r=>r.newParties===0);
-        const heavy=rows.filter(r=>r.expPct!==null&&r.expPct>12);
+        const heavy=rows.filter(r=>r.expPct!==null&&r.expPct>EXP_ALERT);
         const pill=(n,l,c)=>(<div style={{flex:1,minWidth:82,background:"#f6f9f6",borderRadius:8,padding:"8px 9px"}}>
           <div style={{fontSize:9.5,color:"#7a8a7a",fontWeight:700}}>{l}</div>
           <div style={{fontSize:15,fontWeight:800,color:c||"#1a5a3a"}}>{n}</div></div>);
@@ -2979,8 +3121,8 @@ function FieldAdmin({ onClose }) {
             {pill(tot.orders,"ORDERS")}
             {pill(tot.newParties,"NEW PARTIES",tot.newParties>0?"#1a7a3a":"#c33")}
             {pill("₹"+Math.round(tot.collections).toLocaleString("en-IN"),"COLLECTED")}
-            {pill(tot.sales>0?(tot.expenses/tot.sales*100).toFixed(1)+"%":"—","EXPENSE",
-              tot.sales>0&&(tot.expenses/tot.sales*100)>12?"#c33":"#1a5a3a")}
+            {pill(tot.sales>0?(tot.expenses/tot.sales*100).toFixed(1)+"%":"—","EXPENSE (aim "+EXP_IDEAL+"%)",
+              tot.sales>0?((tot.expenses/tot.sales*100)>EXP_ALERT?"#c33":((tot.expenses/tot.sales*100)>EXP_IDEAL?"#8a6a2a":"#1a7a3a")):"#1a5a3a")}
           </div>
 
           {(silent.length>0||noHunt.length>0||heavy.length>0)&&
@@ -2991,10 +3133,30 @@ function FieldAdmin({ onClose }) {
               {silent.length>0&&<div style={{fontSize:11.5,color:"#7a5a2a"}}>
                 Nothing reported today: <b>{silent.map(r=>r.officer).join(", ")}</b></div>}
               {heavy.length>0&&<div style={{fontSize:11.5,color:"#7a5a2a"}}>
-                Expense above 12% of sales: <b>{heavy.map(r=>r.officer+" ("+r.expPct.toFixed(0)+"%)").join(", ")}</b></div>}
+                Expense above {EXP_ALERT}% of sales: <b>{heavy.map(r=>r.officer+" ("+r.expPct.toFixed(1)+"%)").join(", ")}</b></div>}
             </div>}
 
-          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>Against target</div>
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>🏆 League</div>
+          {(()=>{
+            const scored=rows.map(r=>({...r,score:pointsFor(r,sugg,r.user).total}))
+                             .sort((a,b)=>b.score-a.score);
+            const top=scored.length?Math.max(1,scored[0].score):1;
+            const medal=i=>i===0?"🥇":(i===1?"🥈":(i===2?"🥉":(i+1)+"."));
+            return scored.map((r,i)=><div key={"L"+r.user} className="rk-rise"
+              style={{padding:"8px 10px",borderRadius:9,marginBottom:4,
+                animationDelay:(i*55)+"ms",
+                background:i===0?"#fffaf0":"#f8faf8",border:i===0?"1px solid #e8d090":"1px solid #eef2ee"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,marginBottom:4}}>
+                <span style={{fontSize:13,fontWeight:i===0?800:600,textTransform:"capitalize"}}>
+                  {medal(i)} {r.officer}</span>
+                <CountUp value={r.score} suffix=" pts"
+                  style={{fontSize:14,fontWeight:800,color:r.score>=0?"#1a5a3a":"#c33"}}/>
+              </div>
+              <FillBar pct={r.score/top*100} color={i===0?"#d4a017":"#1a7a3a"}/>
+            </div>);
+          })()}
+
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",margin:"14px 0 5px"}}>Against target</div>
           {ranked.length===0?<div style={{fontSize:12,color:"#999",padding:"14px 0",textAlign:"center"}}>Nothing submitted in this window.</div>
           :ranked.map((r,i)=><div key={r.user} style={{padding:"8px 0",borderBottom:i<ranked.length-1?"1px solid #eef2ee":"none"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}>
