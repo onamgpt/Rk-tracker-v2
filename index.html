@@ -2422,26 +2422,56 @@ function FieldReport({ onClose }) {
 // ------------------------------------------------------------
 const EXP_IDEAL = 10, EXP_ALERT = 15;
 
-function pointsFor(row, suggestions, user) {
+function pointsFor(row, suggestions, user, fairplay) {
   const p = [];
+  const u = user||row.user;
+
+  // Batting — the runs on the board
   const ach = row.achPct===null ? 0 : Math.min(150, Math.round(row.achPct));
   if (row.achPct!==null) p.push({ label:"Target "+Math.round(row.achPct)+"%", pts:ach });
+
+  // Hunting — what we are actually trying to buy
   if (row.newParties>0)  p.push({ label:row.newParties+" new part"+(row.newParties===1?"y":"ies"), pts:row.newParties*25 });
+
   if (row.orders>0)      p.push({ label:row.orders+" order"+(row.orders===1?"":"s"), pts:row.orders*5 });
+
+  // Width — selling to many parties beats one large invoice
+  if (row.distinctParties>1) p.push({ label:row.distinctParties+" parties billed", pts:row.distinctParties*8 });
+
+  // Collection, graduated. Money in the bank is not all-or-nothing.
+  if (row.sales>0) {
+    const cr = row.collections/row.sales;
+    const cp = Math.round(Math.min(1.2, cr)*40);
+    p.push({ label:"Collected "+Math.round(cr*100)+"%", pts:cp });
+  }
+
+  // Economy rate
   if (row.expPct!==null) {
     if (row.expPct<=EXP_IDEAL)      p.push({ label:"Expense "+row.expPct.toFixed(1)+"%", pts:30 });
     else if (row.expPct<=EXP_ALERT) p.push({ label:"Expense "+row.expPct.toFixed(1)+"%", pts:10 });
     else                            p.push({ label:"Expense "+row.expPct.toFixed(1)+"%", pts:-20 });
   }
-  if (row.sales>0 && row.collections>=row.sales) p.push({ label:"Collected in full", pts:20 });
+
+  // Turning up. Missing matches costs a side more than a bad innings.
+  if (row.dayCount>=20)      p.push({ label:row.dayCount+" days reported", pts:30 });
+  else if (row.dayCount>=12) p.push({ label:row.dayCount+" days reported", pts:15 });
+
+  // Commitments made on brands they themselves asked for
   (suggestions||[]).forEach(s=>{
-    if (s.user!==(user||row.user) || s.status!=="Launched") return;
+    if (s.user!==u || s.status!=="Launched") return;
     const months = s.launchedOn ? Math.max(1,Math.round((Date.now()-new Date(s.launchedOn).getTime())/(30*864e5))) : 0;
     if (!months) return;
     const owed = months*(Number(s.commitPerMonth)||0);
     const gap  = (Number(s.actualToDate)||0)-owed;
     p.push({ label:s.brand+(gap>=0?" on track":" behind"), pts: gap>=0?25:-15 });
   });
+
+  // Fair play — awarded by hand, for the things no formula can see
+  (fairplay||[]).forEach(f=>{
+    if (f.user!==u) return;
+    p.push({ label:"Fair play: "+(f.reason||"awarded"), pts:Number(f.pts)||0 });
+  });
+
   const total = p.reduce((t,x)=>t+x.pts,0);
   return { total, parts:p };
 }
@@ -2498,7 +2528,8 @@ function rollupField(reports, orders, parties, days) {
   const inWin = d => String(d||"") >= cut;
   const by = {};
   const seed = u => { if(!by[u]) by[u]={ user:u, officer:u, sales:0, expenses:0, collections:0,
-    dayCount:0, target:0, orders:0, orderValue:0, collectedAtOrder:0, newParties:0, lastSeen:"" }; return by[u]; };
+    dayCount:0, target:0, orders:0, orderValue:0, collectedAtOrder:0, newParties:0,
+    distinctParties:0, lastSeen:"" }; return by[u]; };
 
   (reports||[]).forEach(r=>{
     if(!inWin(r.date)) return;
@@ -2510,13 +2541,17 @@ function rollupField(reports, orders, parties, days) {
     b.dayCount += 1;
     if((r.date||"") > b.lastSeen) b.lastSeen = r.date||"";
   });
+  const partySets = {};
   (orders||[]).forEach(o=>{
     if(!inWin(o.date)) return;
-    const b=seed(o.user||"?"); b.officer=o.officer||b.officer;
+    const u=o.user||"?";
+    const b=seed(u); b.officer=o.officer||b.officer;
     b.orders += 1;
     b.orderValue += Number(o.value)||0;
     b.collectedAtOrder += Number(o.paid)||0;
     if((o.date||"") > b.lastSeen) b.lastSeen = o.date||"";
+    if(!partySets[u]) partySets[u]={};
+    if(o.party) partySets[u][String(o.party).trim().toLowerCase()]=1;
   });
   (parties||[]).forEach(p=>{
     if(!inWin(p.date)) return;
@@ -2526,6 +2561,7 @@ function rollupField(reports, orders, parties, days) {
 
   const rows = Object.values(by).map(b=>({
     ...b,
+    distinctParties: partySets[b.user] ? Object.keys(partySets[b.user]).length : 0,
     variance: b.sales - b.target,
     achPct: b.target>0 ? (b.sales/b.target*100) : null,
     expPct: b.sales>0 ? (b.expenses/b.sales*100) : null
@@ -2562,6 +2598,10 @@ function FieldConsole({ onClose }) {
   const [allParties,setAllParties]=useState([]);
   const [mySugg,setMySugg]=useState([]);
   const [mDays,setMDays]=useState(30);
+  const [fair,setFair]=useState([]);
+  const [claims,setClaims]=useState([]);
+  const [incent,setIncent]=useState({rupeesPerPoint:0,minPoints:0});
+  const [homeAddr,setHomeAddr]=useState("");
 
   // ---- order entry
   const [party,setParty]=useState("");
@@ -2616,6 +2656,9 @@ function FieldConsole({ onClose }) {
     try{ const p=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(p&&p.data&&Array.isArray(p.data)) setAllReports(p.data); }catch(e){}
     try{ const q=await sheetsAPI("getPortfolio",{key:"field_newparties",user:"main"}); if(q&&q.data&&Array.isArray(q.data)) setAllParties(q.data); }catch(e){}
     try{ const g=await sheetsAPI("getPortfolio",{key:"field_suggestions",user:"main"}); if(g&&g.data&&Array.isArray(g.data)) setMySugg(g.data); }catch(e){}
+    try{ const fp=await sheetsAPI("getPortfolio",{key:"field_fairplay",user:"main"}); if(fp&&fp.data&&Array.isArray(fp.data)) setFair(fp.data); }catch(e){}
+    try{ const cl=await sheetsAPI("getPortfolio",{key:"field_claims",user:"main"}); if(cl&&cl.data&&Array.isArray(cl.data)) setClaims(cl.data); }catch(e){}
+    try{ const ic=await sheetsAPI("getPortfolio",{key:"field_incentive",user:"main"}); if(ic&&ic.data) setIncent(ic.data); }catch(e){}
   })(); },[]);
 
   const rateOf = n => { const r=rates.find(x=>x.name===n); return r?Number(r.rate)||0:0; };
@@ -2737,6 +2780,7 @@ function FieldConsole({ onClose }) {
         {tabBtn("idea","💡 Brand idea")}
         {tabBtn("team","👥 Recruit")}
         {tabBtn("mine","📈 My month")}
+        {tabBtn("claim","🏏 Incentive")}
         {tabBtn("feed","📣 Team")}
       </div>
 
@@ -2888,8 +2932,8 @@ function FieldConsole({ onClose }) {
           <div style={{fontSize:17,fontWeight:800,color:c||"#1a5a3a"}}>{v}</div></div>);
         if(!meRow) return <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"22px 0"}}>
           Nothing submitted yet in this window.</div>;
-        const myScore=pointsFor(meRow,mySugg,me);
-        const scored=rows.map(r=>({...r,score:pointsFor(r,mySugg,r.user).total})).sort((a,b)=>b.score-a.score);
+        const myScore=pointsFor(meRow,mySugg,me,fair);
+        const scored=rows.map(r=>({...r,score:pointsFor(r,mySugg,r.user,fair).total})).sort((a,b)=>b.score-a.score);
         const ptRank=scored.findIndex(r=>r.user===me)+1;
         const topScore=scored.length?Math.max(1,scored[0].score):1;
         const hitTarget=meRow.achPct!==null&&meRow.achPct>=100;
@@ -2995,6 +3039,89 @@ function FieldConsole({ onClose }) {
         </div>;
       })()}
 
+      {tab==="claim"&&(()=>{
+        const mo=new Date().toISOString().slice(0,7);
+        const monthStart=mo+"-01";
+        const dayCount=Math.max(1,Math.ceil((Date.now()-new Date(monthStart).getTime())/864e5));
+        const {rows}=rollupField(allReports,allOrders,allParties,dayCount);
+        const meRow=rows.find(r=>r.user===me);
+        const sc=meRow?pointsFor(meRow,mySugg,me,fair):{total:0,parts:[]};
+        const rate=Number(incent.rupeesPerPoint)||0;
+        const minP=Number(incent.minPoints)||0;
+        const already=(claims||[]).find(c=>c.user===me&&c.month===mo);
+        const worth=Math.round(sc.total*rate);
+        const eligible=sc.total>=minP && rate>0 && !already;
+        const submitClaim=async()=>{
+          setBusy("claim"); setMsg("");
+          try{
+            const rec={ id:"cl_"+Date.now(), user:me, officer:officer, month:mo,
+              points:sc.total, rate:rate, value:worth, status:"Requested",
+              breakdown:sc.parts, requestedOn:new Date().toISOString().slice(0,10) };
+            let cur=[]; try{ const r=await sheetsAPI("getPortfolio",{key:"field_claims",user:"main"}); if(r&&r.data&&Array.isArray(r.data))cur=r.data; }catch(e){}
+            cur.unshift(rec);
+            await sheetsAPI("savePortfolio",{key:"field_claims",user:"main",data:cur});
+            setClaims(cur);
+            await broadcast("🏏 <b>"+officer+"</b> claimed the "+mo+" incentive — "+sc.total+" pts");
+            setMsg("✓ Claim submitted for approval");
+          }catch(e){ setMsg("✗ Could not submit"); }
+          setBusy("");
+        };
+        const mineClaims=(claims||[]).filter(c=>c.user===me);
+        return <div>
+          <div className="rk-pop" style={{borderRadius:12,padding:"14px",marginBottom:11,
+            background:"linear-gradient(135deg,#1a3a6a,#0d2444)",color:"#fff"}}>
+            <div style={{fontSize:10,opacity:.85,fontWeight:700,letterSpacing:.4}}>THIS MONTH · {mo}</div>
+            <CountUp value={sc.total} suffix=" pts" style={{fontSize:30,fontWeight:800,lineHeight:1.1,display:"block"}}/>
+            {rate>0
+              ? <div style={{fontSize:14,fontWeight:700,marginTop:3,color:"#9ad0ff"}}>
+                  worth ₹<CountUp value={worth}/> <span style={{fontSize:11,opacity:.8,fontWeight:400}}>at ₹{rate}/point</span></div>
+              : <div style={{fontSize:11.5,marginTop:5,opacity:.85}}>The office has not set a point value yet.</div>}
+            {minP>0&&<div style={{marginTop:8}}>
+              <div style={{fontSize:10.5,opacity:.85,marginBottom:3}}>
+                {sc.total>=minP?"Qualified":(minP-sc.total)+" points short of the "+minP+" minimum"}</div>
+              <FillBar pct={sc.total/minP*100} color={sc.total>=minP?"#7ad0a0":"#e0a040"} height={7}/>
+            </div>}
+          </div>
+
+          {sc.parts.length>0&&<div style={{background:"#f6f9f6",borderRadius:9,padding:"10px 12px",marginBottom:11}}>
+            <div style={{fontSize:11.5,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>Your scorecard</div>
+            {sc.parts.map((p,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",
+              fontSize:11.5,padding:"3px 0",borderBottom:i<sc.parts.length-1?"1px solid #eef2ee":"none"}}>
+              <span style={{color:"#4a5a4a"}}>{p.label}</span>
+              <b style={{color:p.pts>=0?"#1a7a3a":"#c33"}}>{p.pts>=0?"+":""}{p.pts}</b>
+            </div>)}
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:800,
+              marginTop:6,paddingTop:6,borderTop:"2px solid #dde6dd",color:"#1a5a3a"}}>
+              <span>Total</span><span>{sc.total} pts</span>
+            </div>
+          </div>}
+
+          {already
+            ? <div style={{background:"#eef4ff",borderRadius:9,padding:"11px 13px",marginBottom:11}}>
+                <b style={{fontSize:12.5,color:"#1a3a7a"}}>Already claimed for {mo}</b>
+                <div style={{fontSize:11.5,color:"#4a5a7a"}}>
+                  {already.points} pts · ₹{Number(already.value).toLocaleString("en-IN")} · {already.status}</div>
+              </div>
+            : <button onClick={submitClaim} disabled={!eligible||!!busy}
+                style={{width:"100%",padding:"13px",borderRadius:10,border:"none",
+                background:eligible?"linear-gradient(135deg,#1a5a9a,#0d3a6a)":"#ccc",
+                color:"#fff",fontWeight:800,fontSize:15,cursor:eligible?"pointer":"not-allowed"}}>
+                {busy==="claim"?"Submitting…":(rate<=0?"Point value not set yet":
+                  (sc.total<minP?"Not qualified yet":"🏏 Claim ₹"+worth.toLocaleString("en-IN")))}</button>}
+
+          {mineClaims.length>0&&<div style={{marginTop:14}}>
+            <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>My claims</div>
+            {mineClaims.map((c,i)=><div key={c.id||i} style={{display:"flex",justifyContent:"space-between",
+              alignItems:"center",padding:"7px 0",borderBottom:"1px solid #eef2ee"}}>
+              <span style={{fontSize:12}}>{c.month} · {c.points} pts</span>
+              <span style={{fontSize:12,fontWeight:700,
+                color:c.status==="Paid"?"#1a7a3a":(c.status==="Rejected"?"#c33":"#8a6a2a")}}>
+                ₹{Number(c.value).toLocaleString("en-IN")} · {c.status}</span>
+            </div>)}
+          </div>}
+        </div>;
+      })()}
+
       {tab==="feed"&&<div>
         <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9}}>What the team has booked recently.</div>
         {feed.length===0
@@ -3033,6 +3160,10 @@ function FieldAdmin({ onClose }) {
   const [recruits,setRecruits]=useState([]);
   const [reports,setReports]=useState([]);
   const [days,setDays]=useState(30);
+  const [fair,setFair]=useState([]);
+  const [claims,setClaims]=useState([]);
+  const [incent,setIncent]=useState({rupeesPerPoint:"",minPoints:""});
+  const [fpUser,setFpUser]=useState(""), [fpPts,setFpPts]=useState(""), [fpWhy,setFpWhy]=useState("");
   const [busy,setBusy]=useState(""); const [msg,setMsg]=useState("");
   const TEAM=["sunil","sadasivan","sebi","biju","satish","vinod","sooraj","prakash"];
 
@@ -3048,6 +3179,9 @@ function FieldAdmin({ onClose }) {
     setParties(await get("field_newparties",[]));
     setRecruits(await get("field_recruits",[]));
     setReports(await get("field_reports",[]));
+    setFair(await get("field_fairplay",[]));
+    setClaims(await get("field_claims",[]));
+    setIncent(await get("field_incentive",{rupeesPerPoint:"",minPoints:""}));
   })(); },[]);
 
   const saveRates=async()=>{ setBusy("r"); try{ await put("field_rates",rates.filter(r=>r.name&&r.name.trim())); setMsg("✓ Rates published to the team"); }catch(e){ setMsg("✗ failed"); } setBusy(""); };
@@ -3084,7 +3218,7 @@ function FieldAdmin({ onClose }) {
         <div style={{fontSize:11,color:"#6a7a6a"}}>Rates, targets and commitments</div></div>
       </div>
       <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:11}}>
-        {tabBtn("report","📈 Report")}{tabBtn("rates","💵 Rates")}{tabBtn("targets","🎯 Targets")}{tabBtn("orders","📦 Orders")}
+        {tabBtn("report","📈 Report")}{tabBtn("game","🏏 Game")}{tabBtn("rates","💵 Rates")}{tabBtn("targets","🎯 Targets")}{tabBtn("orders","📦 Orders")}
         {tabBtn("sugg","💡 Commitments")}{tabBtn("market","🔍 Market")}{tabBtn("parties","🆕 Parties")}{tabBtn("team","👥 Recruits")}
       </div>
       {msg&&<div style={{fontSize:13,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:9,
@@ -3138,7 +3272,7 @@ function FieldAdmin({ onClose }) {
 
           <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>🏆 League</div>
           {(()=>{
-            const scored=rows.map(r=>({...r,score:pointsFor(r,sugg,r.user).total}))
+            const scored=rows.map(r=>({...r,score:pointsFor(r,sugg,r.user,fair).total}))
                              .sort((a,b)=>b.score-a.score);
             const top=scored.length?Math.max(1,scored[0].score):1;
             const medal=i=>i===0?"🥇":(i===1?"🥈":(i===2?"🥉":(i+1)+"."));
@@ -3188,6 +3322,94 @@ function FieldAdmin({ onClose }) {
                 {r.newParties}</b>
             </span>
           </div>)}
+        </div>;
+      })()}
+
+      {tab==="game"&&(()=>{
+        const saveIncent=async()=>{ setBusy("i"); try{ await put("field_incentive",incent); setMsg("✓ Point value published"); }catch(e){ setMsg("✗ failed"); } setBusy(""); };
+        const awardFair=async()=>{
+          if(!fpUser||!fpPts){ setMsg("✗ Pick a person and a points value"); return; }
+          setBusy("f");
+          try{
+            const rec={ id:"fp_"+Date.now(), user:fpUser, officer:fpUser.charAt(0).toUpperCase()+fpUser.slice(1),
+              pts:Number(fpPts)||0, reason:fpWhy.trim()||"awarded", date:new Date().toISOString().slice(0,10) };
+            const n=[rec,...(fair||[])]; await put("field_fairplay",n); setFair(n);
+            try{ await fetch("/.netlify/functions/telegram",{method:"POST",headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({action:"send",chatId:"-5372910186",
+                message:"⚖️ Fair play — <b>"+rec.officer+"</b> "+(rec.pts>=0?"+":"")+rec.pts+" pts\n"+rec.reason})}); }catch(e){}
+            setMsg("✓ Awarded"); setFpUser("");setFpPts("");setFpWhy("");
+          }catch(e){ setMsg("✗ failed"); }
+          setBusy("");
+        };
+        const setClaimStatus=async(id,st)=>{
+          const n=claims.map(c=>c.id===id?{...c,status:st}:c);
+          setClaims(n); await put("field_claims",n);
+          const c=n.find(x=>x.id===id);
+          try{ await fetch("/.netlify/functions/telegram",{method:"POST",headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({action:"send",chatId:"-5372910186",
+              message:"🏏 <b>"+c.officer+"</b> — "+c.month+" incentive "+st+" · ₹"+Number(c.value).toLocaleString("en-IN")})}); }catch(e){}
+        };
+        const pending=(claims||[]).filter(c=>c.status==="Requested");
+        return <div>
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>💰 What a point is worth</div>
+          <div style={{display:"flex",gap:6,marginBottom:7}}>
+            <div style={{flex:1}}><label style={lab}>₹ per point</label>
+              <input type="number" value={incent.rupeesPerPoint||""} inputMode="decimal"
+                onChange={e=>setIncent({...incent,rupeesPerPoint:e.target.value})} style={inp}/></div>
+            <div style={{flex:1}}><label style={lab}>Minimum points to claim</label>
+              <input type="number" value={incent.minPoints||""} inputMode="numeric"
+                onChange={e=>setIncent({...incent,minPoints:e.target.value})} style={inp}/></div>
+          </div>
+          <button onClick={saveIncent} disabled={!!busy} style={{width:"100%",padding:"10px",borderRadius:9,border:"none",
+            background:"#1a5a3a",color:"#fff",fontWeight:700,fontSize:13.5,cursor:"pointer",marginBottom:6}}>
+            {busy==="i"?"Saving…":"💰 Publish point value"}</button>
+          <div style={{fontSize:10.5,color:"#8a7a5a",marginBottom:14,fontStyle:"italic"}}>
+            A month at 100% of target with two new parties and clean expenses scores roughly 250 points.
+            At ₹5 a point that is ₹1,250 — set the rate against what you can actually pay every month.</div>
+
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>⚖️ Award fair play</div>
+          <div style={{fontSize:10.5,color:"#7a8a7a",marginBottom:6}}>
+            For what no formula sees — honest reporting, owning a mistake, covering for a colleague.
+            Negative values work too.</div>
+          <select value={fpUser} onChange={e=>setFpUser(e.target.value)} style={{...inp,marginBottom:6}}>
+            <option value="">choose person…</option>
+            {TEAM.map(u=><option key={u} value={u}>{u.charAt(0).toUpperCase()+u.slice(1)}</option>)}
+          </select>
+          <div style={{display:"flex",gap:6,marginBottom:6}}>
+            <input type="number" value={fpPts} onChange={e=>setFpPts(e.target.value)}
+              placeholder="points ±" inputMode="numeric" style={{...inp,width:110,flex:"0 0 110px"}}/>
+            <input value={fpWhy} onChange={e=>setFpWhy(e.target.value)} placeholder="reason — they will see this" style={{...inp,flex:1}}/>
+          </div>
+          <button onClick={awardFair} disabled={!!busy} style={{width:"100%",padding:"10px",borderRadius:9,border:"none",
+            background:"#5a3a9a",color:"#fff",fontWeight:700,fontSize:13.5,cursor:"pointer",marginBottom:8}}>
+            {busy==="f"?"Awarding…":"⚖️ Award"}</button>
+          {(fair||[]).slice(0,6).map((f,i)=><div key={f.id||i} style={{display:"flex",justifyContent:"space-between",
+            fontSize:11.5,padding:"5px 0",borderBottom:"1px solid #f2f5f2"}}>
+            <span style={{color:"#555"}}><b style={{textTransform:"capitalize"}}>{f.officer}</b> · {f.reason}</span>
+            <b style={{color:f.pts>=0?"#1a7a3a":"#c33"}}>{f.pts>=0?"+":""}{f.pts}</b>
+          </div>)}
+
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",margin:"16px 0 5px"}}>
+            🏏 Claims {pending.length>0?<span style={{background:"#c33",color:"#fff",borderRadius:20,
+              padding:"1px 8px",fontSize:10.5}}>{pending.length} waiting</span>:null}</div>
+          {(claims||[]).length===0
+            ? <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"14px 0"}}>No claims yet.</div>
+            : claims.map((c,i)=><div key={c.id||i} style={{padding:"9px 0",borderBottom:"1px solid #eef2ee"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                  <b style={{fontSize:13,color:"#1a5a3a",textTransform:"capitalize"}}>{c.officer}</b>
+                  <span style={{fontSize:11,color:"#999"}}>{c.month}</span>
+                </div>
+                <div style={{fontSize:12,color:"#444",marginBottom:4}}>
+                  {c.points} pts × ₹{c.rate} = <b>₹{Number(c.value).toLocaleString("en-IN")}</b></div>
+                <details style={{marginBottom:5}}>
+                  <summary style={{fontSize:11,color:"#5a7a5a",cursor:"pointer"}}>scorecard</summary>
+                  {(c.breakdown||[]).map((b,j)=><div key={j} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#666"}}>
+                    <span>{b.label}</span><span>{b.pts>=0?"+":""}{b.pts}</span></div>)}
+                </details>
+                <select value={c.status} onChange={e=>setClaimStatus(c.id,e.target.value)} style={{...inp,fontSize:12,padding:"6px"}}>
+                  <option>Requested</option><option>Approved</option><option>Paid</option><option>Rejected</option>
+                </select>
+              </div>)}
         </div>;
       })()}
 
