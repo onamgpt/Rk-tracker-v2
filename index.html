@@ -2401,6 +2401,56 @@ function FieldReport({ onClose }) {
   );
 }
 
+// ------------------------------------------------------------
+// Field roll-up. One place that turns raw submissions into the
+// numbers both the owner report and the team's own view use, so
+// the two can never disagree with each other.
+// ------------------------------------------------------------
+function rollupField(reports, orders, parties, days) {
+  const cut = new Date(Date.now() - days*864e5).toISOString().slice(0,10);
+  const inWin = d => String(d||"") >= cut;
+  const by = {};
+  const seed = u => { if(!by[u]) by[u]={ user:u, officer:u, sales:0, expenses:0, collections:0,
+    dayCount:0, target:0, orders:0, orderValue:0, collectedAtOrder:0, newParties:0, lastSeen:"" }; return by[u]; };
+
+  (reports||[]).forEach(r=>{
+    if(!inWin(r.date)) return;
+    const b=seed(r.user||"?"); b.officer=r.officer||b.officer;
+    b.sales += Number(r.sales)||0;
+    b.expenses += Number(r.expenses)||0;
+    b.collections += Number(r.collections)||0;
+    b.target += Number(r.target)||0;
+    b.dayCount += 1;
+    if((r.date||"") > b.lastSeen) b.lastSeen = r.date||"";
+  });
+  (orders||[]).forEach(o=>{
+    if(!inWin(o.date)) return;
+    const b=seed(o.user||"?"); b.officer=o.officer||b.officer;
+    b.orders += 1;
+    b.orderValue += Number(o.value)||0;
+    b.collectedAtOrder += Number(o.paid)||0;
+    if((o.date||"") > b.lastSeen) b.lastSeen = o.date||"";
+  });
+  (parties||[]).forEach(p=>{
+    if(!inWin(p.date)) return;
+    const b=seed(p.user||"?"); b.officer=p.officer||b.officer;
+    b.newParties += 1;
+  });
+
+  const rows = Object.values(by).map(b=>({
+    ...b,
+    variance: b.sales - b.target,
+    achPct: b.target>0 ? (b.sales/b.target*100) : null,
+    expPct: b.sales>0 ? (b.expenses/b.sales*100) : null
+  }));
+  const tot = rows.reduce((t,r)=>({
+    sales:t.sales+r.sales, target:t.target+r.target, expenses:t.expenses+r.expenses,
+    collections:t.collections+r.collections, orders:t.orders+r.orders,
+    orderValue:t.orderValue+r.orderValue, newParties:t.newParties+r.newParties
+  }), {sales:0,target:0,expenses:0,collections:0,orders:0,orderValue:0,newParties:0});
+  return { rows, tot };
+}
+
 // ============================================================
 // FIELD CONSOLE — the sales team's own screen.
 // Deliberately shows NO cost, GP or margin anywhere. Rates are
@@ -2420,6 +2470,11 @@ function FieldConsole({ onClose }) {
   const [rates,setRates]=useState([]);        // [{name, rate}] selling rate per dozen
   const [target,setTarget]=useState(null);    // {user: dailyTarget}
   const [feed,setFeed]=useState([]);          // recent team activity
+  const [allOrders,setAllOrders]=useState([]);
+  const [allReports,setAllReports]=useState([]);
+  const [allParties,setAllParties]=useState([]);
+  const [mySugg,setMySugg]=useState([]);
+  const [mDays,setMDays]=useState(30);
 
   // ---- order entry
   const [party,setParty]=useState("");
@@ -2470,6 +2525,10 @@ function FieldConsole({ onClose }) {
     try{ const r=await sheetsAPI("getPortfolio",{key:"field_rates",user:"main"}); if(r&&r.data&&Array.isArray(r.data)) setRates(r.data); }catch(e){}
     try{ const t=await sheetsAPI("getPortfolio",{key:"field_targets",user:"main"}); if(t&&t.data) setTarget(t.data); }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_orders",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFeed(f.data.slice(0,25)); }catch(e){}
+    try{ const a=await sheetsAPI("getPortfolio",{key:"field_orders",user:"main"}); if(a&&a.data&&Array.isArray(a.data)) setAllOrders(a.data); }catch(e){}
+    try{ const p=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"}); if(p&&p.data&&Array.isArray(p.data)) setAllReports(p.data); }catch(e){}
+    try{ const q=await sheetsAPI("getPortfolio",{key:"field_newparties",user:"main"}); if(q&&q.data&&Array.isArray(q.data)) setAllParties(q.data); }catch(e){}
+    try{ const g=await sheetsAPI("getPortfolio",{key:"field_suggestions",user:"main"}); if(g&&g.data&&Array.isArray(g.data)) setMySugg(g.data); }catch(e){}
   })(); },[]);
 
   const rateOf = n => { const r=rates.find(x=>x.name===n); return r?Number(r.rate)||0:0; };
@@ -2590,6 +2649,7 @@ function FieldConsole({ onClose }) {
         {tabBtn("market","🔍 Market")}
         {tabBtn("idea","💡 Brand idea")}
         {tabBtn("team","👥 Recruit")}
+        {tabBtn("mine","📈 My month")}
         {tabBtn("feed","📣 Team")}
       </div>
 
@@ -2723,6 +2783,76 @@ function FieldConsole({ onClose }) {
         <button onClick={submitRecruit} disabled={!!busy} style={btn}>{busy==="rc"?"Saving…":"👥 Record candidate"}</button>
       </div>}
 
+      {tab==="mine"&&(()=>{
+        const {rows}=rollupField(allReports,allOrders,allParties,mDays);
+        const ranked=rows.slice().sort((a,b)=>{
+          if(a.achPct===null&&b.achPct===null) return b.sales-a.sales;
+          if(a.achPct===null) return 1; if(b.achPct===null) return -1;
+          return b.achPct-a.achPct;
+        });
+        const meRow=rows.find(r=>r.user===me);
+        const myRank=ranked.findIndex(r=>r.user===me)+1;
+        const hunters=rows.slice().sort((a,b)=>b.newParties-a.newParties);
+        const huntRank=hunters.findIndex(r=>r.user===me)+1;
+        const bench=Math.round(mDays/30*8);
+        const mine=(mySugg||[]).filter(s=>s.user===me&&s.status==="Launched");
+        const box=(l,v,c)=>(<div style={{flex:1,minWidth:96,background:"#f6f9f6",borderRadius:8,padding:"9px 10px"}}>
+          <div style={{fontSize:9.5,color:"#7a8a7a",fontWeight:700}}>{l}</div>
+          <div style={{fontSize:17,fontWeight:800,color:c||"#1a5a3a"}}>{v}</div></div>);
+        if(!meRow) return <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"22px 0"}}>
+          Nothing submitted yet in this window.</div>;
+        return <div>
+          <div style={{display:"flex",gap:5,marginBottom:10}}>
+            {[[7,"7 days"],[30,"30 days"],[90,"90 days"]].map(([d,l])=>
+              <button key={d} onClick={()=>setMDays(d)} style={{flex:1,padding:"6px",borderRadius:7,border:"none",
+                background:mDays===d?"#1a5a3a":"#e8f0e8",color:mDays===d?"#fff":"#3a5a3a",
+                fontWeight:700,fontSize:11,cursor:"pointer"}}>{l}</button>)}
+          </div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:11}}>
+            {box("MY SALES","₹"+Math.round(meRow.sales).toLocaleString("en-IN"))}
+            {box("OF TARGET", meRow.achPct===null?"—":Math.round(meRow.achPct)+"%",
+              meRow.achPct!==null&&meRow.achPct>=100?"#1a7a3a":"#c33")}
+            {box("MY RANK", myRank+" of "+ranked.length, myRank===1?"#1a7a3a":"#1a5a3a")}
+            {box("NEW PARTIES", meRow.newParties+" of "+bench,
+              meRow.newParties>=bench?"#1a7a3a":(meRow.newParties===0?"#c33":"#8a6a2a"))}
+            {box("HUNT RANK", huntRank+" of "+hunters.length, huntRank===1?"#1a7a3a":"#1a5a3a")}
+            {box("ORDERS", meRow.orders)}
+          </div>
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>Where everyone stands</div>
+          {ranked.map((r,i)=><div key={r.user} style={{display:"flex",justifyContent:"space-between",
+            alignItems:"center",padding:"7px 9px",borderRadius:7,marginBottom:3,
+            background:r.user===me?"#e8f5e9":"transparent"}}>
+            <span style={{fontSize:12.5,textTransform:"capitalize",fontWeight:r.user===me?800:500}}>
+              {i+1}. {r.officer}{r.user===me?" (you)":""}</span>
+            <b style={{fontSize:13,color:r.achPct===null?"#999":(r.achPct>=100?"#1a7a3a":"#c33")}}>
+              {r.achPct===null?"—":Math.round(r.achPct)+"%"}</b>
+          </div>)}
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",margin:"13px 0 4px"}}>🏹 New parties</div>
+          {hunters.map((r,i)=><div key={r.user} style={{display:"flex",justifyContent:"space-between",
+            alignItems:"center",padding:"6px 9px",borderRadius:7,marginBottom:3,
+            background:r.user===me?"#e8f5e9":"transparent"}}>
+            <span style={{fontSize:12.5,textTransform:"capitalize",fontWeight:r.user===me?800:500}}>
+              {i+1}. {r.officer}{r.user===me?" (you)":""}</span>
+            <b style={{fontSize:13,color:r.newParties>=bench?"#1a7a3a":(r.newParties===0?"#c33":"#8a6a2a")}}>
+              {r.newParties}</b>
+          </div>)}
+          {mine.length>0&&<div style={{marginTop:14}}>
+            <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:4}}>💡 My commitments</div>
+            {mine.map((s,i)=>{
+              const months=s.launchedOn?Math.max(1,Math.round((Date.now()-new Date(s.launchedOn).getTime())/(30*864e5))):0;
+              const owed=months*(Number(s.commitPerMonth)||0);
+              const gap=(Number(s.actualToDate)||0)-owed;
+              return <div key={s.id||i} style={{background:gap>=0?"#e8f5e9":"#fdecea",borderRadius:8,
+                padding:"8px 10px",marginBottom:5}}>
+                <b style={{fontSize:12.5,color:"#1a5a3a"}}>{s.brand}</b>
+                <div style={{fontSize:11.5,color:gap>=0?"#1a7a3a":"#c33",fontWeight:700}}>
+                  {months} month(s) live · owed {owed} doz · moved {s.actualToDate||0} doz · {gap>=0?"+":""}{gap}</div>
+              </div>;
+            })}
+          </div>}
+        </div>;
+      })()}
+
       {tab==="feed"&&<div>
         <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9}}>What the team has booked recently.</div>
         {feed.length===0
@@ -2751,7 +2881,7 @@ function FieldConsole({ onClose }) {
 // person's target, and hold the commitments to account.
 // ============================================================
 function FieldAdmin({ onClose }) {
-  const [tab,setTab]=useState("rates");
+  const [tab,setTab]=useState("report");
   const [rates,setRates]=useState([]);
   const [targets,setTargets]=useState({});
   const [orders,setOrders]=useState([]);
@@ -2759,6 +2889,8 @@ function FieldAdmin({ onClose }) {
   const [comp,setComp]=useState([]);
   const [parties,setParties]=useState([]);
   const [recruits,setRecruits]=useState([]);
+  const [reports,setReports]=useState([]);
+  const [days,setDays]=useState(30);
   const [busy,setBusy]=useState(""); const [msg,setMsg]=useState("");
   const TEAM=["sunil","sadasivan","sebi","biju","satish","vinod","sooraj","prakash"];
 
@@ -2773,6 +2905,7 @@ function FieldAdmin({ onClose }) {
     setComp(await get("field_competitor",[]));
     setParties(await get("field_newparties",[]));
     setRecruits(await get("field_recruits",[]));
+    setReports(await get("field_reports",[]));
   })(); },[]);
 
   const saveRates=async()=>{ setBusy("r"); try{ await put("field_rates",rates.filter(r=>r.name&&r.name.trim())); setMsg("✓ Rates published to the team"); }catch(e){ setMsg("✗ failed"); } setBusy(""); };
@@ -2809,11 +2942,92 @@ function FieldAdmin({ onClose }) {
         <div style={{fontSize:11,color:"#6a7a6a"}}>Rates, targets and commitments</div></div>
       </div>
       <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:11}}>
-        {tabBtn("rates","💵 Rates")}{tabBtn("targets","🎯 Targets")}{tabBtn("orders","📦 Orders")}
+        {tabBtn("report","📈 Report")}{tabBtn("rates","💵 Rates")}{tabBtn("targets","🎯 Targets")}{tabBtn("orders","📦 Orders")}
         {tabBtn("sugg","💡 Commitments")}{tabBtn("market","🔍 Market")}{tabBtn("parties","🆕 Parties")}{tabBtn("team","👥 Recruits")}
       </div>
       {msg&&<div style={{fontSize:13,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:9,
         background:msg[0]==="✓"?"#e8f5e9":"#fdecea",padding:"8px 10px",borderRadius:8}}>{msg}</div>}
+
+      {tab==="report"&&(()=>{
+        const {rows,tot}=rollupField(reports,orders,parties,days);
+        const ranked=rows.slice().sort((a,b)=>{
+          if(a.achPct===null&&b.achPct===null) return b.sales-a.sales;
+          if(a.achPct===null) return 1; if(b.achPct===null) return -1;
+          return b.achPct-a.achPct;
+        });
+        const hunters=rows.slice().sort((a,b)=>b.newParties-a.newParties);
+        const bench=Math.round(days/30*8);   // 8 new parties a month is the standard set to the team
+        const todayStr=new Date().toISOString().slice(0,10);
+        const silent=rows.filter(r=>r.lastSeen && r.lastSeen<todayStr);
+        const noHunt=rows.filter(r=>r.newParties===0);
+        const heavy=rows.filter(r=>r.expPct!==null&&r.expPct>12);
+        const pill=(n,l,c)=>(<div style={{flex:1,minWidth:82,background:"#f6f9f6",borderRadius:8,padding:"8px 9px"}}>
+          <div style={{fontSize:9.5,color:"#7a8a7a",fontWeight:700}}>{l}</div>
+          <div style={{fontSize:15,fontWeight:800,color:c||"#1a5a3a"}}>{n}</div></div>);
+        return <div>
+          <div style={{display:"flex",gap:5,marginBottom:10}}>
+            {[[1,"Today"],[7,"7 days"],[30,"30 days"],[90,"90 days"]].map(([d,l])=>
+              <button key={d} onClick={()=>setDays(d)} style={{flex:1,padding:"6px",borderRadius:7,border:"none",
+                background:days===d?"#1a5a3a":"#e8f0e8",color:days===d?"#fff":"#3a5a3a",
+                fontWeight:700,fontSize:11,cursor:"pointer"}}>{l}</button>)}
+          </div>
+
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:11}}>
+            {pill("₹"+Math.round(tot.sales).toLocaleString("en-IN"),"SALES")}
+            {pill(tot.target>0?Math.round(tot.sales/tot.target*100)+"%":"—","OF TARGET",
+              tot.target>0&&tot.sales>=tot.target?"#1a7a3a":"#c33")}
+            {pill(tot.orders,"ORDERS")}
+            {pill(tot.newParties,"NEW PARTIES",tot.newParties>0?"#1a7a3a":"#c33")}
+            {pill("₹"+Math.round(tot.collections).toLocaleString("en-IN"),"COLLECTED")}
+            {pill(tot.sales>0?(tot.expenses/tot.sales*100).toFixed(1)+"%":"—","EXPENSE",
+              tot.sales>0&&(tot.expenses/tot.sales*100)>12?"#c33":"#1a5a3a")}
+          </div>
+
+          {(silent.length>0||noHunt.length>0||heavy.length>0)&&
+            <div style={{background:"#fdf4e8",border:"1px solid #e8c890",borderRadius:9,padding:"9px 11px",marginBottom:11}}>
+              <div style={{fontSize:11.5,fontWeight:800,color:"#8a5a1a",marginBottom:4}}>⚠ Needs a word</div>
+              {noHunt.length>0&&<div style={{fontSize:11.5,color:"#7a5a2a"}}>
+                No new party in this window: <b>{noHunt.map(r=>r.officer).join(", ")}</b></div>}
+              {silent.length>0&&<div style={{fontSize:11.5,color:"#7a5a2a"}}>
+                Nothing reported today: <b>{silent.map(r=>r.officer).join(", ")}</b></div>}
+              {heavy.length>0&&<div style={{fontSize:11.5,color:"#7a5a2a"}}>
+                Expense above 12% of sales: <b>{heavy.map(r=>r.officer+" ("+r.expPct.toFixed(0)+"%)").join(", ")}</b></div>}
+            </div>}
+
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>Against target</div>
+          {ranked.length===0?<div style={{fontSize:12,color:"#999",padding:"14px 0",textAlign:"center"}}>Nothing submitted in this window.</div>
+          :ranked.map((r,i)=><div key={r.user} style={{padding:"8px 0",borderBottom:i<ranked.length-1?"1px solid #eef2ee":"none"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}>
+              <b style={{fontSize:13,color:"#1a5a3a",textTransform:"capitalize"}}>{i+1}. {r.officer}</b>
+              <span style={{fontSize:13,fontWeight:800,color:r.achPct===null?"#999":(r.achPct>=100?"#1a7a3a":"#c33")}}>
+                {r.achPct===null?"no target":Math.round(r.achPct)+"%"}</span>
+            </div>
+            <div style={{fontSize:11.5,color:"#666"}}>
+              ₹{Math.round(r.sales).toLocaleString("en-IN")}
+              {r.target>0?<span> of ₹{Math.round(r.target).toLocaleString("en-IN")}</span>:null}
+              {" · "}{r.orders} order(s) · {r.dayCount} day(s) reported
+            </div>
+            <div style={{fontSize:11,color:"#888"}}>
+              collected ₹{Math.round(r.collections).toLocaleString("en-IN")} ·
+              expense ₹{Math.round(r.expenses).toLocaleString("en-IN")}
+              {r.expPct!==null?" ("+r.expPct.toFixed(1)+"%)":""}
+            </div>
+          </div>)}
+
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",margin:"14px 0 3px"}}>🏹 Hunting</div>
+          <div style={{fontSize:10.5,color:"#7a8a7a",marginBottom:6}}>
+            New parties met. Standard is {bench} in this window.</div>
+          {hunters.map((r,i)=><div key={r.user} style={{display:"flex",justifyContent:"space-between",
+            alignItems:"center",padding:"6px 0",borderBottom:i<hunters.length-1?"1px solid #f4f7f4":"none"}}>
+            <span style={{fontSize:12.5,textTransform:"capitalize"}}>{r.officer}</span>
+            <span style={{display:"flex",alignItems:"center",gap:7}}>
+              <span style={{fontSize:10.5,color:"#999"}}>{bench>0?("of "+bench):""}</span>
+              <b style={{fontSize:14,color:r.newParties>=bench?"#1a7a3a":(r.newParties===0?"#c33":"#8a6a2a")}}>
+                {r.newParties}</b>
+            </span>
+          </div>)}
+        </div>;
+      })()}
 
       {tab==="rates"&&<div>
         <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9}}>
