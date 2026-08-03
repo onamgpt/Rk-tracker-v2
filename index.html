@@ -2452,6 +2452,10 @@ function pointsFor(row, suggestions, user, fairplay) {
     else                            p.push({ label:"Expense "+row.expPct.toFixed(1)+"%", pts:-20 });
   }
 
+  // What they chose to sell, not merely how much. Scored as a band so the
+  // person never sees a margin figure.
+  if (row.mixPts) p.push({ label:"Product mix "+row.mixBand, pts:row.mixPts });
+
   // Turning up. Missing matches costs a side more than a bad innings.
   if (row.dayCount>=20)      p.push({ label:row.dayCount+" days reported", pts:30 });
   else if (row.dayCount>=12) p.push({ label:row.dayCount+" days reported", pts:15 });
@@ -2523,13 +2527,13 @@ function Confetti({ fire }) {
 // numbers both the owner report and the team's own view use, so
 // the two can never disagree with each other.
 // ------------------------------------------------------------
-function rollupField(reports, orders, parties, days) {
+function rollupField(reports, orders, parties, days, gpOf) {
   const cut = new Date(Date.now() - days*864e5).toISOString().slice(0,10);
   const inWin = d => String(d||"") >= cut;
   const by = {};
   const seed = u => { if(!by[u]) by[u]={ user:u, officer:u, sales:0, expenses:0, collections:0,
     dayCount:0, target:0, orders:0, orderValue:0, collectedAtOrder:0, newParties:0,
-    distinctParties:0, lastSeen:"" }; return by[u]; };
+    distinctParties:0, contribution:0, lastSeen:"" }; return by[u]; };
 
   (reports||[]).forEach(r=>{
     if(!inWin(r.date)) return;
@@ -2552,6 +2556,17 @@ function rollupField(reports, orders, parties, days) {
     if((o.date||"") > b.lastSeen) b.lastSeen = o.date||"";
     if(!partySets[u]) partySets[u]={};
     if(o.party) partySets[u][String(o.party).trim().toLowerCase()]=1;
+    // Contribution the order earned the company. Never surfaced to the
+    // person who sold it — only ever converted into points.
+    if (typeof gpOf === "function") {
+      (o.lines||[]).forEach(l=>{
+        const g = gpOf(l.item);            // {gp per dozen, dozPerCase}
+        if(!g || !g.gp) return;
+        const doz = (String(l.unit)==="cases") ? (Number(l.qty)||0)*(Number(g.dozPerCase)||1)
+                                               : (Number(l.qty)||0);
+        b.contribution += (Number(g.gp)||0)*doz;
+      });
+    }
   });
   (parties||[]).forEach(p=>{
     if(!inWin(p.date)) return;
@@ -2566,11 +2581,27 @@ function rollupField(reports, orders, parties, days) {
     achPct: b.target>0 ? (b.sales/b.target*100) : null,
     expPct: b.sales>0 ? (b.expenses/b.sales*100) : null
   }));
+  // Mix quality: contribution earned per rupee sold, banded against the
+  // team's own average so it self-calibrates and needs no fixed target.
+  const withMargin = rows.filter(r=>r.sales>0 && r.contribution>0);
+  const avgMargin = withMargin.length
+    ? withMargin.reduce((s,r)=>s+r.contribution/r.sales,0)/withMargin.length : 0;
+  rows.forEach(r=>{
+    r.mixRatio = r.sales>0 ? r.contribution/r.sales : 0;
+    if(!avgMargin || !r.contribution){ r.mixBand="—"; r.mixPts=0; return; }
+    const rel = r.mixRatio/avgMargin;
+    if      (rel>=1.20){ r.mixBand="Excellent"; r.mixPts=50; }
+    else if (rel>=1.05){ r.mixBand="Strong";    r.mixPts=35; }
+    else if (rel>=0.95){ r.mixBand="Fair";      r.mixPts=15; }
+    else               { r.mixBand="Weak";      r.mixPts=0;  }
+  });
+
   const tot = rows.reduce((t,r)=>({
     sales:t.sales+r.sales, target:t.target+r.target, expenses:t.expenses+r.expenses,
     collections:t.collections+r.collections, orders:t.orders+r.orders,
-    orderValue:t.orderValue+r.orderValue, newParties:t.newParties+r.newParties
-  }), {sales:0,target:0,expenses:0,collections:0,orders:0,orderValue:0,newParties:0});
+    orderValue:t.orderValue+r.orderValue, newParties:t.newParties+r.newParties,
+    contribution:t.contribution+r.contribution
+  }), {sales:0,target:0,expenses:0,collections:0,orders:0,orderValue:0,newParties:0,contribution:0});
   return { rows, tot };
 }
 
@@ -2602,6 +2633,7 @@ function FieldConsole({ onClose }) {
   const [claims,setClaims]=useState([]);
   const [incent,setIncent]=useState({rupeesPerPoint:0,minPoints:0});
   const [homeAddr,setHomeAddr]=useState("");
+  const [pmaster,setPmaster]=useState([]);
 
   // ---- order entry
   const [party,setParty]=useState("");
@@ -2659,9 +2691,16 @@ function FieldConsole({ onClose }) {
     try{ const fp=await sheetsAPI("getPortfolio",{key:"field_fairplay",user:"main"}); if(fp&&fp.data&&Array.isArray(fp.data)) setFair(fp.data); }catch(e){}
     try{ const cl=await sheetsAPI("getPortfolio",{key:"field_claims",user:"main"}); if(cl&&cl.data&&Array.isArray(cl.data)) setClaims(cl.data); }catch(e){}
     try{ const ic=await sheetsAPI("getPortfolio",{key:"field_incentive",user:"main"}); if(ic&&ic.data) setIncent(ic.data); }catch(e){}
+    try{ const pm=await sheetsAPI("getPortfolio",{key:"spectrum_master",user:"main"}); if(pm&&pm.data&&Array.isArray(pm.data)) setPmaster(pm.data); }catch(e){}
   })(); },[]);
 
   const rateOf = n => { const r=rates.find(x=>x.name===n); return r?Number(r.rate)||0:0; };
+  // Used only to place the person in a mix band. Deliberately never displayed.
+  const gpOf = n => {
+    const r=rates.find(x=>x.name===n); if(!r||!r.sku) return null;
+    const m=(pmaster||[]).find(x=>x.sku===r.sku); if(!m) return null;
+    return { gp:Number(m.gp)||0, dozPerCase:Number(r.dozPerCase)||1 };
+  };
   const lineVal = l => rateOf(l.item)*(Number(l.qty)||0);
   const orderTotal = lines.reduce((s,l)=>s+lineVal(l),0);
 
@@ -2915,7 +2954,7 @@ function FieldConsole({ onClose }) {
       </div>}
 
       {tab==="mine"&&(()=>{
-        const {rows}=rollupField(allReports,allOrders,allParties,mDays);
+        const {rows}=rollupField(allReports,allOrders,allParties,mDays,gpOf);
         const ranked=rows.slice().sort((a,b)=>{
           if(a.achPct===null&&b.achPct===null) return b.sales-a.sales;
           if(a.achPct===null) return 1; if(b.achPct===null) return -1;
@@ -3014,10 +3053,12 @@ function FieldConsole({ onClose }) {
             <summary style={{fontSize:11.5,fontWeight:800,color:"#1a5a3a",cursor:"pointer"}}>How points are earned</summary>
             <div style={{fontSize:11.5,color:"#4a5a4a",lineHeight:1.7,marginTop:6}}>
               Target — 1 point for every 1% achieved (max 150)<br/>
+              Product mix — Excellent +50 · Strong +35 · Fair +15 (which brands you sell, not how much)<br/>
               New party — 25 points each<br/>
               Order booked — 5 points each<br/>
               Expense {EXP_IDEAL}% or under — +30 · up to {EXP_ALERT}% — +10 · above — −20<br/>
-              Collected everything you sold — +20<br/>
+              Collection — up to 40, scaled to how much of what you sold came back<br/>
+              Parties billed — 8 each · Days reported — 30 for 20+ days, 15 for 12+<br/>
               Brand commitment on track — +25 · behind — −15
             </div>
           </details>
@@ -3043,7 +3084,7 @@ function FieldConsole({ onClose }) {
         const mo=new Date().toISOString().slice(0,7);
         const monthStart=mo+"-01";
         const dayCount=Math.max(1,Math.ceil((Date.now()-new Date(monthStart).getTime())/864e5));
-        const {rows}=rollupField(allReports,allOrders,allParties,dayCount);
+        const {rows}=rollupField(allReports,allOrders,allParties,dayCount,gpOf);
         const meRow=rows.find(r=>r.user===me);
         const sc=meRow?pointsFor(meRow,mySugg,me,fair):{total:0,parts:[]};
         const rate=Number(incent.rupeesPerPoint)||0;
@@ -3164,6 +3205,7 @@ function FieldAdmin({ onClose }) {
   const [claims,setClaims]=useState([]);
   const [incent,setIncent]=useState({rupeesPerPoint:"",minPoints:""});
   const [fpUser,setFpUser]=useState(""), [fpPts,setFpPts]=useState(""), [fpWhy,setFpWhy]=useState("");
+  const [pmaster,setPmaster]=useState([]);
   const [busy,setBusy]=useState(""); const [msg,setMsg]=useState("");
   const TEAM=["sunil","sadasivan","sebi","biju","satish","vinod","sooraj","prakash"];
 
@@ -3182,6 +3224,7 @@ function FieldAdmin({ onClose }) {
     setFair(await get("field_fairplay",[]));
     setClaims(await get("field_claims",[]));
     setIncent(await get("field_incentive",{rupeesPerPoint:"",minPoints:""}));
+    setPmaster(await get("spectrum_master",[]));
   })(); },[]);
 
   const saveRates=async()=>{ setBusy("r"); try{ await put("field_rates",rates.filter(r=>r.name&&r.name.trim())); setMsg("✓ Rates published to the team"); }catch(e){ setMsg("✗ failed"); } setBusy(""); };
@@ -3204,6 +3247,11 @@ function FieldAdmin({ onClose }) {
         message:"📦 <b>"+(o.party||"")+"</b> — "+status+"\n("+(o.officer||"")+"'s order · ₹"+Number(o.value||0).toLocaleString("en-IN")+")"})}); }catch(e){}
   };
 
+  const gpOf = name => {
+    const r=(rates||[]).find(x=>x.name===name); if(!r||!r.sku) return null;
+    const m=(pmaster||[]).find(x=>x.sku===r.sku); if(!m) return null;
+    return { gp:Number(m.gp)||0, dozPerCase:Number(r.dozPerCase)||1 };
+  };
   const inp={width:"100%",padding:"8px",borderRadius:7,border:"1.5px solid #cfd8cf",fontSize:13,boxSizing:"border-box"};
   const lab={fontSize:11,fontWeight:700,color:"#1a5a3a",display:"block",marginBottom:3};
   const tabBtn=(k,l)=>(<button key={k} onClick={()=>{setTab(k);setMsg("");}} style={{padding:"7px 11px",borderRadius:8,border:"none",
@@ -3225,7 +3273,7 @@ function FieldAdmin({ onClose }) {
         background:msg[0]==="✓"?"#e8f5e9":"#fdecea",padding:"8px 10px",borderRadius:8}}>{msg}</div>}
 
       {tab==="report"&&(()=>{
-        const {rows,tot}=rollupField(reports,orders,parties,days);
+        const {rows,tot}=rollupField(reports,orders,parties,days,gpOf);
         const ranked=rows.slice().sort((a,b)=>{
           if(a.achPct===null&&b.achPct===null) return b.sales-a.sales;
           if(a.achPct===null) return 1; if(b.achPct===null) return -1;
@@ -3255,6 +3303,7 @@ function FieldAdmin({ onClose }) {
             {pill(tot.orders,"ORDERS")}
             {pill(tot.newParties,"NEW PARTIES",tot.newParties>0?"#1a7a3a":"#c33")}
             {pill("₹"+Math.round(tot.collections).toLocaleString("en-IN"),"COLLECTED")}
+            {tot.contribution>0?pill("₹"+Math.round(tot.contribution).toLocaleString("en-IN"),"CONTRIBUTION","#1a7a3a"):null}
             {pill(tot.sales>0?(tot.expenses/tot.sales*100).toFixed(1)+"%":"—","EXPENSE (aim "+EXP_IDEAL+"%)",
               tot.sales>0?((tot.expenses/tot.sales*100)>EXP_ALERT?"#c33":((tot.expenses/tot.sales*100)>EXP_IDEAL?"#8a6a2a":"#1a7a3a")):"#1a5a3a")}
           </div>
@@ -3308,6 +3357,11 @@ function FieldAdmin({ onClose }) {
               expense ₹{Math.round(r.expenses).toLocaleString("en-IN")}
               {r.expPct!==null?" ("+r.expPct.toFixed(1)+"%)":""}
             </div>
+            {r.contribution>0&&<div style={{fontSize:11.5,color:"#1a7a3a",fontWeight:700}}>
+              earned the company ₹{Math.round(r.contribution).toLocaleString("en-IN")}
+              <span style={{fontWeight:400,color:"#888"}}> · mix {r.mixBand}
+              {r.mixRatio?(" ("+(r.mixRatio*100).toFixed(1)+"% of sales)"):""}</span>
+            </div>}
           </div>)}
 
           <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",margin:"14px 0 3px"}}>🏹 Hunting</div>
@@ -3415,13 +3469,25 @@ function FieldAdmin({ onClose }) {
 
       {tab==="rates"&&<div>
         <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9}}>
-          Selling rate per unit as the team should quote it. They never see cost or margin.</div>
-        {rates.map((r,i)=><div key={i} style={{display:"flex",gap:5,marginBottom:6}}>
-          <input value={r.name||""} onChange={e=>{const n=[...rates];n[i]={...n[i],name:e.target.value};setRates(n);}}
-            placeholder="item name" style={{...inp,flex:2}}/>
-          <input type="number" value={r.rate||""} onChange={e=>{const n=[...rates];n[i]={...n[i],rate:e.target.value};setRates(n);}}
-            placeholder="₹/unit" inputMode="decimal" style={{...inp,width:96,flex:"0 0 96px"}}/>
-          <span onClick={()=>setRates(rates.filter((_,j)=>j!==i))} style={{color:"#c33",fontWeight:700,cursor:"pointer",padding:"6px 3px"}}>✕</span>
+          Selling rate per unit as the team should quote it. They never see cost or margin.
+          Linking an item to the master lets the company's earning from it be scored — as a band, never a figure.</div>
+        {rates.map((r,i)=><div key={i} style={{border:"1px solid #eef2ee",borderRadius:8,padding:"7px",marginBottom:6}}>
+          <div style={{display:"flex",gap:5,marginBottom:5}}>
+            <input value={r.name||""} onChange={e=>{const n=[...rates];n[i]={...n[i],name:e.target.value};setRates(n);}}
+              placeholder="item name" style={{...inp,flex:2}}/>
+            <input type="number" value={r.rate||""} onChange={e=>{const n=[...rates];n[i]={...n[i],rate:e.target.value};setRates(n);}}
+              placeholder="₹/unit" inputMode="decimal" style={{...inp,width:92,flex:"0 0 92px"}}/>
+            <span onClick={()=>setRates(rates.filter((_,j)=>j!==i))} style={{color:"#c33",fontWeight:700,cursor:"pointer",padding:"6px 3px"}}>✕</span>
+          </div>
+          <div style={{display:"flex",gap:5}}>
+            <select value={r.sku||""} onChange={e=>{const n=[...rates];n[i]={...n[i],sku:e.target.value};setRates(n);}}
+              style={{...inp,flex:2,fontSize:11.5,color:r.sku?"#1a5a3a":"#999"}}>
+              <option value="">link to master (for profit scoring)…</option>
+              {(pmaster||[]).map(m=><option key={m.sku} value={m.sku}>{m.name}</option>)}
+            </select>
+            <input type="number" value={r.dozPerCase||""} onChange={e=>{const n=[...rates];n[i]={...n[i],dozPerCase:e.target.value};setRates(n);}}
+              placeholder="doz/case" inputMode="numeric" style={{...inp,width:92,flex:"0 0 92px",fontSize:11.5}}/>
+          </div>
         </div>)}
         <button onClick={()=>setRates([...rates,{name:"",rate:""}])} style={{padding:"8px",borderRadius:8,border:"1px dashed #8aaa8a",
           background:"#f6fbf6",color:"#3a6a3a",fontWeight:700,fontSize:12,cursor:"pointer",width:"100%",marginBottom:9}}>+ Add item</button>
