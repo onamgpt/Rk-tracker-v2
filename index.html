@@ -2641,6 +2641,8 @@ function FieldConsole({ onClose }) {
   const [party,setParty]=useState("");
   const [town,setTown]=useState("");
   const [lines,setLines]=useState([{item:"",qty:"",unit:"cases"}]);
+  const [cart,setCart]=useState({});          // {itemName: {qty, unit}}
+  const [catSearch,setCatSearch]=useState("");
   const [paid,setPaid]=useState("");
   const [orderNote,setOrderNote]=useState("");
 
@@ -2708,21 +2710,43 @@ function FieldConsole({ onClose }) {
 
   const submitOrder=async()=>{
     if(!party.trim()) { setMsg("✗ Party name needed"); return; }
-    const good=lines.filter(l=>l.item&&Number(l.qty)>0);
+    const good=Object.entries(cart).map(([n,c])=>({item:n,qty:Number(c.qty)||0,unit:c.unit||"cases"}))
+                    .filter(l=>l.qty>0);
     if(!good.length){ setMsg("✗ Add at least one item"); return; }
     setBusy("order"); setMsg("");
     try{
+      const cartTotal=good.reduce((s,l)=>s+rateOf(l.item)*l.qty,0);
       const rec={ id:"fo_"+Date.now(), officer:officer, user:me, date:today, time:new Date().toISOString(),
-        party:party.trim(), town:town.trim(), lines:good, value:orderTotal,
-        paid:Number(paid)||0, note:orderNote, status:"Placed", verified:false };
+        party:party.trim(), town:town.trim(), lines:good, value:cartTotal,
+        paid:Number(paid)||0, payments:(Number(paid)>0?[{date:today,amount:Number(paid),mode:"on order"}]:[]),
+        note:orderNote, status:"Placed", invoiceNo:"", transporter:"", lrNumber:"",
+        expectedDelivery:"", verified:false };
       await store("field_orders", rec);
       const items=good.map(l=>l.qty+" "+l.unit+" "+l.item).join(", ");
       await broadcast("🛒 <b>"+officer+"</b> booked an order\n"+
         party.trim()+(town.trim()?(" · "+town.trim()):"")+"\n"+items+
-        "\nValue ₹"+orderTotal.toLocaleString("en-IN")+
+        "\nValue ₹"+cartTotal.toLocaleString("en-IN")+
         (Number(paid)>0?("\nCollected ₹"+Number(paid).toLocaleString("en-IN")):""));
+      // Email is best effort — the order is already saved either way.
+      try{
+        await fetch("/.netlify/functions/mail",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            to:["onamgpt@gmail.com"],
+            subject:"Order — "+party.trim()+" — ₹"+cartTotal.toLocaleString("en-IN")+" ("+officer+")",
+            html:"<h3>Order booked by "+officer+"</h3>"+
+              "<p><b>Party:</b> "+party.trim()+"<br><b>Town:</b> "+(town.trim()||"—")+
+              "<br><b>Date:</b> "+today+"</p><table border=1 cellpadding=6 cellspacing=0>"+
+              "<tr><th>Item</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>"+
+              good.map(l=>"<tr><td>"+l.item+"</td><td>"+l.qty+" "+l.unit+"</td><td>₹"+
+                rateOf(l.item)+"</td><td>₹"+(rateOf(l.item)*l.qty).toLocaleString("en-IN")+"</td></tr>").join("")+
+              "<tr><td colspan=3 align=right><b>Total</b></td><td><b>₹"+cartTotal.toLocaleString("en-IN")+
+              "</b></td></tr></table>"+
+              (Number(paid)>0?"<p><b>Collected on order:</b> ₹"+Number(paid).toLocaleString("en-IN")+"</p>":"")+
+              (orderNote?"<p><b>Note:</b> "+orderNote+"</p>":"")
+          })});
+      }catch(e){}
       setMsg("✓ Order booked and sent to the group");
-      setParty("");setTown("");setLines([{item:"",qty:"",unit:"cases"}]);setPaid("");setOrderNote("");
+      setParty("");setTown("");setCart({});setCatSearch("");setPaid("");setOrderNote("");
       try{ const f=await sheetsAPI("getPortfolio",{key:"field_orders",user:"main"}); if(f&&f.data) setFeed(f.data.slice(0,25)); }catch(e){}
     }catch(e){ setMsg("✗ Could not submit — try again"); }
     setBusy("");
@@ -2813,17 +2837,30 @@ function FieldConsole({ onClose }) {
         <div style={{fontSize:11,color:"#6a7a6a"}}>{officer} · {new Date().toLocaleDateString()}</div></div>
       </div>
 
-      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:11}}>
-        {tabBtn("order","🛒 Order")}
-        {tabBtn("day","📊 My day")}
-        {tabBtn("party","🆕 New party")}
-        {tabBtn("market","🔍 Market")}
-        {tabBtn("idea","💡 Brand idea")}
-        {tabBtn("team","👥 Recruit")}
-        {tabBtn("mine","📈 My month")}
-        {tabBtn("claim","🏏 Incentive")}
-        {tabBtn("feed","📣 Team")}
+      <div style={{display:"flex",gap:6,marginBottom:8}}>
+        <button onClick={()=>{setTab("order");setMsg("");}} style={{flex:1,padding:"13px 10px",borderRadius:11,border:"none",
+          background:tab==="order"?"linear-gradient(135deg,#1a7a4a,#0a5a2a)":"#e8f0e8",
+          color:tab==="order"?"#fff":"#3a5a3a",fontWeight:800,fontSize:14,cursor:"pointer",
+          boxShadow:tab==="order"?"0 2px 8px rgba(26,90,58,.28)":"none"}}>🛒 Place order</button>
+        <button onClick={()=>{setTab("track");setMsg("");}} style={{flex:1,padding:"13px 10px",borderRadius:11,border:"none",
+          background:tab==="track"?"linear-gradient(135deg,#1a5a9a,#0d3a6a)":"#e8eef6",
+          color:tab==="track"?"#fff":"#2a4a7a",fontWeight:800,fontSize:14,cursor:"pointer",
+          boxShadow:tab==="track"?"0 2px 8px rgba(26,58,106,.28)":"none"}}>📦 Track orders</button>
       </div>
+      <details style={{marginBottom:11}}>
+        <summary style={{fontSize:11.5,fontWeight:700,color:"#5a7a5a",cursor:"pointer",padding:"4px 2px"}}>
+          More — day figures, new parties, market, ideas, points</summary>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:7}}>
+          {tabBtn("day","📊 My day")}
+          {tabBtn("party","🆕 New party")}
+          {tabBtn("market","🔍 Market")}
+          {tabBtn("idea","💡 Brand idea")}
+          {tabBtn("team","👥 Recruit")}
+          {tabBtn("mine","📈 My month")}
+          {tabBtn("claim","🏏 Incentive")}
+          {tabBtn("feed","📣 Team")}
+        </div>
+      </details>
 
       {msg && <div style={{fontSize:13,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:9,
         background:msg[0]==="✓"?"#e8f5e9":"#fdecea",padding:"8px 10px",borderRadius:8}}>{msg}</div>}
@@ -2834,42 +2871,170 @@ function FieldConsole({ onClose }) {
         <label style={lab}>Town / location</label>
         <input value={town} onChange={e=>setTown(e.target.value)} placeholder="where you are today" style={inp}/>
 
-        <div style={{fontSize:11.5,fontWeight:700,color:"#1a5a3a",marginBottom:5}}>Items — today's rates</div>
-        {rates.length===0 && <div style={{fontSize:11.5,color:"#a33",background:"#fdecea",padding:"9px 11px",borderRadius:8,marginBottom:9}}>
-          No rate list has been published yet. Ask the office to set today's rates before booking orders.</div>}
-        {lines.map((l,i)=><div key={i} style={{display:"flex",gap:5,marginBottom:6,alignItems:"center"}}>
-          <select value={l.item} onChange={e=>{const n=[...lines];n[i].item=e.target.value;setLines(n);}}
-            style={{flex:2,padding:"9px",borderRadius:8,border:"1.5px solid #cfd8cf",fontSize:12.5,minWidth:0}}>
-            <option value="">choose item…</option>
-            {rates.map(r=><option key={r.name} value={r.name}>{r.name}</option>)}
-          </select>
-          <input type="number" value={l.qty} onChange={e=>{const n=[...lines];n[i].qty=e.target.value;setLines(n);}}
-            placeholder="qty" inputMode="numeric" style={{width:62,padding:"9px",borderRadius:8,border:"1.5px solid #cfd8cf",fontSize:13,boxSizing:"border-box"}}/>
-          <select value={l.unit} onChange={e=>{const n=[...lines];n[i].unit=e.target.value;setLines(n);}}
-            style={{width:74,padding:"9px",borderRadius:8,border:"1.5px solid #cfd8cf",fontSize:11.5,boxSizing:"border-box"}}>
-            <option value="cases">cases</option><option value="doz">doz</option>
-          </select>
-          {lines.length>1&&<span onClick={()=>setLines(lines.filter((_,j)=>j!==i))}
-            style={{color:"#c33",fontWeight:700,cursor:"pointer",padding:"0 3px"}}>✕</span>}
-        </div>)}
-        {lines.map((l,i)=>l.item&&Number(l.qty)>0?
-          <div key={"v"+i} style={{fontSize:11,color:"#5a7a5a",marginBottom:3}}>
-            {l.item} · ₹{rateOf(l.item).toLocaleString("en-IN")} × {l.qty} = ₹{lineVal(l).toLocaleString("en-IN")}</div>:null)}
-        <button onClick={()=>setLines([...lines,{item:"",qty:"",unit:"cases"}])}
-          style={{padding:"7px 12px",borderRadius:8,border:"1px dashed #8aaa8a",background:"#f6fbf6",
-          color:"#3a6a3a",fontWeight:700,fontSize:12,cursor:"pointer",width:"100%",marginBottom:9}}>+ Add item</button>
+        {rates.length===0
+          ? <div style={{fontSize:11.5,color:"#a33",background:"#fdecea",padding:"10px 12px",borderRadius:9,marginBottom:9}}>
+              No rate list has been published yet. Ask the office to set today's rates before booking orders.</div>
+          : <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <span style={{fontSize:11.5,fontWeight:800,color:"#1a5a3a"}}>Catalogue — today's rates</span>
+                <span style={{fontSize:10.5,color:"#8a9a8a"}}>{rates.length} items</span>
+              </div>
+              <input value={catSearch} onChange={e=>setCatSearch(e.target.value)}
+                placeholder="search product…" style={{...inp,marginBottom:8}}/>
+              <div style={{maxHeight:330,overflowY:"auto",marginBottom:10,
+                border:"1px solid #eef2ee",borderRadius:10,padding:6}}>
+                {rates.filter(r=>!catSearch||String(r.name).toLowerCase().includes(catSearch.toLowerCase()))
+                  .map((r,i)=>{
+                  const c=cart[r.name]||{qty:0,unit:"cases"};
+                  const q=Number(c.qty)||0;
+                  const setQty=(n)=>{
+                    const nc={...cart};
+                    if(n<=0) delete nc[r.name]; else nc[r.name]={qty:n,unit:c.unit||"cases"};
+                    setCart(nc);
+                  };
+                  return <div key={r.name+i} style={{display:"flex",alignItems:"center",gap:8,
+                    padding:"9px 8px",borderRadius:9,marginBottom:4,
+                    background:q>0?"#e8f5e9":"#fbfdfb",
+                    border:q>0?"1.5px solid #7ab88a":"1px solid #f0f4f0"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12.5,fontWeight:700,color:"#1a5a3a",
+                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</div>
+                      <div style={{fontSize:11,color:"#6a7a6a"}}>
+                        ₹{Number(r.rate||0).toLocaleString("en-IN")}
+                        {q>0?<b style={{color:"#1a7a3a"}}> · ₹{(Number(r.rate||0)*q).toLocaleString("en-IN")}</b>:null}
+                      </div>
+                    </div>
+                    {q>0&&<select value={c.unit||"cases"}
+                      onChange={e=>{const nc={...cart};nc[r.name]={qty:q,unit:e.target.value};setCart(nc);}}
+                      style={{padding:"5px",borderRadius:7,border:"1px solid #cfd8cf",fontSize:10.5,width:62}}>
+                      <option value="cases">cases</option><option value="doz">doz</option>
+                    </select>}
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <button onClick={()=>setQty(q-1)} disabled={q<=0}
+                        style={{width:32,height:32,borderRadius:8,border:"none",fontSize:18,fontWeight:800,
+                        background:q>0?"#c8e0cc":"#f0f2f0",color:q>0?"#1a5a3a":"#bbb",
+                        cursor:q>0?"pointer":"default",lineHeight:1}}>−</button>
+                      <span style={{minWidth:24,textAlign:"center",fontSize:14,fontWeight:800,
+                        color:q>0?"#1a5a3a":"#bbb"}}>{q}</span>
+                      <button onClick={()=>setQty(q+1)}
+                        style={{width:32,height:32,borderRadius:8,border:"none",fontSize:18,fontWeight:800,
+                        background:"#1a7a4a",color:"#fff",cursor:"pointer",lineHeight:1}}>+</button>
+                    </div>
+                  </div>;
+                })}
+              </div>
+            </div>}
 
-        {orderTotal>0&&<div style={{background:"#e8f5e9",borderRadius:8,padding:"9px 11px",marginBottom:9}}>
-          <div style={{fontSize:11,color:"#3a6a3a"}}>ORDER VALUE</div>
-          <div style={{fontSize:19,fontWeight:800,color:"#1a5a3a"}}>₹{orderTotal.toLocaleString("en-IN")}</div>
+        {Object.keys(cart).length>0&&<div className="rk-pop" style={{background:"#e8f5e9",borderRadius:11,
+          padding:"11px 13px",marginBottom:10,border:"1.5px solid #7ab88a"}}>
+          <div style={{fontSize:10.5,color:"#3a6a3a",fontWeight:800,marginBottom:5}}>
+            CART · {Object.keys(cart).length} item(s)</div>
+          {Object.entries(cart).map(([n,c])=>
+            <div key={n} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"2px 0"}}>
+              <span style={{color:"#3a5a3a"}}>{c.qty} {c.unit} {n}</span>
+              <b style={{color:"#1a5a3a"}}>₹{(rateOf(n)*Number(c.qty||0)).toLocaleString("en-IN")}</b>
+            </div>)}
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:7,paddingTop:7,
+            borderTop:"2px solid #b8d8bc"}}>
+            <b style={{fontSize:13,color:"#1a5a3a"}}>TOTAL</b>
+            <CountUp value={Object.entries(cart).reduce((s,[n,c])=>s+rateOf(n)*Number(c.qty||0),0)}
+              prefix="₹" style={{fontSize:20,fontWeight:800,color:"#1a5a3a"}}/>
+          </div>
         </div>}
 
         <label style={lab}>Payment received now (₹)</label>
         <input type="number" value={paid} onChange={e=>setPaid(e.target.value)} placeholder="0 if none" inputMode="decimal" style={inp}/>
         <label style={lab}>Note (optional)</label>
         <input value={orderNote} onChange={e=>setOrderNote(e.target.value)} placeholder="delivery date, remarks…" style={inp}/>
-        <button onClick={submitOrder} disabled={!!busy} style={btn}>{busy==="order"?"Submitting…":"🛒 Book order"}</button>
+        <button onClick={submitOrder} disabled={!!busy||Object.keys(cart).length===0} style={{...btn,
+          background:Object.keys(cart).length===0?"#ccc":"linear-gradient(135deg,#1a7a4a,#0a5a2a)",
+          cursor:Object.keys(cart).length===0?"not-allowed":"pointer"}}>
+          {busy==="order"?"Submitting…":"🛒 Book order"}</button>
       </div>}
+
+      {tab==="track"&&(()=>{
+        const STAGES=["Placed","Confirmed","Packed","Dispatched","Delivered"];
+        const mineOrders=(allOrders||[]).filter(o=>o.user===me);
+        const paidOf=o=>(o.payments&&o.payments.length)
+          ? o.payments.reduce((s,p)=>s+(Number(p.amount)||0),0)
+          : (Number(o.paid)||0);
+        const openValue=mineOrders.filter(o=>o.status!=="Delivered")
+          .reduce((s,o)=>s+(Number(o.value)||0),0);
+        const dueTotal=mineOrders.reduce((s,o)=>s+Math.max(0,(Number(o.value)||0)-paidOf(o)),0);
+        return <div>
+          <div style={{display:"flex",gap:6,marginBottom:11}}>
+            <div style={{flex:1,background:"#eef4fb",borderRadius:9,padding:"9px 11px"}}>
+              <div style={{fontSize:9.5,color:"#3a5a8a",fontWeight:700}}>IN PIPELINE</div>
+              <div style={{fontSize:16,fontWeight:800,color:"#1a3a7a"}}>₹{openValue.toLocaleString("en-IN")}</div>
+            </div>
+            <div style={{flex:1,background:dueTotal>0?"#fdf4e8":"#e8f5e9",borderRadius:9,padding:"9px 11px"}}>
+              <div style={{fontSize:9.5,color:dueTotal>0?"#8a5a1a":"#3a6a3a",fontWeight:700}}>OUTSTANDING</div>
+              <div style={{fontSize:16,fontWeight:800,color:dueTotal>0?"#a0661a":"#1a7a3a"}}>
+                ₹{dueTotal.toLocaleString("en-IN")}</div>
+            </div>
+          </div>
+
+          {mineOrders.length===0
+            ? <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"26px 0"}}>
+                You have not booked any orders yet.</div>
+            : mineOrders.map((o,i)=>{
+                const pd=paidOf(o), val=Number(o.value)||0, due=Math.max(0,val-pd);
+                const si=Math.max(0,STAGES.indexOf(o.status||"Placed"));
+                return <div key={o.id||i} className="rk-rise" style={{border:"1px solid #e6ece6",borderRadius:11,
+                  padding:"11px 12px",marginBottom:9,animationDelay:(i*45)+"ms",background:"#fff"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:2}}>
+                    <b style={{fontSize:13.5,color:"#1a5a3a"}}>{o.party}</b>
+                    <span style={{fontSize:10.5,color:"#999"}}>{o.date}</span>
+                  </div>
+                  <div style={{fontSize:11.5,color:"#666",marginBottom:8}}>
+                    {(o.lines||[]).map(l=>l.qty+" "+l.unit+" "+l.item).join(", ")}</div>
+
+                  <div style={{display:"flex",alignItems:"center",marginBottom:4}}>
+                    {STAGES.map((s,j)=><React.Fragment key={s}>
+                      <div style={{width:15,height:15,borderRadius:"50%",flexShrink:0,
+                        background:j<=si?"#1a7a4a":"#e0e6e0",
+                        border:j===si?"3px solid #a8dcb8":"none",
+                        transition:"background 400ms"}}/>
+                      {j<STAGES.length-1&&<div style={{flex:1,height:3,
+                        background:j<si?"#1a7a4a":"#e0e6e0",transition:"background 400ms"}}/>}
+                    </React.Fragment>)}
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                    {STAGES.map((s,j)=><span key={s} style={{fontSize:8.5,
+                      color:j<=si?"#1a5a3a":"#b0b8b0",fontWeight:j===si?800:500,
+                      width:"20%",textAlign:j===0?"left":(j===STAGES.length-1?"right":"center")}}>{s}</span>)}
+                  </div>
+
+                  {(o.invoiceNo||o.transporter||o.lrNumber||o.expectedDelivery)&&
+                    <div style={{fontSize:11,color:"#5a6a5a",background:"#f7faf7",borderRadius:7,
+                      padding:"7px 9px",marginBottom:7}}>
+                      {o.invoiceNo?<div>Invoice <b>{o.invoiceNo}</b></div>:null}
+                      {o.transporter?<div>Transport <b>{o.transporter}</b>
+                        {o.lrNumber?<span> · LR {o.lrNumber}</span>:null}</div>:null}
+                      {o.expectedDelivery?<div>Expected <b>{o.expectedDelivery}</b></div>:null}
+                    </div>}
+
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4}}>
+                    <span style={{color:"#666"}}>Order ₹{val.toLocaleString("en-IN")}</span>
+                    <span style={{color:"#1a7a3a",fontWeight:700}}>paid ₹{pd.toLocaleString("en-IN")}</span>
+                  </div>
+                  <FillBar pct={val>0?pd/val*100:0} color={due===0?"#1a7a3a":"#d4a017"} height={6}/>
+                  <div style={{fontSize:11.5,fontWeight:800,marginTop:5,
+                    color:due===0?"#1a7a3a":"#a0661a"}}>
+                    {due===0?"✓ Fully paid":"Balance ₹"+due.toLocaleString("en-IN")}</div>
+
+                  {(o.payments||[]).length>0&&<details style={{marginTop:6}}>
+                    <summary style={{fontSize:10.5,color:"#5a7a5a",cursor:"pointer"}}>payment history</summary>
+                    {o.payments.map((p,j)=><div key={j} style={{display:"flex",justifyContent:"space-between",
+                      fontSize:11,color:"#666",padding:"2px 0"}}>
+                      <span>{p.date}{p.mode?(" · "+p.mode):""}{p.ref?(" · "+p.ref):""}</span>
+                      <b>₹{Number(p.amount).toLocaleString("en-IN")}</b>
+                    </div>)}
+                  </details>}
+                </div>;
+              })}
+        </div>;
+      })()}
 
       {tab==="day"&&<div>
         {myTarget>0
@@ -3241,6 +3406,10 @@ function FieldAdmin({ onClose }) {
     const n=sugg.map(s=>s.id===id?{...s,actualToDate:Number(v)||0}:s);
     setSugg(n); await put("field_suggestions",n);
   };
+  const patchOrder=async(id,fields)=>{
+    const n=orders.map(o=>o.id===id?{...o,...fields}:o);
+    setOrders(n); await put("field_orders",n);
+  };
   const setOrderStatus=async(id,status)=>{
     const n=orders.map(o=>o.id===id?{...o,status:status}:o);
     setOrders(n); await put("field_orders",n);
@@ -3564,9 +3733,48 @@ function FieldAdmin({ onClose }) {
           <div style={{fontSize:12,fontWeight:700,color:"#1a5a3a",marginBottom:4}}>
             ₹{Number(o.value||0).toLocaleString("en-IN")}
             {o.paid>0?<span style={{fontWeight:400,color:"#3a6a3a"}}> · collected ₹{Number(o.paid).toLocaleString("en-IN")}</span>:null}</div>
-          <select value={o.status||"Placed"} onChange={e=>setOrderStatus(o.id,e.target.value)} style={{...inp,fontSize:12,padding:"6px"}}>
+          <select value={o.status||"Placed"} onChange={e=>setOrderStatus(o.id,e.target.value)} style={{...inp,fontSize:12,padding:"6px",marginBottom:5}}>
             {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
           </select>
+          <details>
+            <summary style={{fontSize:11,color:"#5a7a5a",cursor:"pointer",marginBottom:5}}>
+              logistics & payment</summary>
+            <div style={{display:"flex",gap:5,marginBottom:5}}>
+              <input value={o.invoiceNo||""} placeholder="invoice no"
+                onChange={e=>patchOrder(o.id,{invoiceNo:e.target.value})}
+                style={{...inp,fontSize:11.5,padding:"6px",flex:1}}/>
+              <input value={o.expectedDelivery||""} placeholder="expected date" type="date"
+                onChange={e=>patchOrder(o.id,{expectedDelivery:e.target.value})}
+                style={{...inp,fontSize:11.5,padding:"6px",flex:1}}/>
+            </div>
+            <div style={{display:"flex",gap:5,marginBottom:6}}>
+              <input value={o.transporter||""} placeholder="transporter"
+                onChange={e=>patchOrder(o.id,{transporter:e.target.value})}
+                style={{...inp,fontSize:11.5,padding:"6px",flex:1}}/>
+              <input value={o.lrNumber||""} placeholder="LR / docket no"
+                onChange={e=>patchOrder(o.id,{lrNumber:e.target.value})}
+                style={{...inp,fontSize:11.5,padding:"6px",flex:1}}/>
+            </div>
+            {(()=>{
+              const pd=(o.payments||[]).reduce((s,p)=>s+(Number(p.amount)||0),0)||Number(o.paid)||0;
+              const due=Math.max(0,(Number(o.value)||0)-pd);
+              return <div>
+                <div style={{fontSize:11.5,marginBottom:5,color:due===0?"#1a7a3a":"#a0661a",fontWeight:700}}>
+                  Paid ₹{pd.toLocaleString("en-IN")} · {due===0?"settled":"balance ₹"+due.toLocaleString("en-IN")}</div>
+                <div style={{display:"flex",gap:5}}>
+                  <input id={"pay_"+o.id} type="number" placeholder="add payment ₹" inputMode="decimal"
+                    style={{...inp,fontSize:11.5,padding:"6px",flex:1}}/>
+                  <button onClick={()=>{
+                    const el=document.getElementById("pay_"+o.id);
+                    const amt=Number(el&&el.value); if(!amt) return;
+                    const ps=[...(o.payments||[]),{date:new Date().toISOString().slice(0,10),amount:amt,mode:"received"}];
+                    patchOrder(o.id,{payments:ps}); if(el) el.value="";
+                  }} style={{padding:"6px 12px",borderRadius:7,border:"none",background:"#1a5a3a",
+                    color:"#fff",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>+ Pay</button>
+                </div>
+              </div>;
+            })()}
+          </details>
         </div>)}
       </div>}
 
