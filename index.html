@@ -2636,6 +2636,9 @@ function FieldConsole({ onClose }) {
   const [locName,setLocName]=useState(""), [locAddr,setLocAddr]=useState(""), [locCoord,setLocCoord]=useState("");
   const [homeAddr,setHomeAddr]=useState("");
   const [pmaster,setPmaster]=useState([]);
+  const [contacts,setContacts]=useState({prakashEmail:""});
+  const [remindOpen,setRemindOpen]=useState("");
+  const [remindNote,setRemindNote]=useState("");
 
   // ---- order entry
   const [party,setParty]=useState("");
@@ -2677,6 +2680,50 @@ function FieldConsole({ onClose }) {
     return cur;
   };
 
+  // One tap to nudge Prakash about a specific order. Telegram always,
+  // plus email when an address is on file.
+  const remindPrakash = async (order, note) => {
+    const paidSoFar=(order.payments&&order.payments.length)
+      ? order.payments.reduce((s,p)=>s+(Number(p.amount)||0),0) : (Number(order.paid)||0);
+    const due=Math.max(0,(Number(order.value)||0)-paidSoFar);
+    const items=(order.lines||[]).map(l=>l.qty+" "+l.unit+" "+l.item).join(", ");
+    const body=
+      "🔔 <b>"+officer+"</b> is asking Prakash about an order\n"+
+      "<b>"+order.party+"</b>"+(order.town?(" · "+order.town):"")+"\n"+
+      items+"\n"+
+      "Booked "+order.date+" · ₹"+Number(order.value||0).toLocaleString("en-IN")+
+      "\nStatus: "+(order.status||"Placed")+
+      (due>0?("\nBalance ₹"+due.toLocaleString("en-IN")):"\nFully paid")+
+      (note?("\n\n\""+note+"\""):"");
+    await broadcast(body);
+    if(contacts.prakashEmail){
+      try{
+        await fetch("/.netlify/functions/mail",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            to:[contacts.prakashEmail],
+            subject:"Reminder from "+officer+" — "+order.party+" ("+(order.status||"Placed")+")",
+            html:"<h3>"+officer+" is asking about this order</h3>"+
+              "<p><b>Party:</b> "+order.party+(order.town?(" · "+order.town):"")+
+              "<br><b>Booked:</b> "+order.date+
+              "<br><b>Status:</b> "+(order.status||"Placed")+
+              "<br><b>Value:</b> ₹"+Number(order.value||0).toLocaleString("en-IN")+
+              (due>0?("<br><b>Balance:</b> ₹"+due.toLocaleString("en-IN")):"<br><b>Fully paid</b>")+
+              "</p><p><b>Items:</b> "+items+"</p>"+
+              (note?("<p><b>Message:</b> "+note+"</p>"):"")
+          })});
+      }catch(e){}
+    }
+    try{
+      let cur=[]; const r=await sheetsAPI("getPortfolio",{key:"field_orders",user:"main"});
+      if(r&&r.data&&Array.isArray(r.data)) cur=r.data;
+      const n=cur.map(o=>o.id===order.id
+        ? {...o, lastReminded:new Date().toISOString().slice(0,10),
+           reminderCount:(Number(o.reminderCount)||0)+1} : o);
+      await sheetsAPI("savePortfolio",{key:"field_orders",user:"main",data:n});
+      setAllOrders(n);
+    }catch(e){}
+  };
+
   const broadcast = async (text) => {
     try{
       await fetch("/.netlify/functions/telegram",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -2696,6 +2743,7 @@ function FieldConsole({ onClose }) {
     try{ const cl=await sheetsAPI("getPortfolio",{key:"field_claims",user:"main"}); if(cl&&cl.data&&Array.isArray(cl.data)) setClaims(cl.data); }catch(e){}
     try{ const ic=await sheetsAPI("getPortfolio",{key:"field_incentive",user:"main"}); if(ic&&ic.data) setIncent(ic.data); }catch(e){}
     try{ const pm=await sheetsAPI("getPortfolio",{key:"spectrum_master",user:"main"}); if(pm&&pm.data&&Array.isArray(pm.data)) setPmaster(pm.data); }catch(e){}
+    try{ const ct=await sheetsAPI("getPortfolio",{key:"field_contacts",user:"main"}); if(ct&&ct.data) setContacts(ct.data); }catch(e){}
   })(); },[]);
 
   const rateOf = n => { const r=rates.find(x=>x.name===n); return r?Number(r.rate)||0:0; };
@@ -3022,6 +3070,37 @@ function FieldConsole({ onClose }) {
                   <div style={{fontSize:11.5,fontWeight:800,marginTop:5,
                     color:due===0?"#1a7a3a":"#a0661a"}}>
                     {due===0?"✓ Fully paid":"Balance ₹"+due.toLocaleString("en-IN")}</div>
+
+                  <div style={{marginTop:8}}>
+                    {remindOpen===o.id
+                      ? <div>
+                          <input value={remindNote} onChange={e=>setRemindNote(e.target.value)}
+                            placeholder="anything to add? (optional)"
+                            style={{width:"100%",padding:"8px",borderRadius:8,border:"1.5px solid #cfd8cf",
+                            fontSize:12.5,marginBottom:6,boxSizing:"border-box"}}/>
+                          <div style={{display:"flex",gap:6}}>
+                            <button onClick={async()=>{
+                              setBusy("rem"+o.id);
+                              await remindPrakash(o,remindNote.trim());
+                              setRemindOpen("");setRemindNote("");setBusy("");
+                              setMsg("✓ Prakash has been reminded");
+                            }} disabled={!!busy} style={{flex:1,padding:"9px",borderRadius:8,border:"none",
+                              background:"#c98a1a",color:"#fff",fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
+                              {busy==="rem"+o.id?"Sending…":"Send reminder"}</button>
+                            <button onClick={()=>{setRemindOpen("");setRemindNote("");}}
+                              style={{padding:"9px 14px",borderRadius:8,border:"1px solid #ddd",
+                              background:"#fff",color:"#777",fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
+                              Cancel</button>
+                          </div>
+                        </div>
+                      : <button onClick={()=>{setRemindOpen(o.id);setRemindNote("");}}
+                          style={{width:"100%",padding:"9px",borderRadius:8,border:"1.5px solid #e0c090",
+                          background:"#fdf8ec",color:"#8a5a1a",fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
+                          🔔 Remind Prakash</button>}
+                    {o.lastReminded&&<div style={{fontSize:10,color:"#9a9a8a",marginTop:4,textAlign:"center"}}>
+                      last reminded {o.lastReminded}
+                      {o.reminderCount>1?(" · "+o.reminderCount+" times"):""}</div>}
+                  </div>
 
                   {(o.payments||[]).length>0&&<details style={{marginTop:6}}>
                     <summary style={{fontSize:10.5,color:"#5a7a5a",cursor:"pointer"}}>payment history</summary>
@@ -3373,6 +3452,7 @@ function FieldAdmin({ onClose }) {
   const [incent,setIncent]=useState({rupeesPerPoint:"",minPoints:""});
   const [fpUser,setFpUser]=useState(""), [fpPts,setFpPts]=useState(""), [fpWhy,setFpWhy]=useState("");
   const [pmaster,setPmaster]=useState([]);
+  const [contacts,setContacts]=useState({prakashEmail:"",ownerEmail:""});
   const [busy,setBusy]=useState(""); const [msg,setMsg]=useState("");
   const TEAM=["sunil","sadasivan","sebi","biju","satish","vinod","sooraj","prakash"];
 
@@ -3393,6 +3473,7 @@ function FieldAdmin({ onClose }) {
     setIncent(await get("field_incentive",{rupeesPerPoint:"",minPoints:""}));
     setPmaster(await get("spectrum_master",[]));
     setLocs(await get("field_locations",[]));
+    setContacts(await get("field_contacts",{prakashEmail:"",ownerEmail:""}));
   })(); },[]);
 
   const saveRates=async()=>{ setBusy("r"); try{ await put("field_rates",rates.filter(r=>r.name&&r.name.trim())); setMsg("✓ Rates published to the team"); }catch(e){ setMsg("✗ failed"); } setBusy(""); };
@@ -3577,6 +3658,18 @@ function FieldAdmin({ onClose }) {
         };
         const pending=(claims||[]).filter(c=>c.status==="Requested");
         return <div>
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>📧 Where reminders go</div>
+          <div style={{fontSize:10.5,color:"#7a8a7a",marginBottom:6}}>
+            When the team taps "Remind Prakash" on an order, it always posts to the Telegram group.
+            Add an address here and it emails him as well.</div>
+          <input value={contacts.prakashEmail||""} placeholder="Prakash's email"
+            onChange={e=>setContacts({...contacts,prakashEmail:e.target.value})} style={{...inp,marginBottom:6}}/>
+          <button onClick={async()=>{ setBusy("c"); try{ await put("field_contacts",contacts);
+              setMsg("✓ Saved"); }catch(e){ setMsg("✗ failed"); } setBusy(""); }}
+            disabled={!!busy} style={{width:"100%",padding:"10px",borderRadius:9,border:"none",
+            background:"#1a5a3a",color:"#fff",fontWeight:700,fontSize:13.5,cursor:"pointer",marginBottom:16}}>
+            {busy==="c"?"Saving…":"📧 Save contact"}</button>
+
           <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>💰 What a point is worth</div>
           <div style={{display:"flex",gap:6,marginBottom:7}}>
             <div style={{flex:1}}><label style={lab}>₹ per point</label>
