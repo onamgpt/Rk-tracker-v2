@@ -2411,6 +2411,30 @@ function FieldReport({ onClose }) {
 }
 
 // ------------------------------------------------------------
+// Daily allowance bands, by road distance from the person's own
+// headquarters. Thresholds are fixed; the rupee rates are set by
+// the office and read from storage.
+//   under 10 km      HQ
+//   10 to 40 km      Ex-HQ
+//   over 40 km       Outstation
+// ------------------------------------------------------------
+const DA_HQ_MAX = 10, DA_EXHQ_MAX = 40;
+
+function daBandFor(km) {
+  if (km === null || km === undefined || isNaN(km)) return null;
+  if (km < DA_HQ_MAX)   return "HQ";
+  if (km <= DA_EXHQ_MAX) return "Ex-HQ";
+  return "Outstation";
+}
+
+function daRateFor(km, slabs) {
+  const band = daBandFor(km);
+  if (!band || !slabs) return { band: band, rate: 0 };
+  const map = { "HQ":"hq", "Ex-HQ":"exhq", "Outstation":"outstation" };
+  return { band: band, rate: Number(slabs[map[band]]) || 0 };
+}
+
+// ------------------------------------------------------------
 // Points. Deliberately legible — a person must be able to work
 // out their own score in their head, or it stops motivating.
 //   target        1 point per 1% achieved, capped at 150
@@ -2632,11 +2656,15 @@ function FieldConsole({ onClose }) {
   const [fair,setFair]=useState([]);
   const [claims,setClaims]=useState([]);
   const [incent,setIncent]=useState({rupeesPerPoint:0,minPoints:0});
-  const [locs,setLocs]=useState([]);
-  const [locName,setLocName]=useState(""), [locAddr,setLocAddr]=useState(""), [locCoord,setLocCoord]=useState("");
   const [homeAddr,setHomeAddr]=useState("");
   const [pmaster,setPmaster]=useState([]);
   const [contacts,setContacts]=useState({prakashEmail:""});
+  const [slabs,setSlabs]=useState({hq:"",exhq:"",outstation:""});
+  const [locs,setLocs]=useState([]);
+  const [gps,setGps]=useState(null);        // {lat,lng}
+  const [daKm,setDaKm]=useState(null);
+  const [daBusy,setDaBusy]=useState(false);
+  const [daErr,setDaErr]=useState("");
   const [remindOpen,setRemindOpen]=useState("");
   const [remindNote,setRemindNote]=useState("");
 
@@ -2724,6 +2752,41 @@ function FieldConsole({ onClose }) {
     }catch(e){}
   };
 
+  // My own headquarters, as registered by the office.
+  const myHQ = () => {
+    const rec=(locs||[]).find(l=>String(l.name||"").toLowerCase()===me.toLowerCase());
+    return rec ? (rec.coordinates||rec.address||"") : "";
+  };
+
+  // Read the phone's position, then ask Google for the ROAD distance back to
+  // headquarters. Straight-line would understate Kerala journeys badly.
+  const captureLocation = async () => {
+    setDaErr(""); setDaBusy(true); setDaKm(null);
+    const hq=myHQ();
+    if(!hq){ setDaErr("Your headquarters is not on file yet — ask the office to add it."); setDaBusy(false); return; }
+    if(!navigator.geolocation){ setDaErr("This phone cannot report its position."); setDaBusy(false); return; }
+    navigator.geolocation.getCurrentPosition(async pos=>{
+      const here=pos.coords.latitude.toFixed(6)+","+pos.coords.longitude.toFixed(6);
+      setGps({lat:pos.coords.latitude,lng:pos.coords.longitude});
+      try{
+        const r=await fetch("/.netlify/functions/distance",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({origin:hq,destination:here})});
+        const j=await r.json();
+        if(j&&j.ok){
+          setDaKm(j.km);
+          if(j.destinationText&&!town) setTown(j.destinationText);
+        } else {
+          setDaErr("Could not work out the road distance"+(j&&j.status?(" ("+j.status+")"):"")+".");
+        }
+      }catch(e){ setDaErr("Could not reach the distance service."); }
+      setDaBusy(false);
+    }, err=>{
+      setDaErr(err.code===1?"Location permission was refused.":"Could not read your position.");
+      setDaBusy(false);
+    }, {enableHighAccuracy:true,timeout:15000,maximumAge:60000});
+  };
+
   const broadcast = async (text) => {
     try{
       await fetch("/.netlify/functions/telegram",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -2744,6 +2807,8 @@ function FieldConsole({ onClose }) {
     try{ const ic=await sheetsAPI("getPortfolio",{key:"field_incentive",user:"main"}); if(ic&&ic.data) setIncent(ic.data); }catch(e){}
     try{ const pm=await sheetsAPI("getPortfolio",{key:"spectrum_master",user:"main"}); if(pm&&pm.data&&Array.isArray(pm.data)) setPmaster(pm.data); }catch(e){}
     try{ const ct=await sheetsAPI("getPortfolio",{key:"field_contacts",user:"main"}); if(ct&&ct.data) setContacts(ct.data); }catch(e){}
+    try{ const sl=await sheetsAPI("getPortfolio",{key:"field_da_slabs",user:"main"}); if(sl&&sl.data) setSlabs(sl.data); }catch(e){}
+    try{ const lc=await sheetsAPI("getPortfolio",{key:"field_locations",user:"main"}); if(lc&&lc.data&&Array.isArray(lc.data)) setLocs(lc.data); }catch(e){}
   })(); },[]);
 
   const rateOf = n => { const r=rates.find(x=>x.name===n); return r?Number(r.rate)||0:0; };
@@ -2806,9 +2871,12 @@ function FieldConsole({ onClose }) {
   const submitDay=async()=>{
     setBusy("day"); setMsg("");
     try{
+      const da=daRateFor(daKm,slabs);
       await store("field_reports", { id:"fr_"+Date.now(), officer:officer, user:me, date:today,
         time:new Date().toISOString(), location:town.trim(), sales:sales, expenses:expenses,
-        collections:collections, target:myTarget, variance:variance, verified:false });
+        collections:collections, target:myTarget, variance:variance,
+        gps:gps?(gps.lat.toFixed(6)+","+gps.lng.toFixed(6)):"", km:daKm,
+        daBand:da.band||"", daRate:da.rate||0, verified:false });
       setMsg("✓ Day figures submitted");
       setSales("");setExpenses("");setCollections("");
     }catch(e){ setMsg("✗ Could not submit"); }
@@ -3136,6 +3204,31 @@ function FieldConsole({ onClose }) {
         <input type="number" value={collections} onChange={e=>setCollections(e.target.value)} placeholder="payments received" inputMode="decimal" style={inp}/>
         <label style={lab}>Where are you today?</label>
         <input value={town} onChange={e=>setTown(e.target.value)} placeholder="town / area" style={inp}/>
+        <button onClick={captureLocation} disabled={daBusy}
+          style={{width:"100%",padding:"11px",borderRadius:9,border:"1.5px solid #a8c8e8",
+          background:"#eef4fb",color:"#1a3a7a",fontWeight:700,fontSize:13,cursor:"pointer",marginBottom:8}}>
+          {daBusy?"Working out the distance…":"📍 Use my location for allowance"}</button>
+        {daErr&&<div style={{fontSize:11.5,color:"#a33",background:"#fdecea",padding:"8px 10px",
+          borderRadius:8,marginBottom:8}}>{daErr}</div>}
+        {daKm!==null&&(()=>{
+          const da=daRateFor(daKm,slabs);
+          const col=da.band==="Outstation"?"#1a5a9a":(da.band==="Ex-HQ"?"#8a6a2a":"#1a7a3a");
+          return <div className="rk-pop" style={{background:"#f4f8fc",border:"1.5px solid "+col,
+            borderRadius:10,padding:"11px 13px",marginBottom:9}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:9.5,color:"#5a6a7a",fontWeight:700}}>ROAD DISTANCE FROM HQ</div>
+                <div style={{fontSize:19,fontWeight:800,color:col}}>{daKm} km</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:12.5,fontWeight:800,color:col}}>{da.band}</div>
+                {da.rate>0
+                  ? <div style={{fontSize:16,fontWeight:800,color:col}}>₹{da.rate}</div>
+                  : <div style={{fontSize:10.5,color:"#8a7a5a"}}>rate not set</div>}
+              </div>
+            </div>
+          </div>;
+        })()}
         <button onClick={submitDay} disabled={!!busy} style={btn}>{busy==="day"?"Submitting…":"📤 Submit day"}</button>
         <div style={{fontSize:10,color:"#8a9a8a",marginTop:9,fontStyle:"italic"}}>
           Field-reported and marked unverified until reconciled against orders and bank collections.</div>
@@ -3453,6 +3546,9 @@ function FieldAdmin({ onClose }) {
   const [fpUser,setFpUser]=useState(""), [fpPts,setFpPts]=useState(""), [fpWhy,setFpWhy]=useState("");
   const [pmaster,setPmaster]=useState([]);
   const [contacts,setContacts]=useState({prakashEmail:"",ownerEmail:""});
+  const [slabs,setSlabs]=useState({hq:"",exhq:"",outstation:""});
+  const [locs,setLocs]=useState([]);
+  const [locName,setLocName]=useState(""), [locAddr,setLocAddr]=useState(""), [locCoord,setLocCoord]=useState("");
   const [busy,setBusy]=useState(""); const [msg,setMsg]=useState("");
   const TEAM=["sunil","sadasivan","sebi","biju","satish","vinod","sooraj","prakash"];
 
@@ -3474,6 +3570,7 @@ function FieldAdmin({ onClose }) {
     setPmaster(await get("spectrum_master",[]));
     setLocs(await get("field_locations",[]));
     setContacts(await get("field_contacts",{prakashEmail:"",ownerEmail:""}));
+    setSlabs(await get("field_da_slabs",{hq:"",exhq:"",outstation:""}));
   })(); },[]);
 
   const saveRates=async()=>{ setBusy("r"); try{ await put("field_rates",rates.filter(r=>r.name&&r.name.trim())); setMsg("✓ Rates published to the team"); }catch(e){ setMsg("✗ failed"); } setBusy(""); };
@@ -3751,8 +3848,12 @@ function FieldAdmin({ onClose }) {
           <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9}}>
             Enter your team members' house/HQ addresses. Use Google Plus Codes (e.g. GXMM+9M9) or decimal coordinates (11.177158,75.830315).
             Later these will be used to calculate distance-based daily allowance.</div>
-          <label style={lab}>Name (person or HQ)</label>
-          <input value={locName} onChange={e=>setLocName(e.target.value)} placeholder="Sooraj / HQ" style={inp}/>
+          <label style={lab}>Whose headquarters is this?</label>
+          <select value={locName} onChange={e=>setLocName(e.target.value)} style={inp}>
+            <option value="">choose person…</option>
+            {TEAM.map(u=><option key={u} value={u}>{u.charAt(0).toUpperCase()+u.slice(1)}</option>)}
+            <option value="office">Office / HQ</option>
+          </select>
           <label style={lab}>Address (optional)</label>
           <input value={locAddr} onChange={e=>setLocAddr(e.target.value)} placeholder="street, town" style={inp}/>
           <label style={lab}>Plus Code or coordinates</label>
@@ -3761,6 +3862,25 @@ function FieldAdmin({ onClose }) {
           <button onClick={saveLoc} disabled={!!busy} style={{width:"100%",padding:"10px",borderRadius:9,border:"none",
             background:"#1a5a3a",color:"#fff",fontWeight:700,fontSize:13.5,cursor:"pointer",marginBottom:9}}>
             {busy==="l"?"Saving…":"📍 Add location"}</button>
+          <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",margin:"16px 0 4px"}}>💵 Allowance slabs</div>
+          <div style={{fontSize:10.5,color:"#7a8a7a",marginBottom:7}}>
+            Bands are by <b>road</b> distance from each person's own headquarters, not straight-line —
+            so backwaters and river crossings count properly.</div>
+          {[["hq","HQ — under "+DA_HQ_MAX+" km"],
+            ["exhq","Ex-HQ — "+DA_HQ_MAX+" to "+DA_EXHQ_MAX+" km"],
+            ["outstation","Outstation — over "+DA_EXHQ_MAX+" km"]].map(([k,l])=>
+            <div key={k} style={{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
+              <span style={{flex:1,fontSize:12}}>{l}</span>
+              <input type="number" value={(slabs&&slabs[k])||""} inputMode="decimal"
+                onChange={e=>setSlabs({...slabs,[k]:e.target.value})}
+                placeholder="₹/day" style={{...inp,width:104,flex:"0 0 104px"}}/>
+            </div>)}
+          <button onClick={async()=>{ setBusy("s"); try{ await put("field_da_slabs",slabs);
+              setMsg("✓ Allowance slabs published"); }catch(e){ setMsg("✗ failed"); } setBusy(""); }}
+            disabled={!!busy} style={{width:"100%",padding:"10px",borderRadius:9,border:"none",
+            background:"#1a5a3a",color:"#fff",fontWeight:700,fontSize:13.5,cursor:"pointer",marginBottom:16}}>
+            {busy==="s"?"Saving…":"💵 Publish slabs"}</button>
+
           <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:5}}>Saved locations</div>
           {locs.length===0
             ? <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"14px 0"}}>None yet.</div>
