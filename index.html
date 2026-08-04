@@ -2665,6 +2665,8 @@ function FieldConsole({ onClose }) {
   const [daKm,setDaKm]=useState(null);
   const [daBusy,setDaBusy]=useState(false);
   const [daErr,setDaErr]=useState("");
+  const [daConfirm,setDaConfirm]=useState(null);   // pending claim awaiting his yes
+  const [daClaimed,setDaClaimed]=useState(null);   // what he actually agreed to
   const [remindOpen,setRemindOpen]=useState("");
   const [remindNote,setRemindNote]=useState("");
 
@@ -2776,6 +2778,9 @@ function FieldConsole({ onClose }) {
         if(j&&j.ok){
           setDaKm(j.km);
           if(j.destinationText&&!town) setTown(j.destinationText);
+          const d=daRateFor(j.km,slabs);
+          setDaConfirm({ km:j.km, band:d.band, rate:d.rate,
+            where:j.destinationText||here, minutes:j.durationMin });
         } else {
           setDaErr("Could not work out the road distance"+(j&&j.status?(" ("+j.status+")"):"")+".");
         }
@@ -2871,14 +2876,17 @@ function FieldConsole({ onClose }) {
   const submitDay=async()=>{
     setBusy("day"); setMsg("");
     try{
-      const da=daRateFor(daKm,slabs);
+      const da=daClaimed ? {band:daClaimed.band,rate:daClaimed.rate} : {band:"",rate:0};
       await store("field_reports", { id:"fr_"+Date.now(), officer:officer, user:me, date:today,
         time:new Date().toISOString(), location:town.trim(), sales:sales, expenses:expenses,
         collections:collections, target:myTarget, variance:variance,
-        gps:gps?(gps.lat.toFixed(6)+","+gps.lng.toFixed(6)):"", km:daKm,
-        daBand:da.band||"", daRate:da.rate||0, verified:false });
+        gps:gps?(gps.lat.toFixed(6)+","+gps.lng.toFixed(6)):"", km:daClaimed?daClaimed.km:null,
+        daBand:da.band||"", daRate:da.rate||0,
+        daConfirmedBy:daClaimed?me:"", daConfirmedAt:daClaimed?new Date().toISOString():"",
+        daPlace:daClaimed?daClaimed.where:"", verified:false });
       setMsg("✓ Day figures submitted");
       setSales("");setExpenses("");setCollections("");
+      setDaClaimed(null);setDaKm(null);setGps(null);
     }catch(e){ setMsg("✗ Could not submit"); }
     setBusy("");
   };
@@ -3210,15 +3218,62 @@ function FieldConsole({ onClose }) {
           {daBusy?"Working out the distance…":"📍 Use my location for allowance"}</button>
         {daErr&&<div style={{fontSize:11.5,color:"#a33",background:"#fdecea",padding:"8px 10px",
           borderRadius:8,marginBottom:8}}>{daErr}</div>}
-        {daKm!==null&&(()=>{
-          const da=daRateFor(daKm,slabs);
+        {daConfirm&&<div style={{position:"fixed",inset:0,background:"rgba(20,30,25,.55)",
+          display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,padding:18}}
+          onClick={()=>setDaConfirm(null)}>
+          <div className="rk-pop" onClick={e=>e.stopPropagation()}
+            style={{background:"#fff",borderRadius:16,padding:"20px 18px",maxWidth:340,width:"100%",
+            boxShadow:"0 18px 50px rgba(0,0,0,.3)"}}>
+            <div style={{fontSize:34,textAlign:"center",marginBottom:6}}>📍</div>
+            <div style={{fontSize:11,color:"#7a8a7a",fontWeight:700,textAlign:"center",letterSpacing:.4}}>
+              CONFIRM YOUR ALLOWANCE</div>
+            <div style={{fontSize:12.5,color:"#4a5a4a",textAlign:"center",margin:"9px 0 12px",lineHeight:1.5}}>
+              {daConfirm.where}</div>
+            <div style={{background:"#f4f8fc",borderRadius:11,padding:"13px",marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                <span style={{fontSize:12,color:"#5a6a7a"}}>Road distance from your HQ</span>
+                <b style={{fontSize:13.5,color:"#1a3a7a"}}>{daConfirm.km} km</b>
+              </div>
+              {daConfirm.minutes?<div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                <span style={{fontSize:12,color:"#5a6a7a"}}>Driving time</span>
+                <b style={{fontSize:12.5,color:"#5a6a7a"}}>
+                  {Math.floor(daConfirm.minutes/60)>0?(Math.floor(daConfirm.minutes/60)+" hr "):""}
+                  {daConfirm.minutes%60} min</b>
+              </div>:null}
+              <div style={{display:"flex",justifyContent:"space-between",paddingTop:7,
+                borderTop:"1px solid #dde6ee"}}>
+                <span style={{fontSize:12.5,fontWeight:700,color:"#1a3a7a"}}>{daConfirm.band}</span>
+                {daConfirm.rate>0
+                  ? <b style={{fontSize:19,color:"#1a5a9a"}}>₹{daConfirm.rate}</b>
+                  : <span style={{fontSize:11.5,color:"#8a7a5a"}}>rate not set by office</span>}
+              </div>
+            </div>
+            <div style={{fontSize:10.5,color:"#8a9a8a",textAlign:"center",marginBottom:12,lineHeight:1.5}}>
+              This is recorded against today only when you submit your day.
+              If you are not at your working location yet, check again later.</div>
+            <button onClick={()=>{ setDaClaimed(daConfirm); setDaConfirm(null);
+              setMsg("✓ Allowance confirmed — submit your day to record it"); }}
+              style={{width:"100%",padding:"13px",borderRadius:10,border:"none",
+              background:"linear-gradient(135deg,#1a5a9a,#0d3a6a)",color:"#fff",
+              fontWeight:800,fontSize:15,cursor:"pointer",marginBottom:7}}>
+              ✓ Yes, this is correct</button>
+            <button onClick={()=>{ setDaConfirm(null); setDaKm(null); }}
+              style={{width:"100%",padding:"11px",borderRadius:10,border:"1px solid #ddd",
+              background:"#fff",color:"#777",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+              Check again</button>
+          </div>
+        </div>}
+
+        {daClaimed&&(()=>{
+          const da={band:daClaimed.band,rate:daClaimed.rate};
+          const daKmShown=daClaimed.km;
           const col=da.band==="Outstation"?"#1a5a9a":(da.band==="Ex-HQ"?"#8a6a2a":"#1a7a3a");
-          return <div className="rk-pop" style={{background:"#f4f8fc",border:"1.5px solid "+col,
+          return <div style={{background:"#f4f8fc",border:"1.5px solid "+col,
             borderRadius:10,padding:"11px 13px",marginBottom:9}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div>
-                <div style={{fontSize:9.5,color:"#5a6a7a",fontWeight:700}}>ROAD DISTANCE FROM HQ</div>
-                <div style={{fontSize:19,fontWeight:800,color:col}}>{daKm} km</div>
+                <div style={{fontSize:9.5,color:"#5a6a7a",fontWeight:700}}>✓ CONFIRMED · FROM YOUR HQ</div>
+                <div style={{fontSize:19,fontWeight:800,color:col}}>{daKmShown} km</div>
               </div>
               <div style={{textAlign:"right"}}>
                 <div style={{fontSize:12.5,fontWeight:800,color:col}}>{da.band}</div>
