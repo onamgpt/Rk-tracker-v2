@@ -3671,7 +3671,7 @@ function FieldAdmin({ onClose }) {
         <div style={{fontSize:11,color:"#6a7a6a"}}>Rates, targets and commitments</div></div>
       </div>
       <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:11}}>
-        {tabBtn("report","📈 Report")}{tabBtn("game","🏏 Game")}{tabBtn("locs","📍 Locations")}{tabBtn("rates","💵 Rates")}{tabBtn("targets","🎯 Targets")}{tabBtn("orders","📦 Orders")}
+        {tabBtn("report","📈 Report")}{tabBtn("game","🏏 Game")}{tabBtn("damonth","💰 DA Monthly")}{tabBtn("locs","📍 Locations")}{tabBtn("rates","💵 Rates")}{tabBtn("targets","🎯 Targets")}{tabBtn("orders","📦 Orders")}
         {tabBtn("sugg","💡 Commitments")}{tabBtn("market","🔍 Market")}{tabBtn("parties","🆕 Parties")}{tabBtn("team","👥 Recruits")}
       </div>
       {msg&&<div style={{fontSize:13,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:9,
@@ -3884,7 +3884,97 @@ function FieldAdmin({ onClose }) {
         </div>;
       })()}
 
-      {tab==="locs"&&(()=>{
+            {tab==="damonth"&&(()=>{
+            const [daMonth,setDaMonth]=useState(new Date().toISOString().slice(0,7));
+            const [daRows,setDaRows]=useState([]);
+            const [daCSV,setDaCSV]=useState("");
+
+            React.useEffect(()=>{
+              (async()=>{
+                try{
+                  const r=await sheetsAPI("getPortfolio",{key:"field_reports",user:"main"});
+                  if(!r||!r.data||!Array.isArray(r.data)) return;
+                  const rows=r.data.filter(x=>x.date&&x.date.startsWith(daMonth));
+                  const byPerson={};
+                  rows.forEach(x=>{
+                    const p=x.user||"unknown";
+                    if(!byPerson[p]) byPerson[p]={name:p,hq:0,exhq:0,outstation:0,total:0,days:0,recs:[]};
+                    const band=(x.daBand||"").replace("-","").toLowerCase();
+                    const rec={date:x.date,band:x.daBand||"",rate:Number(x.daRate)||0,
+                      place:x.daPlace||"",km:x.km,officer:x.officer};
+                    byPerson[p].recs.push(rec);
+                    if(rec.rate>0){ if(band) byPerson[p][band]=(byPerson[p][band]||0)+rec.rate;
+                      byPerson[p].total+=rec.rate; byPerson[p].days+=1; }
+                  });
+                  const rows2=Object.values(byPerson).sort((a,b)=>(b.total-a.total));
+                  setDaRows(rows2);
+                  let csv="Person,HQ days,Ex-HQ days,Outstation days,HQ Rupees,Ex-HQ Rupees,Outstation Rupees,Total Rupees\n";
+                  rows2.forEach(r=>{
+                    const hqD=r.recs.filter(x=>x.band==="HQ").length;
+                    const exhqD=r.recs.filter(x=>x.band==="Ex-HQ").length;
+                    const outD=r.recs.filter(x=>x.band==="Outstation").length;
+                    const hqA=r.recs.filter(x=>x.band==="HQ").reduce((s,x)=>s+x.rate,0);
+                    const exhqA=r.recs.filter(x=>x.band==="Ex-HQ").reduce((s,x)=>s+x.rate,0);
+                    const outA=r.recs.filter(x=>x.band==="Outstation").reduce((s,x)=>s+x.rate,0);
+                    csv+=r.name+","+hqD+","+exhqD+","+outD+","+hqA+","+exhqA+","+outA+","+r.total+"\n";
+                  });
+                  setDaCSV(csv);
+                }catch(e){}
+              })();
+            },[daMonth]);
+
+            return <div>
+              <label style={lab}>Month</label>
+              <input type="month" value={daMonth} onChange={e=>setDaMonth(e.target.value)} style={{...inp,marginBottom:10}}/>
+              {daRows.length===0
+                ? <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"26px 0"}}>No DA records for {daMonth}.</div>
+                : <div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                      <span style={{fontSize:11.5,fontWeight:700,color:"#1a5a3a"}}>{daRows.length} persons</span>
+                      <button onClick={()=>{const b=new Blob([daCSV],{type:"text/csv"}); const u=URL.createObjectURL(b);
+                        const a=document.createElement("a"); a.href=u; a.download="da-"+daMonth+".csv"; a.click();
+                        URL.revokeObjectURL(u);}} style={{padding:"6px 11px",borderRadius:8,border:"1px solid #ccc",
+                        background:"#fff",color:"#333",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>
+                        📥 CSV</button>
+                    </div>
+                    <div style={{overflowX:"auto",fontSize:11.5}}>
+                      <table style={{width:"100%",borderCollapse:"collapse"}}>
+                        <thead><tr style={{background:"#f4f8fc",borderBottom:"2px solid #d0dce8"}}>
+                          <th style={{padding:"8px",textAlign:"left",fontWeight:700,color:"#1a3a7a"}}>Person</th>
+                          <th style={{padding:"8px",textAlign:"center",fontWeight:700,color:"#5a5a5a"}}>HQ</th>
+                          <th style={{padding:"8px",textAlign:"center",fontWeight:700,color:"#8a6a2a"}}>Ex-HQ</th>
+                          <th style={{padding:"8px",textAlign:"center",fontWeight:700,color:"#1a5a9a"}}>Out</th>
+                          <th style={{padding:"8px",textAlign:"right",fontWeight:700,color:"#1a5a3a"}}>Total</th>
+                        </tr></thead>
+                        <tbody>{daRows.map((r,i)=>{
+                          const hqD=r.recs.filter(x=>x.band==="HQ").length;
+                          const exhqD=r.recs.filter(x=>x.band==="Ex-HQ").length;
+                          const outD=r.recs.filter(x=>x.band==="Outstation").length;
+                          return <tr key={r.name} style={{borderBottom:"1px solid #e8eef0",background:i%2===0?"#fbfdfb":"#fff"}}>
+                            <td style={{padding:"9px 8px",fontWeight:700,color:"#1a5a3a"}}>{r.name}</td>
+                            <td style={{padding:"9px 8px",textAlign:"center",color:"#666"}}>{hqD>0?hqD:<span style={{color:"#bbb"}}>—</span>}</td>
+                            <td style={{padding:"9px 8px",textAlign:"center",color:"#666"}}>{exhqD>0?exhqD:<span style={{color:"#bbb"}}>—</span>}</td>
+                            <td style={{padding:"9px 8px",textAlign:"center",color:"#666"}}>{outD>0?outD:<span style={{color:"#bbb"}}>—</span>}</td>
+                            <td style={{padding:"9px 8px",textAlign:"right",fontWeight:800,color:"#1a5a3a"}}>₹{r.total.toLocaleString("en-IN")}</td>
+                          </tr>;})}
+                        <tr style={{background:"#eef4fb",borderTop:"2px solid #d0dce8",fontWeight:800}}>
+                          <td style={{padding:"10px 8px",color:"#1a3a7a"}}>TOTAL</td>
+                          <td style={{padding:"10px 8px",textAlign:"center",color:"#1a3a7a"}}>
+                            {daRows.reduce((s,r)=>s+r.recs.filter(x=>x.band==="HQ").length,0)}</td>
+                          <td style={{padding:"10px 8px",textAlign:"center",color:"#8a6a2a"}}>
+                            {daRows.reduce((s,r)=>s+r.recs.filter(x=>x.band==="Ex-HQ").length,0)}</td>
+                          <td style={{padding:"10px 8px",textAlign:"center",color:"#1a5a9a"}}>
+                            {daRows.reduce((s,r)=>s+r.recs.filter(x=>x.band==="Outstation").length,0)}</td>
+                          <td style={{padding:"10px 8px",textAlign:"right",color:"#1a3a7a"}}>
+                            ₹{daRows.reduce((s,r)=>s+r.total,0).toLocaleString("en-IN")}</td>
+                        </tr></tbody>
+                      </table>
+                    </div>
+                  </div>}
+            </div>;
+          })()}
+
+{tab==="locs"&&(()=>{
         const saveLoc=async()=>{
           if(!locName||(!locAddr&&!locCoord)){ setMsg("✗ Name and at least address or coordinates needed"); return; }
           setBusy("l"); setMsg("");
