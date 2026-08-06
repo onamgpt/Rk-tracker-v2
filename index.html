@@ -2435,6 +2435,88 @@ function daRateFor(km, slabs) {
 }
 
 // ------------------------------------------------------------
+// Succession. The nine men who carry Kerala and Tamil Nadu are
+// almost all past sixty. What they hold is not the outlet list —
+// that is cheap to rebuild — but who actually runs each shop now,
+// how it pays, what it promised, and in what order the town is
+// walked. Karnataka was lost because that was never written down.
+//
+// An outlet is "held" by a person until the company knows enough
+// to serve it without him. These functions measure that gap.
+// ------------------------------------------------------------
+
+// Which facts must exist before an outlet can survive a handover.
+const SUCCESSION_FIELDS = [
+  { k:"ownerName",        w:10, label:"Who owns it" },
+  { k:"ownerPhone",       w:14, label:"Owner's phone" },
+  { k:"successorName",    w:16, label:"Who runs it next" },
+  { k:"gps",              w:10, label:"Where it is" },
+  { k:"distributor",      w:10, label:"Who supplies it" },
+  { k:"paymentBehaviour", w:14, label:"How it pays" },
+  { k:"monthlyCommitment",w:10, label:"What it committed" },
+  { k:"visitDay",         w:10, label:"When it is visited" },
+  { k:"relationshipNotes",w:6,  label:"What to know about them" }
+];
+
+function coverageOf(outlet) {
+  if (!outlet) return 0;
+  let got = 0, total = 0;
+  SUCCESSION_FIELDS.forEach(f => {
+    total += f.w;
+    const v = outlet[f.k];
+    if (v !== undefined && v !== null && String(v).trim() !== "") got += f.w;
+  });
+  return total ? Math.round(got / total * 100) : 0;
+}
+
+function missingFor(outlet) {
+  return SUCCESSION_FIELDS.filter(f => {
+    const v = outlet ? outlet[f.k] : null;
+    return v === undefined || v === null || String(v).trim() === "";
+  });
+}
+
+// Exposure = what it would cost to lose this outlet, weighed against
+// how little the company knows about it independently of one man.
+function exposureOf(outlet) {
+  const cov   = coverageOf(outlet);
+  const value = Number(outlet.avgMonthlyValue) || 0;
+  const years = Number(outlet.yearsAssociated) || 0;
+
+  // Long-standing outlets are worth more and are usually the ones
+  // most tightly bound to a single person.
+  const loyalty = years >= 15 ? 1.35 : years >= 8 ? 1.2 : years >= 3 ? 1.05 : 1;
+  const blind   = (100 - cov) / 100;
+  const score   = value * loyalty * blind;
+
+  let band;
+  if (cov >= 85)      band = "Secured";
+  else if (cov >= 60) band = "Partial";
+  else if (value >= 20000) band = "Critical";
+  else                band = "Exposed";
+
+  return { coverage: cov, exposure: Math.round(score), band: band, loyalty: loyalty };
+}
+
+// The beat, reconstructed rather than asked for. Every outlet carries
+// the day of month it is visited on; grouping them rebuilds the route
+// without anyone ever sitting down to write it out.
+function beatOf(outlets, user) {
+  const mine = (outlets||[]).filter(o => !user || o.assignedTo === user);
+  const byDay = {};
+  mine.forEach(o => {
+    const d = String(o.visitDay||"").trim();
+    if (!d) return;
+    (byDay[d] = byDay[d] || []).push(o);
+  });
+  return Object.keys(byDay).sort((a,b)=>{
+    const na=parseInt(a,10), nb=parseInt(b,10);
+    if(!isNaN(na)&&!isNaN(nb)) return na-nb;
+    return String(a).localeCompare(String(b));
+  }).map(d => ({ day: d, outlets: byDay[d] }));
+}
+
+// ------------------------------------------------------------
 // Points. Deliberately legible — a person must be able to work
 // out their own score in their head, or it stops motivating.
 //   target        1 point per 1% achieved, capped at 150
@@ -2665,6 +2747,10 @@ function FieldConsole({ onClose }) {
   const [daKm,setDaKm]=useState(null);
   const [daBusy,setDaBusy]=useState(false);
   const [daErr,setDaErr]=useState("");
+  const [outlets,setOutlets]=useState([]);
+  const [askOutlet,setAskOutlet]=useState(null);   // today's single question
+  const [askVal,setAskVal]=useState("");
+  const [oForm,setOForm]=useState(null);           // outlet being added or edited
   const [daConfirm,setDaConfirm]=useState(null);   // pending claim awaiting his yes
   const [daClaimed,setDaClaimed]=useState(null);   // what he actually agreed to
   const [remindOpen,setRemindOpen]=useState("");
@@ -2754,6 +2840,56 @@ function FieldConsole({ onClose }) {
     }catch(e){}
   };
 
+  // Ask for exactly one thing a day, and ask for the thing whose absence
+  // would hurt most. A man will answer one question between two shops.
+  // He will never sit down and fill a form about his own territory.
+  const pickQuestion = (list) => {
+    const mine=(list||[]).filter(o=>o.assignedTo===me);
+    if(!mine.length) return null;
+    const stamp=new Date().toISOString().slice(0,10);
+    let best=null, bestScore=-1;
+    mine.forEach(o=>{
+      if(o.askedOn===stamp) return;              // already asked today
+      const gaps=missingFor(o);
+      if(!gaps.length) return;
+      const gap=gaps.sort((a,b)=>b.w-a.w)[0];    // the heaviest missing fact
+      const value=Number(o.avgMonthlyValue)||0;
+      const score=gap.w*100 + value/100;
+      if(score>bestScore){ bestScore=score; best={outlet:o,field:gap}; }
+    });
+    return best;
+  };
+
+  React.useEffect(()=>{ if(outlets.length) setAskOutlet(pickQuestion(outlets)); },[outlets]);
+
+  const answerQuestion = async () => {
+    if(!askOutlet||!askVal.trim()) return;
+    setBusy("ask");
+    try{
+      let cur=[]; const r=await sheetsAPI("getPortfolio",{key:"field_outlets",user:"main"});
+      if(r&&r.data&&Array.isArray(r.data)) cur=r.data;
+      const stamp=new Date().toISOString().slice(0,10);
+      const n=cur.map(o=>o.id===askOutlet.outlet.id
+        ? {...o,[askOutlet.field.k]:askVal.trim(),askedOn:stamp,
+           answeredCount:(Number(o.answeredCount)||0)+1,
+           lastDocumentedBy:me,lastDocumentedOn:stamp}
+        : o);
+      await sheetsAPI("savePortfolio",{key:"field_outlets",user:"main",data:n});
+      setOutlets(n); setAskVal(""); setMsg("✓ Thank you — that is now recorded");
+      setAskOutlet(pickQuestion(n));
+    }catch(e){ setMsg("✗ Could not save"); }
+    setBusy("");
+  };
+
+  const skipQuestion = async () => {
+    if(!askOutlet) return;
+    const stamp=new Date().toISOString().slice(0,10);
+    const n=outlets.map(o=>o.id===askOutlet.outlet.id?{...o,askedOn:stamp}:o);
+    setOutlets(n); setAskVal("");
+    try{ await sheetsAPI("savePortfolio",{key:"field_outlets",user:"main",data:n}); }catch(e){}
+    setAskOutlet(pickQuestion(n));
+  };
+
   // My own headquarters, as registered by the office.
   const myHQ = () => {
     const rec=(locs||[]).find(l=>String(l.name||"").toLowerCase()===me.toLowerCase());
@@ -2814,6 +2950,7 @@ function FieldConsole({ onClose }) {
     try{ const ct=await sheetsAPI("getPortfolio",{key:"field_contacts",user:"main"}); if(ct&&ct.data) setContacts(ct.data); }catch(e){}
     try{ const sl=await sheetsAPI("getPortfolio",{key:"field_da_slabs",user:"main"}); if(sl&&sl.data) setSlabs(sl.data); }catch(e){}
     try{ const lc=await sheetsAPI("getPortfolio",{key:"field_locations",user:"main"}); if(lc&&lc.data&&Array.isArray(lc.data)) setLocs(lc.data); }catch(e){}
+    try{ const ou=await sheetsAPI("getPortfolio",{key:"field_outlets",user:"main"}); if(ou&&ou.data&&Array.isArray(ou.data)) setOutlets(ou.data); }catch(e){}
   })(); },[]);
 
   const rateOf = n => { const r=rates.find(x=>x.name===n); return r?Number(r.rate)||0:0; };
@@ -2976,6 +3113,7 @@ function FieldConsole({ onClose }) {
           More — day figures, new parties, market, ideas, points</summary>
         <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:7}}>
           {tabBtn("day","📊 My day")}
+          {tabBtn("outlets","🏪 My shops")}
           {tabBtn("party","🆕 New party")}
           {tabBtn("market","🔍 Market")}
           {tabBtn("idea","💡 Brand idea")}
@@ -2990,6 +3128,33 @@ function FieldConsole({ onClose }) {
         background:msg[0]==="✓"?"#e8f5e9":"#fdecea",padding:"8px 10px",borderRadius:8}}>{msg}</div>}
 
       {tab==="order"&&<div>
+        {askOutlet&&<div style={{background:"#fdf8ec",border:"1.5px solid #e8d0a0",borderRadius:12,
+          padding:"13px 14px",marginBottom:12}}>
+          <div style={{fontSize:9.5,fontWeight:800,color:"#8a6a1a",letterSpacing:.4,marginBottom:5}}>
+            ONE QUESTION · BUILDS YOUR HANDOVER RECORD</div>
+          <div style={{fontSize:13.5,color:"#3a3a2a",lineHeight:1.5,marginBottom:9}}>
+            <b>{askOutlet.outlet.name}</b>
+            {askOutlet.outlet.town?(", "+askOutlet.outlet.town):""} —{" "}
+            {askOutlet.field.k==="successorName"
+              ? "who takes the order when the owner is not there?"
+              : askOutlet.field.label.toLowerCase()+"?"}
+          </div>
+          <input value={askVal} onChange={e=>setAskVal(e.target.value)}
+            placeholder="type the answer"
+            style={{width:"100%",padding:"10px",borderRadius:8,border:"1.5px solid #ddc890",
+            fontSize:13,marginBottom:8,boxSizing:"border-box"}}/>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={answerQuestion} disabled={!!busy||!askVal.trim()}
+              style={{flex:1,padding:"10px",borderRadius:8,border:"none",
+              background:askVal.trim()?"#c98a1a":"#ddd",color:"#fff",fontWeight:800,
+              fontSize:13,cursor:askVal.trim()?"pointer":"default"}}>
+              {busy==="ask"?"Saving…":"Answer"}</button>
+            <button onClick={skipQuestion} style={{padding:"10px 14px",borderRadius:8,
+              border:"1px solid #ddd",background:"#fff",color:"#999",fontWeight:700,
+              fontSize:12.5,cursor:"pointer"}}>Not now</button>
+          </div>
+        </div>}
+
         <label style={lab}>Party name</label>
         <input value={party} onChange={e=>setParty(e.target.value)} placeholder="shop / distributor" style={inp}/>
         <label style={lab}>Town / location</label>
@@ -3186,6 +3351,147 @@ function FieldConsole({ onClose }) {
                       <b>₹{Number(p.amount).toLocaleString("en-IN")}</b>
                     </div>)}
                   </details>}
+                </div>;
+              })}
+        </div>;
+      })()}
+
+      {tab==="outlets"&&(()=>{
+        const mine=(outlets||[]).filter(o=>o.assignedTo===me);
+        const secured=mine.filter(o=>coverageOf(o)>=85).length;
+        const avgCov=mine.length?Math.round(mine.reduce((s,o)=>s+coverageOf(o),0)/mine.length):0;
+        const blank={id:"",name:"",town:"",ownerName:"",ownerPhone:"",successorName:"",
+          successorPhone:"",successorRelation:"",distributor:"",monthlyCommitment:"",
+          avgMonthlyValue:"",yearsAssociated:"",paymentBehaviour:"",creditDays:"",
+          visitDay:"",competitorBrands:"",relationshipNotes:"",gps:""};
+
+        const saveOutlet=async()=>{
+          if(!oForm.name.trim()||!oForm.town.trim()){ setMsg("✗ Shop name and town are needed"); return; }
+          setBusy("o");
+          try{
+            let cur=[]; const r=await sheetsAPI("getPortfolio",{key:"field_outlets",user:"main"});
+            if(r&&r.data&&Array.isArray(r.data)) cur=r.data;
+            const stamp=new Date().toISOString().slice(0,10);
+            let n;
+            if(oForm.id){ n=cur.map(o=>o.id===oForm.id?{...o,...oForm,lastDocumentedBy:me,lastDocumentedOn:stamp}:o); }
+            else { n=[{...oForm,id:"ot_"+Date.now(),assignedTo:me,createdBy:me,
+                       createdOn:stamp,lastDocumentedBy:me,lastDocumentedOn:stamp},...cur]; }
+            await sheetsAPI("savePortfolio",{key:"field_outlets",user:"main",data:n});
+            setOutlets(n); setOForm(null); setMsg("✓ Shop recorded");
+          }catch(e){ setMsg("✗ Could not save"); }
+          setBusy("");
+        };
+
+        const tagHere=async()=>{
+          if(!navigator.geolocation) return;
+          navigator.geolocation.getCurrentPosition(p=>{
+            setOForm(f=>({...f,gps:p.coords.latitude.toFixed(6)+","+p.coords.longitude.toFixed(6)}));
+            setMsg("✓ Position tagged");
+          },()=>setMsg("✗ Could not read position"),{enableHighAccuracy:true,timeout:12000});
+        };
+
+        if(oForm) return <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+            <b style={{fontSize:14,color:"#1a5a3a"}}>{oForm.id?"Edit shop":"Add a shop"}</b>
+            <button onClick={()=>setOForm(null)} style={{border:"none",background:"none",
+              color:"#999",fontSize:13,cursor:"pointer"}}>✕ close</button>
+          </div>
+          <label style={lab}>Shop name</label>
+          <input value={oForm.name} onChange={e=>setOForm({...oForm,name:e.target.value})} style={inp}/>
+          <label style={lab}>Town</label>
+          <input value={oForm.town} onChange={e=>setOForm({...oForm,town:e.target.value})} style={inp}/>
+          <button onClick={tagHere} style={{width:"100%",padding:"9px",borderRadius:8,
+            border:"1.5px solid #a8c8e8",background:"#eef4fb",color:"#1a3a7a",fontWeight:700,
+            fontSize:12.5,cursor:"pointer",marginBottom:9}}>
+            📍 {oForm.gps?("Tagged: "+oForm.gps):"Tag this shop's position"}</button>
+          <label style={lab}>Owner's name</label>
+          <input value={oForm.ownerName} onChange={e=>setOForm({...oForm,ownerName:e.target.value})} style={inp}/>
+          <label style={lab}>Owner's phone</label>
+          <input value={oForm.ownerPhone} onChange={e=>setOForm({...oForm,ownerPhone:e.target.value})}
+            inputMode="tel" style={inp}/>
+          <div style={{background:"#fdf8ec",borderRadius:9,padding:"10px 11px",marginBottom:9,
+            border:"1px solid #e8d8b0"}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#8a6a1a",marginBottom:2}}>
+              WHO RUNS IT AFTER HIM</div>
+            <div style={{fontSize:10.5,color:"#9a8a6a",marginBottom:7}}>
+              The son, the manager, whoever actually takes the order when the owner is not there.</div>
+            <input value={oForm.successorName} onChange={e=>setOForm({...oForm,successorName:e.target.value})}
+              placeholder="name" style={{...inp,marginBottom:6}}/>
+            <input value={oForm.successorPhone} onChange={e=>setOForm({...oForm,successorPhone:e.target.value})}
+              placeholder="phone" inputMode="tel" style={{...inp,marginBottom:6}}/>
+            <input value={oForm.successorRelation} onChange={e=>setOForm({...oForm,successorRelation:e.target.value})}
+              placeholder="son / manager / partner" style={{...inp,marginBottom:0}}/>
+          </div>
+          <label style={lab}>Which distributor supplies it</label>
+          <input value={oForm.distributor} onChange={e=>setOForm({...oForm,distributor:e.target.value})} style={inp}/>
+          <label style={lab}>Day of month you visit</label>
+          <input value={oForm.visitDay} onChange={e=>setOForm({...oForm,visitDay:e.target.value})}
+            placeholder="e.g. 3, or 1st Monday" style={inp}/>
+          <label style={lab}>Monthly commitment (dozens)</label>
+          <input type="number" value={oForm.monthlyCommitment} inputMode="decimal"
+            onChange={e=>setOForm({...oForm,monthlyCommitment:e.target.value})} style={inp}/>
+          <label style={lab}>Typical monthly value (₹)</label>
+          <input type="number" value={oForm.avgMonthlyValue} inputMode="decimal"
+            onChange={e=>setOForm({...oForm,avgMonthlyValue:e.target.value})} style={inp}/>
+          <label style={lab}>Years he has dealt with us</label>
+          <input type="number" value={oForm.yearsAssociated} inputMode="decimal"
+            onChange={e=>setOForm({...oForm,yearsAssociated:e.target.value})} style={inp}/>
+          <label style={lab}>How he pays</label>
+          <select value={oForm.paymentBehaviour} onChange={e=>setOForm({...oForm,paymentBehaviour:e.target.value})} style={inp}>
+            <option value="">choose…</option>
+            <option>Pays on delivery</option>
+            <option>Pays on next visit</option>
+            <option>Needs reminding</option>
+            <option>Slow, but pays</option>
+            <option>Difficult</option>
+          </select>
+          <label style={lab}>Credit days allowed</label>
+          <input type="number" value={oForm.creditDays} inputMode="decimal"
+            onChange={e=>setOForm({...oForm,creditDays:e.target.value})} style={inp}/>
+          <label style={lab}>Competitor brands he stocks</label>
+          <input value={oForm.competitorBrands} onChange={e=>setOForm({...oForm,competitorBrands:e.target.value})} style={inp}/>
+          <label style={lab}>Anything a new man must know</label>
+          <textarea value={oForm.relationshipNotes} rows={3}
+            onChange={e=>setOForm({...oForm,relationshipNotes:e.target.value})}
+            placeholder="how he likes to be dealt with, old grievances, family, timing…"
+            style={{...inp,resize:"vertical",fontFamily:"inherit"}}/>
+          <button onClick={saveOutlet} disabled={!!busy} style={btn}>
+            {busy==="o"?"Saving…":"Save shop"}</button>
+        </div>;
+
+        return <div>
+          <div style={{background:"linear-gradient(135deg,#1a5a3a,#0d3a24)",borderRadius:12,
+            padding:"13px 15px",marginBottom:11,color:"#fff"}}>
+            <div style={{fontSize:10,opacity:.8,fontWeight:700,letterSpacing:.4}}>YOUR TERRITORY ON RECORD</div>
+            <div style={{display:"flex",alignItems:"baseline",gap:8,marginTop:3}}>
+              <CountUp value={mine.length} style={{fontSize:26,fontWeight:800}}/>
+              <span style={{fontSize:12,opacity:.85}}>shops · {secured} fully recorded</span>
+            </div>
+            <div style={{marginTop:8}}><FillBar pct={avgCov} color="#7ee8a2" height={7}/></div>
+            <div style={{fontSize:11,opacity:.85,marginTop:5}}>{avgCov}% of what matters is written down</div>
+          </div>
+
+          <button onClick={()=>setOForm(blank)} style={{...btn,marginBottom:11}}>+ Add a shop</button>
+
+          {mine.length===0
+            ? <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"22px 10px",lineHeight:1.6}}>
+                No shops recorded yet. Add the ones you visit most often first.</div>
+            : mine.slice().sort((a,b)=>coverageOf(a)-coverageOf(b)).map((o,i)=>{
+                const cov=coverageOf(o), gaps=missingFor(o);
+                const col=cov>=85?"#1a7a3a":cov>=60?"#c98a1a":"#c0392b";
+                return <div key={o.id} onClick={()=>setOForm({...o})}
+                  style={{border:"1px solid #e6ece6",borderRadius:10,padding:"10px 12px",
+                  marginBottom:8,cursor:"pointer",background:"#fff"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                    <b style={{fontSize:13,color:"#1a5a3a"}}>{o.name}</b>
+                    <span style={{fontSize:11,fontWeight:800,color:col}}>{cov}%</span>
+                  </div>
+                  <div style={{fontSize:11,color:"#888",marginBottom:6}}>
+                    {o.town}{o.visitDay?(" · day "+o.visitDay):""}</div>
+                  <FillBar pct={cov} color={col} height={4}/>
+                  {gaps.length>0&&<div style={{fontSize:10.5,color:"#a08a5a",marginTop:5}}>
+                    still missing: {gaps.slice(0,3).map(g=>g.label.toLowerCase()).join(", ")}
+                    {gaps.length>3?(" +"+(gaps.length-3)):""}</div>}
                 </div>;
               })}
         </div>;
@@ -3602,6 +3908,7 @@ function FieldAdmin({ onClose }) {
   const [pmaster,setPmaster]=useState([]);
   const [contacts,setContacts]=useState({prakashEmail:"",ownerEmail:""});
   const [slabs,setSlabs]=useState({hq:"",exhq:"",outstation:""});
+  const [outlets,setOutlets]=useState([]);
   const [locs,setLocs]=useState([]);
   const [locName,setLocName]=useState(""), [locAddr,setLocAddr]=useState(""), [locCoord,setLocCoord]=useState("");
   const [busy,setBusy]=useState(""); const [msg,setMsg]=useState("");
@@ -3626,6 +3933,7 @@ function FieldAdmin({ onClose }) {
     setLocs(await get("field_locations",[]));
     setContacts(await get("field_contacts",{prakashEmail:"",ownerEmail:""}));
     setSlabs(await get("field_da_slabs",{hq:"",exhq:"",outstation:""}));
+    setOutlets(await get("field_outlets",[]));
   })(); },[]);
 
   const saveRates=async()=>{ setBusy("r"); try{ await put("field_rates",rates.filter(r=>r.name&&r.name.trim())); setMsg("✓ Rates published to the team"); }catch(e){ setMsg("✗ failed"); } setBusy(""); };
@@ -3671,7 +3979,7 @@ function FieldAdmin({ onClose }) {
         <div style={{fontSize:11,color:"#6a7a6a"}}>Rates, targets and commitments</div></div>
       </div>
       <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:11}}>
-        {tabBtn("report","📈 Report")}{tabBtn("game","🏏 Game")}{tabBtn("damonth","💰 DA Monthly")}{tabBtn("locs","📍 Locations")}{tabBtn("rates","💵 Rates")}{tabBtn("targets","🎯 Targets")}{tabBtn("orders","📦 Orders")}
+        {tabBtn("report","📈 Report")}{tabBtn("succession","🏛️ Succession")}{tabBtn("game","🏏 Game")}{tabBtn("damonth","💰 DA Monthly")}{tabBtn("locs","📍 Locations")}{tabBtn("rates","💵 Rates")}{tabBtn("targets","🎯 Targets")}{tabBtn("orders","📦 Orders")}
         {tabBtn("sugg","💡 Commitments")}{tabBtn("market","🔍 Market")}{tabBtn("parties","🆕 Parties")}{tabBtn("team","👥 Recruits")}
       </div>
       {msg&&<div style={{fontSize:13,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:9,
@@ -3884,7 +4192,107 @@ function FieldAdmin({ onClose }) {
         </div>;
       })()}
 
-            {tab==="damonth"&&(()=>{
+            {tab==="succession"&&(()=>{
+        const all=outlets||[];
+        const byPerson={};
+        all.forEach(o=>{
+          const p=o.assignedTo||"unassigned";
+          if(!byPerson[p]) byPerson[p]={name:p,outlets:[],value:0,exposure:0,cov:0,noSuccessor:0};
+          const e=exposureOf(o);
+          byPerson[p].outlets.push(o);
+          byPerson[p].value+=Number(o.avgMonthlyValue)||0;
+          byPerson[p].exposure+=e.exposure;
+          if(!String(o.successorName||"").trim()) byPerson[p].noSuccessor++;
+        });
+        const rows=Object.values(byPerson).map(r=>({...r,
+          cov: r.outlets.length?Math.round(r.outlets.reduce((s,o)=>s+coverageOf(o),0)/r.outlets.length):0
+        })).sort((a,b)=>b.exposure-a.exposure);
+
+        const totalValue=all.reduce((s,o)=>s+(Number(o.avgMonthlyValue)||0),0);
+        const totalExp=all.reduce((s,o)=>s+exposureOf(o).exposure,0);
+        const atRisk=all.filter(o=>{const b=exposureOf(o).band; return b==="Critical"||b==="Exposed";});
+        const critical=all.slice().sort((a,b)=>exposureOf(b).exposure-exposureOf(a).exposure).slice(0,10);
+
+        return <div>
+          <div style={{background:"linear-gradient(135deg,#7a2a2a,#4a1616)",borderRadius:12,
+            padding:"14px 15px",marginBottom:12,color:"#fff"}}>
+            <div style={{fontSize:10,opacity:.8,fontWeight:700,letterSpacing:.4}}>
+              MONTHLY BUSINESS THAT WALKS OUT WITH ONE MAN</div>
+            <CountUp value={totalExp} prefix="₹" style={{fontSize:27,fontWeight:800,display:"block",marginTop:3}}/>
+            <div style={{fontSize:11.5,opacity:.85,marginTop:4}}>
+              of ₹{totalValue.toLocaleString("en-IN")} total · {atRisk.length} of {all.length} shops thinly recorded
+            </div>
+          </div>
+
+          {all.length===0
+            ? <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"22px 10px",lineHeight:1.6}}>
+                No shops recorded yet. The team builds this from 🏪 My shops in their console.</div>
+            : <div>
+                <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",marginBottom:6}}>By person</div>
+                {rows.map(r=>{
+                  const col=r.cov>=85?"#1a7a3a":r.cov>=60?"#c98a1a":"#c0392b";
+                  return <div key={r.name} style={{border:"1px solid #e6ece6",borderRadius:10,
+                    padding:"11px 12px",marginBottom:8}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                      <b style={{fontSize:13,color:"#1a5a3a",textTransform:"capitalize"}}>{r.name}</b>
+                      <span style={{fontSize:12,fontWeight:800,color:col}}>{r.cov}% recorded</span>
+                    </div>
+                    <div style={{fontSize:11,color:"#888",marginBottom:6}}>
+                      {r.outlets.length} shops · ₹{r.value.toLocaleString("en-IN")}/month
+                      {r.noSuccessor>0?<span style={{color:"#c0392b",fontWeight:700}}>
+                        {" · "+r.noSuccessor+" with no named successor"}</span>:null}
+                    </div>
+                    <FillBar pct={r.cov} color={col} height={5}/>
+                    <div style={{fontSize:11,marginTop:6,color:"#7a2a2a",fontWeight:700}}>
+                      ₹{r.exposure.toLocaleString("en-IN")}/month exposed if he leaves tomorrow</div>
+                  </div>;
+                })}
+
+                <div style={{fontSize:12,fontWeight:800,color:"#1a5a3a",margin:"14px 0 6px"}}>
+                  Where to start — the ten costliest gaps</div>
+                {critical.map(o=>{
+                  const e=exposureOf(o), gaps=missingFor(o);
+                  return <div key={o.id} style={{border:"1px solid #f0e0e0",borderRadius:9,
+                    padding:"9px 11px",marginBottom:6,background:"#fffafa"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                      <b style={{fontSize:12.5,color:"#1a5a3a"}}>{o.name}</b>
+                      <span style={{fontSize:11,fontWeight:800,
+                        color:e.band==="Critical"?"#c0392b":"#c98a1a"}}>{e.band}</span>
+                    </div>
+                    <div style={{fontSize:10.5,color:"#888"}}>
+                      {o.town} · {o.assignedTo} · ₹{(Number(o.avgMonthlyValue)||0).toLocaleString("en-IN")}/mo
+                      {o.yearsAssociated?(" · "+o.yearsAssociated+" years"):""}</div>
+                    {gaps.length>0&&<div style={{fontSize:10.5,color:"#a0522d",marginTop:4}}>
+                      missing: {gaps.map(g=>g.label.toLowerCase()).join(", ")}</div>}
+                  </div>;
+                })}
+
+                <button onClick={()=>{
+                  let csv="Shop,Town,Person,Owner,Owner phone,Successor,Successor phone,Relation,"+
+                    "Distributor,Visit day,Commitment,Monthly value,Years,Payment,Credit days,"+
+                    "Competitors,Notes,GPS,Coverage %,Exposure\n";
+                  all.forEach(o=>{
+                    const e=exposureOf(o);
+                    const q=v=>'"'+String(v===undefined||v===null?"":v).replace(/"/g,'""')+'"';
+                    csv+=[o.name,o.town,o.assignedTo,o.ownerName,o.ownerPhone,o.successorName,
+                      o.successorPhone,o.successorRelation,o.distributor,o.visitDay,o.monthlyCommitment,
+                      o.avgMonthlyValue,o.yearsAssociated,o.paymentBehaviour,o.creditDays,
+                      o.competitorBrands,o.relationshipNotes,o.gps,e.coverage,e.exposure].map(q).join(",")+"\n";
+                  });
+                  const b=new Blob([csv],{type:"text/csv"}); const u=URL.createObjectURL(b);
+                  const a=document.createElement("a"); a.href=u;
+                  a.download="territory-record-"+new Date().toISOString().slice(0,10)+".csv"; a.click();
+                  URL.revokeObjectURL(u);
+                }} style={{width:"100%",padding:"11px",borderRadius:9,border:"1px solid #ccc",
+                  background:"#fff",color:"#333",fontWeight:700,fontSize:13,cursor:"pointer",marginTop:12}}>
+                  📥 Export the whole territory record</button>
+                <div style={{fontSize:10.5,color:"#8a9a8a",textAlign:"center",marginTop:6,lineHeight:1.5}}>
+                  Keep a copy outside this system. This file is the asset.</div>
+              </div>}
+        </div>;
+      })()}
+
+'''      {tab==="damonth"&&(()=>{
             const [daMonth,setDaMonth]=useState(new Date().toISOString().slice(0,7));
             const [daRows,setDaRows]=useState([]);
             const [daCSV,setDaCSV]=useState("");
