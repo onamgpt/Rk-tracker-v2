@@ -2748,6 +2748,7 @@ function FieldConsole({ onClose }) {
   const [daBusy,setDaBusy]=useState(false);
   const [daErr,setDaErr]=useState("");
   const [outlets,setOutlets]=useState([]);
+  const [stock,setStock]=useState([]);
   const [askOutlet,setAskOutlet]=useState(null);   // today's single question
   const [askVal,setAskVal]=useState("");
   const [oForm,setOForm]=useState(null);           // outlet being added or edited
@@ -2951,6 +2952,7 @@ function FieldConsole({ onClose }) {
     try{ const sl=await sheetsAPI("getPortfolio",{key:"field_da_slabs",user:"main"}); if(sl&&sl.data) setSlabs(sl.data); }catch(e){}
     try{ const lc=await sheetsAPI("getPortfolio",{key:"field_locations",user:"main"}); if(lc&&lc.data&&Array.isArray(lc.data)) setLocs(lc.data); }catch(e){}
     try{ const ou=await sheetsAPI("getPortfolio",{key:"field_outlets",user:"main"}); if(ou&&ou.data&&Array.isArray(ou.data)) setOutlets(ou.data); }catch(e){}
+    try{ const sk=await sheetsAPI("getPortfolio",{key:"field_stock",user:"main"}); if(sk&&sk.data&&Array.isArray(sk.data)) setStock(sk.data); }catch(e){}
   })(); },[]);
 
   const rateOf = n => { const r=rates.find(x=>x.name===n); return r?Number(r.rate)||0:0; };
@@ -3102,11 +3104,15 @@ function FieldConsole({ onClose }) {
         <button onClick={()=>{setTab("order");setMsg("");}} style={{flex:1,padding:"13px 10px",borderRadius:11,border:"none",
           background:tab==="order"?"linear-gradient(135deg,#1a7a4a,#0a5a2a)":"#e8f0e8",
           color:tab==="order"?"#fff":"#3a5a3a",fontWeight:800,fontSize:14,cursor:"pointer",
-          boxShadow:tab==="order"?"0 2px 8px rgba(26,90,58,.28)":"none"}}>🛒 Place order</button>
+          boxShadow:tab==="order"?"0 2px 8px rgba(26,90,58,.28)":"none"}}>🛒 Order</button>
+        <button onClick={()=>{setTab("stock");setMsg("");}} style={{flex:1,padding:"13px 10px",borderRadius:11,border:"none",
+          background:tab==="stock"?"linear-gradient(135deg,#8a4a1a,#5a2a0a)":"#f6ece4",
+          color:tab==="stock"?"#fff":"#7a4a2a",fontWeight:800,fontSize:14,cursor:"pointer",
+          boxShadow:tab==="stock"?"0 2px 8px rgba(120,60,20,.28)":"none"}}>📦 Stock</button>
         <button onClick={()=>{setTab("track");setMsg("");}} style={{flex:1,padding:"13px 10px",borderRadius:11,border:"none",
           background:tab==="track"?"linear-gradient(135deg,#1a5a9a,#0d3a6a)":"#e8eef6",
           color:tab==="track"?"#fff":"#2a4a7a",fontWeight:800,fontSize:14,cursor:"pointer",
-          boxShadow:tab==="track"?"0 2px 8px rgba(26,58,106,.28)":"none"}}>📦 Track orders</button>
+          boxShadow:tab==="track"?"0 2px 8px rgba(26,58,106,.28)":"none"}}>📦 Track</button>
       </div>
       <details style={{marginBottom:11}}>
         <summary style={{fontSize:11.5,fontWeight:700,color:"#5a7a5a",cursor:"pointer",padding:"4px 2px"}}>
@@ -3351,6 +3357,53 @@ function FieldConsole({ onClose }) {
                       <b>₹{Number(p.amount).toLocaleString("en-IN")}</b>
                     </div>)}
                   </details>}
+                </div>;
+              })}
+        </div>;
+      })()}
+
+      {tab==="stock"&&(()=>{
+        const live=(stock||[]).filter(s=>s.active!==false);
+        const groups=[
+          {k:"dead", head:"🔴 Clear these first", colour:"#c0392b",
+           sub:"Lying in the factory. Every case you move here is money the company keeps."},
+          {k:"slow", head:"🟡 Moving slowly", colour:"#c98a1a",
+           sub:"Available, needs a push."},
+          {k:"ready",head:"🟢 Ready to supply", colour:"#1a7a3a",
+           sub:"In stock now — despatches immediately, no waiting."}
+        ];
+        return <div>
+          {live.length===0
+            ? <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"26px 12px",lineHeight:1.6}}>
+                Nothing published yet. The office posts available stock here.</div>
+            : groups.map(g=>{
+                const items=live.filter(s=>s.category===g.k);
+                if(!items.length) return null;
+                return <div key={g.k} style={{marginBottom:16}}>
+                  <div style={{fontSize:13,fontWeight:800,color:g.colour}}>{g.head}</div>
+                  <div style={{fontSize:10.5,color:"#8a8a7a",marginBottom:7}}>{g.sub}</div>
+                  {items.map(s=><div key={s.id} style={{border:"1.5px solid "+g.colour+"33",
+                    borderRadius:10,padding:"11px 12px",marginBottom:7,background:"#fff"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                      <b style={{fontSize:13,color:"#1a5a3a"}}>{s.name}</b>
+                      <span style={{fontSize:12,fontWeight:800,color:g.colour}}>{s.qty} {s.unit}</span>
+                    </div>
+                    <div style={{fontSize:10.5,color:"#999",marginTop:2}}>
+                      {s.sku?(s.sku+" · "):""}
+                      {s.ageMonths?("lying "+s.ageMonths+" months"):"available now"}</div>
+                    {s.note&&<div style={{fontSize:11.5,color:"#5a6a5a",marginTop:5,
+                      background:"#f7faf7",padding:"6px 8px",borderRadius:6}}>{s.note}</div>}
+                    <button onClick={()=>{
+                      const match=(rates||[]).find(r=>
+                        (s.sku&&r.sku===s.sku)||String(r.name).toLowerCase()===String(s.name).toLowerCase());
+                      if(match){ setCart({...cart,[match.name]:{qty:1,unit:"cases"}}); setTab("order");
+                        setMsg("✓ Added to your cart — set the quantity and book it"); }
+                      else { setTab("order"); setOrderNote(o=>(o?o+" · ":"")+"Wants: "+s.name);
+                        setMsg("Not on the rate list — noted on the order for the office"); }
+                    }} style={{width:"100%",marginTop:8,padding:"9px",borderRadius:8,border:"none",
+                      background:g.colour,color:"#fff",fontWeight:800,fontSize:12.5,cursor:"pointer"}}>
+                      🛒 Book this</button>
+                  </div>)}
                 </div>;
               })}
         </div>;
@@ -3909,6 +3962,8 @@ function FieldAdmin({ onClose }) {
   const [contacts,setContacts]=useState({prakashEmail:"",ownerEmail:""});
   const [slabs,setSlabs]=useState({hq:"",exhq:"",outstation:""});
   const [outlets,setOutlets]=useState([]);
+  const [stock,setStock]=useState([]);
+  const [stForm,setStForm]=useState(null);
   const [locs,setLocs]=useState([]);
   const [locName,setLocName]=useState(""), [locAddr,setLocAddr]=useState(""), [locCoord,setLocCoord]=useState("");
   const [busy,setBusy]=useState(""); const [msg,setMsg]=useState("");
@@ -3934,6 +3989,7 @@ function FieldAdmin({ onClose }) {
     setContacts(await get("field_contacts",{prakashEmail:"",ownerEmail:""}));
     setSlabs(await get("field_da_slabs",{hq:"",exhq:"",outstation:""}));
     setOutlets(await get("field_outlets",[]));
+    setStock(await get("field_stock",[]));
   })(); },[]);
 
   const saveRates=async()=>{ setBusy("r"); try{ await put("field_rates",rates.filter(r=>r.name&&r.name.trim())); setMsg("✓ Rates published to the team"); }catch(e){ setMsg("✗ failed"); } setBusy(""); };
@@ -3979,8 +4035,8 @@ function FieldAdmin({ onClose }) {
         <div style={{fontSize:11,color:"#6a7a6a"}}>Rates, targets and commitments</div></div>
       </div>
       <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:11}}>
-        {tabBtn("report","📈 Report")}{tabBtn("succession","🏛️ Succession")}{tabBtn("game","🏏 Game")}{tabBtn("damonth","💰 DA Monthly")}{tabBtn("locs","📍 Locations")}{tabBtn("rates","💵 Rates")}{tabBtn("targets","🎯 Targets")}{tabBtn("orders","📦 Orders")}
-        {tabBtn("sugg","💡 Commitments")}{tabBtn("market","🔍 Market")}{tabBtn("parties","🆕 Parties")}{tabBtn("team","👥 Recruits")}
+        {tabBtn("report","📈 Report")}{tabBtn("stock","📦 Stock")}{tabBtn("succession","🏛️ Succession")}{tabBtn("game","🏏 Game")}{tabBtn("damonth","💰 DA Monthly")}{tabBtn("locs","📍 Locations")}{tabBtn("rates","💵 Rates")}{tabBtn("targets","🎯 Targets")}{tabBtn("orders","📦 Orders")}
+        {tabBtn("sugg","💡 Commitments")}{tabBtn("commitvar","📐 Variance")}{tabBtn("market","🔍 Market")}{tabBtn("parties","🆕 Parties")}{tabBtn("team","👥 Recruits")}
       </div>
       {msg&&<div style={{fontSize:13,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:9,
         background:msg[0]==="✓"?"#e8f5e9":"#fdecea",padding:"8px 10px",borderRadius:8}}>{msg}</div>}
@@ -4192,7 +4248,234 @@ function FieldAdmin({ onClose }) {
         </div>;
       })()}
 
-            {tab==="succession"&&(()=>{
+            {tab==="commitvar"&&(()=>{
+        // Roll every launched brand up to the man who committed to it, so the
+        // question "is he keeping his word" has one number instead of ten.
+        const launched=(sugg||[]).filter(s=>s.status==="Launched");
+        const byPerson={};
+        launched.forEach(s=>{
+          const p=s.user||s.officer||"unknown";
+          const months=s.launchedOn
+            ? Math.max(1,Math.round((Date.now()-new Date(s.launchedOn).getTime())/(30*864e5))) : 0;
+          const owed=months*(Number(s.commitPerMonth)||0);
+          const actual=Number(s.actualToDate)||0;
+          if(!byPerson[p]) byPerson[p]={name:p,owed:0,actual:0,brands:[]};
+          byPerson[p].owed+=owed; byPerson[p].actual+=actual;
+          byPerson[p].brands.push({brand:s.brand,owed:owed,actual:actual,months:months,
+            perMonth:Number(s.commitPerMonth)||0});
+        });
+        const rows=Object.values(byPerson).map(r=>({...r,
+          variance:r.actual-r.owed,
+          pct:r.owed?Math.round(r.actual/r.owed*100):0
+        })).sort((a,b)=>a.pct-b.pct);
+
+        const totOwed=rows.reduce((s,r)=>s+r.owed,0);
+        const totActual=rows.reduce((s,r)=>s+r.actual,0);
+
+        return <div>
+          <div style={{background:"#f4f8fc",borderRadius:11,padding:"12px 14px",marginBottom:11}}>
+            <div style={{fontSize:10,color:"#5a6a7a",fontWeight:700,letterSpacing:.4}}>
+              PROMISED AGAINST DELIVERED — ALL LAUNCHED BRANDS</div>
+            <div style={{display:"flex",alignItems:"baseline",gap:8,marginTop:4}}>
+              <span style={{fontSize:24,fontWeight:800,
+                color:totActual>=totOwed?"#1a7a3a":"#c0392b"}}>{totActual.toLocaleString("en-IN")}</span>
+              <span style={{fontSize:13,color:"#7a8a9a"}}>of {totOwed.toLocaleString("en-IN")} dozens owed</span>
+            </div>
+            <div style={{marginTop:7}}>
+              <FillBar pct={totOwed?Math.min(100,totActual/totOwed*100):0}
+                color={totActual>=totOwed?"#1a7a3a":"#c98a1a"} height={6}/>
+            </div>
+          </div>
+
+          {rows.length===0
+            ? <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"22px 10px",lineHeight:1.6}}>
+                No launched brands yet. Mark a suggestion as Launched in 💡 Commitments
+                and the variance appears here.</div>
+            : rows.map(r=>{
+                const col=r.pct>=100?"#1a7a3a":r.pct>=70?"#c98a1a":"#c0392b";
+                return <div key={r.name} style={{border:"1px solid #e6ece6",borderRadius:10,
+                  padding:"11px 12px",marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                    <b style={{fontSize:13,color:"#1a5a3a",textTransform:"capitalize"}}>{r.name}</b>
+                    <span style={{fontSize:12.5,fontWeight:800,color:col}}>{r.pct}%</span>
+                  </div>
+                  <div style={{fontSize:11.5,color:"#666",marginBottom:5}}>
+                    {r.actual.toLocaleString("en-IN")} moved · {r.owed.toLocaleString("en-IN")} committed ·{" "}
+                    <b style={{color:col}}>
+                      {r.variance>=0?"+":""}{r.variance.toLocaleString("en-IN")}</b>
+                  </div>
+                  <FillBar pct={Math.min(100,r.pct)} color={col} height={5}/>
+                  <details style={{marginTop:6}}>
+                    <summary style={{fontSize:10.5,color:"#5a7a5a",cursor:"pointer"}}>
+                      {r.brands.length} brand(s)</summary>
+                    {r.brands.map((b,i)=>{
+                      const bc=b.owed&&b.actual>=b.owed?"#1a7a3a":"#c0392b";
+                      return <div key={i} style={{display:"flex",justifyContent:"space-between",
+                        fontSize:11,color:"#666",padding:"3px 0"}}>
+                        <span>{b.brand} <span style={{color:"#aaa"}}>
+                          ({b.perMonth}/mo × {b.months})</span></span>
+                        <b style={{color:bc}}>{b.actual}/{b.owed}</b>
+                      </div>;
+                    })}
+                  </details>
+                </div>;
+              })}
+
+          {rows.length>0&&<button onClick={()=>{
+            let csv="Person,Committed dozens,Actual dozens,Variance,Percent\n";
+            rows.forEach(r=>{csv+=r.name+","+r.owed+","+r.actual+","+r.variance+","+r.pct+"\n";});
+            const b=new Blob([csv],{type:"text/csv"}); const u=URL.createObjectURL(b);
+            const a=document.createElement("a"); a.href=u;
+            a.download="commitments-"+new Date().toISOString().slice(0,10)+".csv"; a.click();
+            URL.revokeObjectURL(u);
+          }} style={{width:"100%",padding:"10px",borderRadius:9,border:"1px solid #ccc",
+            background:"#fff",color:"#333",fontWeight:700,fontSize:12.5,cursor:"pointer",marginTop:8}}>
+            📥 Export</button>}
+        </div>;
+      })()}
+
+      {tab==="stock"&&(()=>{
+        const CATS=[
+          {k:"dead",   label:"Clear this",     colour:"#c0392b", note:"printed board or packed stock with no movement — clear it before it is scrapped"},
+          {k:"slow",   label:"Moving slowly",  colour:"#c98a1a", note:"moving, but not fast enough"},
+          {k:"ready",  label:"Ready to supply",colour:"#1a7a3a", note:"in stock, despatches immediately"}
+        ];
+        const blank={id:"",name:"",sku:"",qty:"",unit:"cases",category:"ready",
+          ageMonths:"",note:"",value:"",active:true};
+
+        const saveStock=async()=>{
+          if(!stForm.name.trim()){ setMsg("✗ Item name needed"); return; }
+          setBusy("st");
+          try{
+            const stamp=new Date().toISOString().slice(0,10);
+            let n;
+            if(stForm.id){ n=stock.map(s=>s.id===stForm.id?{...s,...stForm,updatedOn:stamp}:s); }
+            else { n=[{...stForm,id:"st_"+Date.now(),postedOn:stamp,updatedOn:stamp},...stock]; }
+            await put("field_stock",n); setStock(n); setStForm(null);
+            setMsg("✓ Published to the whole team");
+          }catch(e){ setMsg("✗ Could not save"); }
+          setBusy("");
+        };
+
+        const announce=async(s)=>{
+          const c=CATS.find(x=>x.k===s.category)||CATS[2];
+          const head=s.category==="dead"?"🔴 CLEAR THIS STOCK"
+                   :s.category==="slow"?"🟡 SLOW MOVING — PUSH IT"
+                   :"🟢 READY TO SUPPLY";
+          try{
+            await fetch("/.netlify/functions/telegram",{method:"POST",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({chat_id:"-5372910186",parse_mode:"HTML",
+                text:head+"\n<b>"+s.name+"</b>"+(s.sku?(" ("+s.sku+")"):"")+
+                  "\nAvailable: "+s.qty+" "+s.unit+
+                  (s.ageMonths?("\nLying "+s.ageMonths+" months"):"")+
+                  (s.note?("\n"+s.note):"")+
+                  "\n\nBook it from 📦 Stock in your tracker."})});
+            setMsg("✓ Sent to the team");
+          }catch(e){ setMsg("✗ Telegram failed"); }
+        };
+
+        if(stForm) return <div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:9}}>
+            <b style={{fontSize:14,color:"#1a5a3a"}}>{stForm.id?"Edit stock":"Publish stock"}</b>
+            <button onClick={()=>setStForm(null)} style={{border:"none",background:"none",
+              color:"#999",fontSize:13,cursor:"pointer"}}>✕ close</button>
+          </div>
+          <label style={lab}>Item</label>
+          <input value={stForm.name} onChange={e=>setStForm({...stForm,name:e.target.value})}
+            placeholder="brand / carton description" style={inp}/>
+          <label style={lab}>SKU (optional)</label>
+          <input value={stForm.sku} onChange={e=>setStForm({...stForm,sku:e.target.value})} style={inp}/>
+          <label style={lab}>What is it</label>
+          <select value={stForm.category} onChange={e=>setStForm({...stForm,category:e.target.value})} style={inp}>
+            {CATS.map(c=><option key={c.k} value={c.k}>{c.label}</option>)}
+          </select>
+          <div style={{fontSize:10.5,color:"#8a8a7a",marginTop:-5,marginBottom:9}}>
+            {(CATS.find(c=>c.k===stForm.category)||{}).note}</div>
+          <div style={{display:"flex",gap:6}}>
+            <div style={{flex:1}}>
+              <label style={lab}>Quantity</label>
+              <input type="number" value={stForm.qty} inputMode="decimal"
+                onChange={e=>setStForm({...stForm,qty:e.target.value})} style={inp}/>
+            </div>
+            <div style={{width:110}}>
+              <label style={lab}>Unit</label>
+              <select value={stForm.unit} onChange={e=>setStForm({...stForm,unit:e.target.value})} style={inp}>
+                <option value="cases">cases</option><option value="doz">dozens</option>
+                <option value="boxes">boxes</option><option value="kg">kg</option>
+              </select>
+            </div>
+          </div>
+          <label style={lab}>Months it has been lying</label>
+          <input type="number" value={stForm.ageMonths} inputMode="decimal"
+            onChange={e=>setStForm({...stForm,ageMonths:e.target.value})} style={inp}/>
+          <label style={lab}>Value at stake (₹, optional)</label>
+          <input type="number" value={stForm.value} inputMode="decimal"
+            onChange={e=>setStForm({...stForm,value:e.target.value})} style={inp}/>
+          <label style={lab}>Note to the team</label>
+          <textarea value={stForm.note} rows={2}
+            onChange={e=>setStForm({...stForm,note:e.target.value})}
+            placeholder="special rate, which parties may take it, anything they should know"
+            style={{...inp,resize:"vertical",fontFamily:"inherit"}}/>
+          <button onClick={saveStock} disabled={!!busy} style={btn}>
+            {busy==="st"?"Publishing…":"Publish to the team"}</button>
+        </div>;
+
+        const dead=stock.filter(s=>s.category==="dead"&&s.active!==false);
+        const deadValue=dead.reduce((s,x)=>s+(Number(x.value)||0),0);
+
+        return <div>
+          {deadValue>0&&<div style={{background:"linear-gradient(135deg,#7a2a2a,#4a1616)",
+            borderRadius:12,padding:"13px 15px",marginBottom:11,color:"#fff"}}>
+            <div style={{fontSize:10,opacity:.8,fontWeight:700,letterSpacing:.4}}>
+              SITTING IN THE FACTORY, NOT YET SOLD</div>
+            <CountUp value={deadValue} prefix="₹" style={{fontSize:25,fontWeight:800,display:"block",marginTop:3}}/>
+            <div style={{fontSize:11,opacity:.85,marginTop:3}}>{dead.length} items the team can clear</div>
+          </div>}
+
+          <button onClick={()=>setStForm(blank)} style={{...btn,marginBottom:11}}>+ Publish stock</button>
+
+          {stock.length===0
+            ? <div style={{fontSize:12,color:"#999",textAlign:"center",padding:"22px 10px",lineHeight:1.6}}>
+                Nothing published. Whatever you put here appears in every salesman's tracker.</div>
+            : CATS.map(c=>{
+                const items=stock.filter(s=>s.category===c.k);
+                if(!items.length) return null;
+                return <div key={c.k} style={{marginBottom:14}}>
+                  <div style={{fontSize:12,fontWeight:800,color:c.colour,marginBottom:5}}>{c.label}</div>
+                  {items.map(s=><div key={s.id} style={{border:"1px solid #e6ece6",borderRadius:9,
+                    padding:"10px 11px",marginBottom:6,background:s.active===false?"#f6f6f6":"#fff",
+                    opacity:s.active===false?.55:1}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                      <b style={{fontSize:12.5,color:"#1a5a3a"}}>{s.name}</b>
+                      <span style={{fontSize:11.5,fontWeight:800,color:c.colour}}>
+                        {s.qty} {s.unit}</span>
+                    </div>
+                    <div style={{fontSize:10.5,color:"#888",marginTop:2}}>
+                      {s.sku?(s.sku+" · "):""}{s.ageMonths?("lying "+s.ageMonths+" months · "):""}
+                      {s.value?("₹"+Number(s.value).toLocaleString("en-IN")):""}</div>
+                    {s.note&&<div style={{fontSize:11,color:"#666",marginTop:4}}>{s.note}</div>}
+                    <div style={{display:"flex",gap:5,marginTop:7}}>
+                      <button onClick={()=>setStForm({...s})} style={{flex:1,padding:"6px",borderRadius:7,
+                        border:"1px solid #ddd",background:"#fff",color:"#555",fontWeight:700,
+                        fontSize:11,cursor:"pointer"}}>Edit</button>
+                      <button onClick={()=>announce(s)} style={{flex:1,padding:"6px",borderRadius:7,
+                        border:"none",background:"#1a5a3a",color:"#fff",fontWeight:700,
+                        fontSize:11,cursor:"pointer"}}>📣 Tell them</button>
+                      <button onClick={async()=>{
+                        const n=stock.map(x=>x.id===s.id?{...x,active:x.active===false}:x);
+                        setStock(n); await put("field_stock",n);
+                      }} style={{padding:"6px 10px",borderRadius:7,border:"1px solid #ddd",
+                        background:"#fff",color:"#999",fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                        {s.active===false?"Show":"Hide"}</button>
+                    </div>
+                  </div>)}
+                </div>;
+              })}
+        </div>;
+      })()}
+
+      {tab==="succession"&&(()=>{
         const all=outlets||[];
         const byPerson={};
         all.forEach(o=>{
