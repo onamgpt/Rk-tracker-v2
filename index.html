@@ -73,7 +73,7 @@ const URL_USER=new URLSearchParams(window.location.search).get("user")||"main";
 const IS_OWNER=(URL_USER==="main");  // only the owner sees profit/margin figures
 const IS_ORDERS_USER=["main","prakash"].includes(URL_USER); // shop order management: owner + Prakash
 const FAMILY_USERS=["wife","daughter"];
-const SALES_USERS=["satish","sebi","sugeesh","sunil","biju","sadasivan","sooraj","murugan"];
+const SALES_USERS=["sunil","satish","sugeesh","sadasivan","sebi","vinod","biju","sooraj","murugan"];
 const IS_FAMILY=FAMILY_USERS.includes(URL_USER);
 const IS_SALES=SALES_USERS.includes(URL_USER);
 // Owner-only team view: staff members who have their own sheet. Add {u:"maadhu",sheet:true} once their sheet is mapped in sheets.js.
@@ -3967,7 +3967,7 @@ function FieldAdmin({ onClose }) {
   const [locs,setLocs]=useState([]);
   const [locName,setLocName]=useState(""), [locAddr,setLocAddr]=useState(""), [locCoord,setLocCoord]=useState("");
   const [busy,setBusy]=useState(""); const [msg,setMsg]=useState("");
-  const TEAM=["sunil","sadasivan","sebi","biju","satish","vinod","sooraj","prakash"];
+  const TEAM=["sunil","satish","sugeesh","sadasivan","sebi","vinod","biju","sooraj","murugan"];
 
   const get=async(k,d)=>{ try{ const r=await sheetsAPI("getPortfolio",{key:k,user:"main"}); return (r&&r.data)?r.data:d; }catch(e){ return d; } };
   const put=async(k,v)=>{ await sheetsAPI("savePortfolio",{key:k,user:"main",data:v}); };
