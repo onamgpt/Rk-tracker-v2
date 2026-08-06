@@ -2717,7 +2717,7 @@ function rollupField(reports, orders, parties, days, gpOf) {
 // selling rates only. Everything submitted is marked unverified
 // until the office reconciles it.
 // ============================================================
-function FieldConsole({ onClose }) {
+function FieldConsole({ onClose, rootMode }) {
   const me = (typeof URL_USER!=="undefined"?URL_USER:"main");
   const officer = me.charAt(0).toUpperCase()+me.slice(1);
   const isOwner = (typeof IS_OWNER!=="undefined") ? IS_OWNER : (me==="main");
@@ -3093,11 +3093,16 @@ function FieldConsole({ onClose }) {
     background:tab===k?"#1a5a3a":"#e8f0e8",color:tab===k?"#fff":"#3a5a3a",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>{l}</button>);
 
   return (
-    <div style={{padding:4}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+    <div style={{padding:rootMode?"14px 13px 44px":4,maxWidth:rootMode?560:"none",margin:"0 auto"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
         <span style={{fontSize:26}}>🧭</span>
-        <div><h2 style={{margin:0,fontSize:18,color:"#1a5a3a"}}>Field Console</h2>
-        <div style={{fontSize:11,color:"#6a7a6a"}}>{officer} · {new Date().toLocaleDateString()}</div></div>
+        <div style={{flex:1}}>
+          <h2 style={{margin:0,fontSize:18,color:"#1a5a3a"}}>Field Console</h2>
+          <div style={{fontSize:11,color:"#6a7a6a"}}>{officer} · {new Date().toLocaleDateString()}</div>
+        </div>
+        {rootMode&&<button onClick={()=>window.location.reload()} title="Refresh"
+          style={{border:"1px solid #d8e0d8",background:"#fff",borderRadius:8,
+          padding:"6px 10px",fontSize:13,cursor:"pointer",color:"#5a7a5a"}}>↻</button>}
       </div>
 
       <div style={{display:"flex",gap:6,marginBottom:8}}>
@@ -11631,6 +11636,14 @@ function App(){
       <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}><button className="bgh" onClick={()=>setShowShare(false)}>Close</button></div>
     </div>;
   };
+
+   // The nine field staff do not need a general-purpose tracker. Their whole
+   // job is the field console, so that is the app for them — no menu hunting,
+   // no note-entry screen they will never use.
+   if (IS_SALES) return <div style={{minHeight:"100vh",background:"linear-gradient(160deg,#fdf8ef,#f8f2e4)"}}>
+     <FieldConsole onClose={()=>{}} rootMode={true}/>
+   </div>;
+
 
   return<div style={{minHeight:"100vh",background:"linear-gradient(160deg,#fdf8ef,#f8f2e4 50%,#fdf5e6)",paddingBottom:52}}>
 
