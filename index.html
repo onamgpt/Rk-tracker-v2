@@ -2763,6 +2763,9 @@ function FieldConsole({ onClose, rootMode }) {
   const [lines,setLines]=useState([{item:"",qty:"",unit:"cases"}]);
   const [cart,setCart]=useState({});          // {itemName: {qty, unit}}
   const [catSearch,setCatSearch]=useState("");
+  const [partyPick,setPartyPick]=useState(true);     // choose a known shop, or type a new one
+  const [otherOpen,setOtherOpen]=useState(false);
+  const [otherName,setOtherName]=useState(""), [otherRate,setOtherRate]=useState("");
   const [paid,setPaid]=useState("");
   const [orderNote,setOrderNote]=useState("");
 
@@ -2955,7 +2958,11 @@ function FieldConsole({ onClose, rootMode }) {
     try{ const sk=await sheetsAPI("getPortfolio",{key:"field_stock",user:"main"}); if(sk&&sk.data&&Array.isArray(sk.data)) setStock(sk.data); }catch(e){}
   })(); },[]);
 
-  const rateOf = n => { const r=rates.find(x=>x.name===n); return r?Number(r.rate)||0:0; };
+  const rateOf = n => {
+    const c=cart&&cart[n];
+    if(c&&Number(c.rate)>0) return Number(c.rate);   // item entered by hand
+    const r=rates.find(x=>x.name===n); return r?Number(r.rate)||0:0;
+  };
   // Used only to place the person in a mix band. Deliberately never displayed.
   const gpOf = n => {
     const r=rates.find(x=>x.name===n); if(!r||!r.sku) return null;
@@ -2967,7 +2974,8 @@ function FieldConsole({ onClose, rootMode }) {
 
   const submitOrder=async()=>{
     if(!party.trim()) { setMsg("✗ Party name needed"); return; }
-    const good=Object.entries(cart).map(([n,c])=>({item:n,qty:Number(c.qty)||0,unit:c.unit||"cases"}))
+    const good=Object.entries(cart).map(([n,c])=>({item:n,qty:Number(c.qty)||0,
+                      unit:c.unit||"cases", rate:rateOf(n), offList:!!c.offList}))
                     .filter(l=>l.qty>0);
     if(!good.length){ setMsg("✗ Add at least one item"); return; }
     setBusy("order"); setMsg("");
@@ -3166,14 +3174,79 @@ function FieldConsole({ onClose, rootMode }) {
           </div>
         </div>}
 
-        <label style={lab}>Party name</label>
-        <input value={party} onChange={e=>setParty(e.target.value)} placeholder="shop / distributor" style={inp}/>
-        <label style={lab}>Town / location</label>
-        <input value={town} onChange={e=>setTown(e.target.value)} placeholder="where you are today" style={inp}/>
+        {(()=>{
+          const mineShops=(outlets||[]).filter(o=>o.assignedTo===me);
+          return <div style={{marginBottom:9}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <label style={{...lab,marginBottom:0}}>Party</label>
+              {mineShops.length>0&&<button onClick={()=>{setPartyPick(!partyPick);setParty("");}}
+                style={{border:"none",background:"none",color:"#1a5a9a",fontSize:11.5,
+                fontWeight:700,cursor:"pointer",padding:"2px 0"}}>
+                {partyPick?"+ new party":"← choose from my shops"}</button>}
+            </div>
+            {partyPick&&mineShops.length>0
+              ? <div>
+                  <select value={party} onChange={e=>{
+                      const v=e.target.value; setParty(v);
+                      const o=mineShops.find(x=>x.name===v);
+                      if(o&&o.town) setTown(o.town);
+                    }} style={inp}>
+                    <option value="">choose a shop…</option>
+                    {mineShops.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name)))
+                      .map(o=><option key={o.id} value={o.name}>{o.name}{o.town?(" — "+o.town):""}</option>)}
+                  </select>
+                  {party&&(()=>{
+                    const o=mineShops.find(x=>x.name===party);
+                    if(!o) return null;
+                    const bits=[];
+                    if(o.paymentBehaviour) bits.push(o.paymentBehaviour);
+                    if(o.creditDays) bits.push(o.creditDays+" days credit");
+                    if(o.monthlyCommitment) bits.push("committed "+o.monthlyCommitment+" doz/month");
+                    return bits.length?<div style={{fontSize:11,color:"#6a7a6a",background:"#f4f8f4",
+                      padding:"7px 9px",borderRadius:7,marginTop:-4,marginBottom:8}}>{bits.join(" · ")}</div>:null;
+                  })()}
+                </div>
+              : <input value={party} onChange={e=>setParty(e.target.value)}
+                  placeholder="shop / distributor" style={inp}/>}
+            <label style={lab}>Town / location</label>
+            <input value={town} onChange={e=>setTown(e.target.value)}
+              placeholder="where you are today" style={inp}/>
+          </div>;
+        })()}
 
         {rates.length===0
-          ? <div style={{fontSize:11.5,color:"#a33",background:"#fdecea",padding:"10px 12px",borderRadius:9,marginBottom:9}}>
-              No rate list has been published yet. Ask the office to set today's rates before booking orders.</div>
+          ? <div style={{marginBottom:9}}>
+              <div style={{fontSize:11.5,color:"#8a6a1a",background:"#fdf8ec",padding:"10px 12px",
+                borderRadius:9,marginBottom:8}}>
+                No rate list published yet. You can still book by entering the item and rate yourself.</div>
+              {otherOpen
+                ? <div style={{background:"#fdf8ec",border:"1.5px solid #e8d0a0",borderRadius:10,padding:"11px 12px"}}>
+                    <input value={otherName} onChange={e=>setOtherName(e.target.value)}
+                      placeholder="item the party asked for" style={{...inp,marginBottom:6}}/>
+                    <input type="number" value={otherRate} inputMode="decimal"
+                      onChange={e=>setOtherRate(e.target.value)}
+                      placeholder="rate you quoted (₹)" style={{...inp,marginBottom:8}}/>
+                    <div style={{display:"flex",gap:6}}>
+                      <button onClick={()=>{
+                        if(!otherName.trim()) return;
+                        setCart({...cart,[otherName.trim()]:{qty:1,unit:"cases",
+                          rate:Number(otherRate)||0, offList:true}});
+                        setOtherName("");setOtherRate("");setOtherOpen(false);
+                        setMsg("✓ Added — the office will confirm the rate");
+                      }} style={{flex:1,padding:"9px",borderRadius:8,border:"none",
+                        background:"#c98a1a",color:"#fff",fontWeight:800,fontSize:12.5,cursor:"pointer"}}>
+                        Add to cart</button>
+                      <button onClick={()=>{setOtherOpen(false);setOtherName("");setOtherRate("");}}
+                        style={{padding:"9px 14px",borderRadius:8,border:"1px solid #ddd",
+                        background:"#fff",color:"#888",fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
+                        Cancel</button>
+                    </div>
+                  </div>
+                : <button onClick={()=>setOtherOpen(true)}
+                    style={{width:"100%",padding:"10px",borderRadius:8,border:"1px dashed #c8b890",
+                    background:"#fffdf7",color:"#8a6a1a",fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
+                    + Add an item</button>}
+            </div>
           : <div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                 <span style={{fontSize:11.5,fontWeight:800,color:"#1a5a3a"}}>Catalogue — today's rates</span>
@@ -3223,6 +3296,38 @@ function FieldConsole({ onClose, rootMode }) {
                   </div>;
                 })}
               </div>
+
+              {otherOpen
+                ? <div style={{background:"#fdf8ec",border:"1.5px solid #e8d0a0",borderRadius:10,
+                    padding:"11px 12px",marginBottom:10}}>
+                    <div style={{fontSize:11,fontWeight:800,color:"#8a6a1a",marginBottom:6}}>
+                      ITEM NOT ON THE LIST</div>
+                    <input value={otherName} onChange={e=>setOtherName(e.target.value)}
+                      placeholder="what the party asked for" style={{...inp,marginBottom:6}}/>
+                    <input type="number" value={otherRate} inputMode="decimal"
+                      onChange={e=>setOtherRate(e.target.value)}
+                      placeholder="rate you quoted (₹)" style={{...inp,marginBottom:8}}/>
+                    <div style={{display:"flex",gap:6}}>
+                      <button onClick={()=>{
+                        if(!otherName.trim()) return;
+                        setCart({...cart,[otherName.trim()]:{qty:1,unit:"cases",
+                          rate:Number(otherRate)||0, offList:true}});
+                        setOtherName("");setOtherRate("");setOtherOpen(false);
+                        setMsg("✓ Added — the office will confirm the rate");
+                      }} style={{flex:1,padding:"9px",borderRadius:8,border:"none",
+                        background:"#c98a1a",color:"#fff",fontWeight:800,fontSize:12.5,cursor:"pointer"}}>
+                        Add to cart</button>
+                      <button onClick={()=>{setOtherOpen(false);setOtherName("");setOtherRate("");}}
+                        style={{padding:"9px 14px",borderRadius:8,border:"1px solid #ddd",
+                        background:"#fff",color:"#888",fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
+                        Cancel</button>
+                    </div>
+                  </div>
+                : <button onClick={()=>setOtherOpen(true)}
+                    style={{width:"100%",padding:"9px",borderRadius:8,border:"1px dashed #c8b890",
+                    background:"#fffdf7",color:"#8a6a1a",fontWeight:700,fontSize:12,
+                    cursor:"pointer",marginBottom:10}}>
+                    + Item not on the list</button>}
             </div>}
 
         {Object.keys(cart).length>0&&<div className="rk-pop" style={{background:"#e8f5e9",borderRadius:11,
@@ -3231,7 +3336,8 @@ function FieldConsole({ onClose, rootMode }) {
             CART · {Object.keys(cart).length} item(s)</div>
           {Object.entries(cart).map(([n,c])=>
             <div key={n} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"2px 0"}}>
-              <span style={{color:"#3a5a3a"}}>{c.qty} {c.unit} {n}</span>
+              <span style={{color:"#3a5a3a"}}>{c.qty} {c.unit} {n}
+                {c.offList?<span style={{color:"#c98a1a",fontWeight:700}}> · to confirm</span>:null}</span>
               <b style={{color:"#1a5a3a"}}>₹{(rateOf(n)*Number(c.qty||0)).toLocaleString("en-IN")}</b>
             </div>)}
           <div style={{display:"flex",justifyContent:"space-between",marginTop:7,paddingTop:7,
