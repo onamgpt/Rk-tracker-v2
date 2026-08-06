@@ -4740,6 +4740,23 @@ function FieldAdmin({ onClose }) {
         <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9}}>
           Selling rate per unit as the team should quote it. They never see cost or margin.
           Linking an item to the master lets the company's earning from it be scored — as a band, never a figure.</div>
+
+        {(pmaster||[]).length>0&&<div style={{background:"#eef4fb",border:"1px solid #c8daea",
+          borderRadius:10,padding:"11px 12px",marginBottom:11}}>
+          <div style={{fontSize:11.5,color:"#1a3a7a",marginBottom:7,lineHeight:1.5}}>
+            <b>{pmaster.length} products</b> are already in your product master. Pull them in as rates
+            with the master link already set, then correct any price before publishing.</div>
+          <button onClick={()=>{
+            const have=new Set((rates||[]).map(r=>String(r.sku||"")).filter(Boolean));
+            const add=(pmaster||[]).filter(m=>m.sku&&!have.has(String(m.sku)))
+              .map(m=>({name:m.name||m.sku, rate:Number(m.sp)||"", sku:m.sku, dozPerCase:12}));
+            if(!add.length){ setMsg("Every master product is already on the rate list"); return; }
+            setRates([...(rates||[]),...add]);
+            setMsg("✓ "+add.length+" pulled in — check the prices, then Publish below");
+          }} style={{width:"100%",padding:"10px",borderRadius:8,border:"none",
+            background:"#1a3a7a",color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
+            ⤵ Pull products from the master</button>
+        </div>}
         {rates.map((r,i)=><div key={i} style={{border:"1px solid #eef2ee",borderRadius:8,padding:"7px",marginBottom:6}}>
           <div style={{display:"flex",gap:5,marginBottom:5}}>
             <input value={r.name||""} onChange={e=>{const n=[...rates];n[i]={...n[i],name:e.target.value};setRates(n);}}
