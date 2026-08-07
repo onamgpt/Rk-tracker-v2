@@ -213,36 +213,54 @@ exports.handler = async (event) => {
       const id = book + "|" + symbol;
       const today = body.date || new Date().toISOString().slice(0, 10);
 
-      const ex = await sb("GET", "/rest/v1/aim_holdings?select=id&id=eq." + encodeURIComponent(id));
-      if (ex.status < 300 && ex.body && ex.body.length) {
+      // Adoption is bookkeeping, not a purchase. Shares already held were paid
+      // for long ago, so bringing them under AIM must not touch cash. Only a
+      // genuine opening buy moves money.
+      const isAdopt = !!body.adopt;
+
+      const ex = await sb("GET", "/rest/v1/aim_holdings?select=id,active&id=eq." + encodeURIComponent(id));
+      const existing = (ex.status < 300 && ex.body && ex.body.length) ? ex.body[0] : null;
+      if (existing && existing.active !== false) {
         return FAIL("position already open for " + symbol + " — use recordTrade instead", 400);
       }
 
       const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + encodeURIComponent(book));
       const cashNow = (cr.status < 300 && cr.body && cr.body.length) ? n(cr.body[0].cash) : 0;
-      const cashAfter = cashNow - amount - costs;
+      const cashAfter = isAdopt ? cashNow : (cashNow - amount - costs);
 
-      const hr = await sb("POST", "/rest/v1/aim_holdings", {
+      const row = {
         id, book, symbol, name: body.name || symbol,
         shares, avg_cost: r2((amount + costs) / shares),
         portfolio_control: r2(amount),
         last_price: price, last_review: today, active: true,
         updated_at: new Date().toISOString()
-      }, { "Prefer": "return=representation" });
+      };
+
+      // A row left behind by an earlier removal is revived rather than blocking.
+      let hr;
+      if (existing) {
+        hr = await sb("PATCH", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(id), row);
+      } else {
+        hr = await sb("POST", "/rest/v1/aim_holdings", row, { "Prefer": "return=representation" });
+      }
       if (hr.status >= 300) return FAIL("could not open position: " + JSON.stringify(hr.body));
 
       await sb("POST", "/rest/v1/aim_transactions", {
-        book, symbol, txn_date: today, action: "BUY",
+        book, symbol, txn_date: today, action: isAdopt ? "ADOPT" : "BUY",
         shares, price, amount: r2(amount), costs: r2(costs),
         pc_before: 0, pc_after: r2(amount), cash_after: r2(cashAfter),
-        note: body.note || "opening purchase — sets Portfolio Control"
+        note: body.note || (isAdopt
+          ? "adopted existing holding — Portfolio Control set to market value, cash untouched"
+          : "opening purchase — sets Portfolio Control")
       });
 
-      await sb("POST", "/rest/v1/aim_cash",
-        { book, cash: r2(cashAfter), updated_at: new Date().toISOString() },
-        { "Prefer": "resolution=merge-duplicates" });
+      if (!isAdopt) {
+        await sb("POST", "/rest/v1/aim_cash",
+          { book, cash: r2(cashAfter), updated_at: new Date().toISOString() },
+          { "Prefer": "resolution=merge-duplicates" });
+      }
 
-      return OK({ ok: true, opened: symbol, pc: r2(amount), cash: r2(cashAfter) });
+      return OK({ ok: true, opened: symbol, adopted: isAdopt, pc: r2(amount), cash: r2(cashAfter) });
     }
 
     // ------------------------------------------------------------ PRICE UPDATE

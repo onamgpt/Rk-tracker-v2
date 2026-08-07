@@ -10870,11 +10870,11 @@ function AIMTrading({ onClose }) {
         const h=zh[i];
         const px=Number(h.last_price)||Number(h.average_price);
         const r=await api({action:"openPosition",symbol:String(h.tradingsymbol).toUpperCase(),
-          shares:Number(h.quantity),price:px,costs:0,
+          shares:Number(h.quantity),price:px,costs:0,adopt:true,
           name:String(h.tradingsymbol).toUpperCase()});
         if(r.ok) n++;
       }
-      setMsg("✓ "+n+" holding(s) adopted · now set your cash reserve below");
+      setMsg("✓ "+n+" holding(s) adopted · cash untouched — these were already yours");
       setZh(null); load();
     }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
