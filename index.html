@@ -73,6 +73,7 @@ const URL_USER=new URLSearchParams(window.location.search).get("user")||"main";
 const IS_OWNER=(URL_USER==="main");  // only the owner sees profit/margin figures
 const IS_ORDERS_USER=["main","prakash"].includes(URL_USER); // shop order management: owner + Prakash
 const FAMILY_USERS=["wife","daughter"];
+const BUILD_STAMP="2026-08-07 06:02 UTC";
 const SALES_USERS=["sunil","satish","sugeesh","sadasivan","sebi","vinod","biju","sooraj","murugan"];
 const IS_FAMILY=FAMILY_USERS.includes(URL_USER);
 const IS_SALES=SALES_USERS.includes(URL_USER);
@@ -3108,6 +3109,7 @@ function FieldConsole({ onClose, rootMode }) {
           <h2 style={{margin:0,fontSize:18,color:"#1a5a3a"}}>Field Console</h2>
           <div style={{fontSize:11,color:"#6a7a6a"}}>{officer} · {new Date().toLocaleDateString()}</div>
         </div>
+        {rootMode&&<span style={{fontSize:9,color:"#c0c8c0",marginRight:6}}>{BUILD_STAMP}</span>}
         {rootMode&&<button onClick={()=>window.location.reload()} title="Refresh"
           style={{border:"1px solid #d8e0d8",background:"#fff",borderRadius:8,
           padding:"6px 10px",fontSize:13,cursor:"pointer",color:"#5a7a5a"}}>↻</button>}
@@ -11050,6 +11052,8 @@ function AIMTrading({ onClose }) {
           <button onClick={showRaw} disabled={!!busy} style={{...btn,background:"#f4f4f4",
             color:"#666",width:"100%",marginTop:5,fontSize:12}}>
             {busy==="raw"?"…":"🔍 Show what is stored"}</button>
+          <div style={{fontSize:10,color:"#b0b0a8",textAlign:"center",marginTop:5}}>
+            build {BUILD_STAMP}</div>
           {kite&&<button onClick={loadHoldings} disabled={!!busy} style={{...btn,background:"#eee",color:"#333",width:"100%",marginTop:5}}>
             {busy==="zh"?"…":"📥 Import holdings from Zerodha"}</button>}
       </div>}
