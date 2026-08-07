@@ -7978,10 +7978,33 @@ function Spectrum({ onClose, onSaveEntry }) {
             </details>
 
             <div style={{display:"flex",gap:6,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
-              <select value={it.sku||""} onChange={e=>updCost(i,"sku",e.target.value)} style={{flex:1,minWidth:150,padding:"6px",borderRadius:6,border:"1px solid #ccd",fontSize:11,color:"#3a2a6a"}}>
-                <option value="">🔗 Link to a product…</option>
-                {master.map(m=><option key={m.sku} value={m.sku}>{m.name}</option>)}
-              </select>
+              {master.length===0
+                ? <button onClick={async()=>{
+                    // Nothing to link to yet. The costing already knows the name,
+                    // the realisation and the cost, so create the master entry from it.
+                    const nm=(it.name||"").trim();
+                    if(!nm){ alert("Give the brand a name first."); return; }
+                    const sku=nm.toUpperCase().replace(/[^A-Z0-9]+/g,"_").slice(0,28);
+                    const rm=(Number(it.rawIncense)||0)+(Number(it.perfume)||0)+
+                             (Number(it.packaging)||0)+(Number(it.labour)||0);
+                    const cogs=rm+(Number(it.freight)||0);
+                    const sp=Number(it.real)||0;
+                    const rec={sku,name:nm,sp,cogs,gp:Math.round((sp-cogs)*100)/100,
+                      gpp:sp?Math.round((sp-cogs)/sp*1000)/10:0};
+                    const nextMaster=[...master,rec];
+                    await persistMaster(nextMaster);
+                    updCost(i,"sku",sku);
+                    alert("Added \""+nm+"\" to the product master and linked it.\n\n"+
+                      "SKU "+sku+"\nSelling ₹"+sp+" · cost ₹"+cogs.toFixed(2)+
+                      " · margin ₹"+(sp-cogs).toFixed(2));
+                  }} style={{flex:1,minWidth:150,padding:"7px",borderRadius:6,
+                    border:"1px dashed #8a6aca",background:"#faf8ff",color:"#5a3a9a",
+                    fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                    + Create this product in the master</button>
+                : <select value={it.sku||""} onChange={e=>updCost(i,"sku",e.target.value)} style={{flex:1,minWidth:150,padding:"6px",borderRadius:6,border:"1px solid #ccd",fontSize:11,color:"#3a2a6a"}}>
+                    <option value="">🔗 Link to a product…</option>
+                    {master.map(m=><option key={m.sku} value={m.sku}>{m.name}</option>)}
+                  </select>}
               <button onClick={()=>pushNet(it)} style={{padding:"7px 12px",borderRadius:6,border:"none",background:contrib>=0?"#1a7a3a":"#c33",color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>↧ Push contribution to Reports</button>
             </div>
           </div>;
