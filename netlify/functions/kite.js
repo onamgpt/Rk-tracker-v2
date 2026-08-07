@@ -97,9 +97,26 @@ exports.handler = async (event) => {
 
     // Get quote for multiple symbols
     if (action === "quote") {
-      var syms = (body.symbols||[]).map(function(s){ return "NSE:" + s; }).join("&i=");
-      var raw4 = await kiteGet("/quote?i=" + syms, body.access_token);
-      return {statusCode:200, headers:h, body:raw4};
+      // Symbols are requested one at a time rather than as a single batch.
+      // Kite rejects the whole request if any one symbol is unknown to NSE —
+      // a Yahoo-style ticker like SHK.NS would silently kill every other price
+      // in the same call, which is exactly how prices appeared to "not update".
+      var list = (body.symbols || []).filter(Boolean);
+      var out = {};
+      var failed = [];
+      for (var i = 0; i < list.length; i++) {
+        var key = "NSE:" + list[i];
+        try {
+          var raw = await kiteGet("/quote?i=" + encodeURIComponent(key), body.access_token);
+          var parsed = JSON.parse(raw);
+          if (parsed && parsed.data && parsed.data[key]) out[key] = parsed.data[key];
+          else failed.push(list[i]);
+        } catch (e) {
+          failed.push(list[i]);
+        }
+      }
+      return {statusCode:200, headers:h,
+        body: JSON.stringify({ status:"success", data: out, failed: failed })};
     }
 
     // Place a single order — only when user explicitly presses the button

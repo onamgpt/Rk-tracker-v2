@@ -148,7 +148,9 @@ exports.handler = async (event) => {
   try {
     // ------------------------------------------------------------ DASHBOARD
     if (action === "dashboard") {
-      const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&order=symbol.asc");
+      // active=false means the position was closed. Without this filter a removed
+      // holding reappears on the next load and "remove" looks broken.
+      const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&active=not.eq.false&order=symbol.asc");
       if (hr.status >= 300) return FAIL("holdings read failed: " + JSON.stringify(hr.body));
       const holdings = hr.body || [];
 
@@ -324,7 +326,7 @@ exports.handler = async (event) => {
     // ----------------------------------------------------------------- AUDIT
     // Recompute PC from the full ledger and compare against what is stored.
     if (action === "audit") {
-      const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book));
+      const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&active=not.eq.false");
       if (hr.status >= 300) return FAIL("holdings read failed");
       const holdings = hr.body || [];
 
