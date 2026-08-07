@@ -150,7 +150,7 @@ exports.handler = async (event) => {
     if (action === "dashboard") {
       // active=false means the position was closed. Without this filter a removed
       // holding reappears on the next load and "remove" looks broken.
-      const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&active=not.eq.false&order=symbol.asc");
+      const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&or=(active.is.null,active.eq.true)&order=symbol.asc");
       if (hr.status >= 300) return FAIL("holdings read failed: " + JSON.stringify(hr.body));
       const holdings = hr.body || [];
 
@@ -326,7 +326,7 @@ exports.handler = async (event) => {
     // ----------------------------------------------------------------- AUDIT
     // Recompute PC from the full ledger and compare against what is stored.
     if (action === "audit") {
-      const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&active=not.eq.false");
+      const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&or=(active.is.null,active.eq.true)");
       if (hr.status >= 300) return FAIL("holdings read failed");
       const holdings = hr.body || [];
 
@@ -367,13 +367,25 @@ exports.handler = async (event) => {
       if (check.status >= 300 || !check.body || !check.body.length) {
         return FAIL("holding " + symbol + " not found in " + book + " — it may already be closed");
       }
-      const r = await sb("PATCH", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(id),
-        { active: false, updated_at: new Date().toISOString() });
+      // Delete outright. Ledger history lives in its own table and is untouched,
+      // so nothing is lost, and there is no flag left behind to resurrect the row.
+      const r = await sb("DELETE", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(id));
       if (r.status >= 300) {
-        console.log("closePosition PATCH FAIL: id=" + id + " status=" + r.status + " body=" + JSON.stringify(r.body));
-        return FAIL("close failed: " + (r.body && r.body.message ? r.body.message : "status " + r.status));
+        console.log("closePosition DELETE FAIL: id=" + id + " status=" + r.status + " body=" + JSON.stringify(r.body));
+        // Fall back to marking it inactive if the delete was refused.
+        const p = await sb("PATCH", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(id),
+          { active: false, updated_at: new Date().toISOString() });
+        if (p.status >= 300) {
+          return FAIL("could not remove " + symbol + ": status " + r.status +
+            (r.body && r.body.message ? (" — " + r.body.message) : ""));
+        }
       }
-      return OK({ ok: true });
+      // Confirm it is really gone before reporting success.
+      const after = await sb("GET", "/rest/v1/aim_holdings?select=id,active&id=eq." + encodeURIComponent(id));
+      if (after.status < 300 && after.body && after.body.length && after.body[0].active !== false) {
+        return FAIL("removal did not take effect for " + symbol + " — row still present");
+      }
+      return OK({ ok: true, removed: symbol });
     }
 
     // ------------------------------------------------------------- GATE CHECK
