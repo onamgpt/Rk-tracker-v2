@@ -7,6 +7,18 @@
   [headers.values]
     Access-Control-Allow-Origin = "*"
 
+# The whole application is one HTML file, so a cached copy means the user is
+# running old code no matter how many times they reload. Never cache it.
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
+
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
+
 # Run the Telegram scheduler every 5 minutes
 [functions."telegram-scheduler"]
   schedule = "*/5 * * * *"

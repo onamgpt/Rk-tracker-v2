@@ -11052,8 +11052,7 @@ function AIMTrading({ onClose }) {
           <button onClick={showRaw} disabled={!!busy} style={{...btn,background:"#f4f4f4",
             color:"#666",width:"100%",marginTop:5,fontSize:12}}>
             {busy==="raw"?"…":"🔍 Show what is stored"}</button>
-          <div style={{fontSize:10,color:"#b0b0a8",textAlign:"center",marginTop:5}}>
-            build {BUILD_STAMP}</div>
+  
           {kite&&<button onClick={loadHoldings} disabled={!!busy} style={{...btn,background:"#eee",color:"#333",width:"100%",marginTop:5}}>
             {busy==="zh"?"…":"📥 Import holdings from Zerodha"}</button>}
       </div>}
@@ -11742,7 +11741,9 @@ function App(){
     if(filterAccount&&e.account!==filterAccount)return false;
     if(filterVendor&&e.vendor!==filterVendor)return false;
     if(filterStatus&&e.paymentStatus!==filterStatus)return false;
-    if(search){const q=search.toLowerCase();return["title","notes","person","vendor","amount","taskType","chemical","account","financialType","property"].some(k=>(e[k]||"").toLowerCase().includes(q));}
+    // Coerce to string first. "amount" is numeric, and calling toLowerCase on a
+    // number throws, which unmounted the entire app the moment anyone searched.
+    if(search){const q=search.toLowerCase();return["title","notes","person","vendor","amount","taskType","chemical","account","financialType","property"].some(k=>String(e[k]==null?"":e[k]).toLowerCase().includes(q));}
     return true;
   }).sort((a,b)=>{
     if(sort==="date_desc")return(b.date||"").localeCompare(a.date||"");
@@ -11852,6 +11853,7 @@ function App(){
           </h1>
           <div style={{fontSize:10,color:"#c8a860",marginTop:2,display:"flex",flexWrap:"wrap",gap:5,alignItems:"center"}}>
             <span>{entries.length} total · {filtered.length} shown</span>
+            <span style={{color:"#8a7048",fontSize:9}}>· build {BUILD_STAMP}</span>
             {overdueN>0&&<span style={{background:"#c00",color:"#fff",borderRadius:20,padding:"1px 7px",fontSize:9,fontWeight:700}}>⏰ {overdueN}</span>}
             {superN>0&&<span style={{background:"#8B0000",color:"#fff",borderRadius:20,padding:"1px 7px",fontSize:9,fontWeight:700}}>🔴 {superN}</span>}
             {dupeN>0&&<span onClick={()=>setShowDupes(true)} style={{background:"#7a5800",color:"#fff",borderRadius:20,padding:"1px 7px",fontSize:9,fontWeight:700,cursor:"pointer"}}>🔍 {dupeN} dupes</span>}
