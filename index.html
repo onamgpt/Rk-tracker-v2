@@ -8260,11 +8260,24 @@ function AvailableFunds() {
       </div>
 
       {/* Bank balance input */}
-      <div style={{ display:"flex", gap:8, marginBottom:10, alignItems:"center" }}>
+      <div style={{ display:"flex", gap:8, marginBottom:6, alignItems:"center" }}>
         <label style={{ fontSize:12.5, fontWeight:700, color:"#1a5a3a", minWidth:100 }}>Bank balance</label>
         <input value={data.bankBalance} onChange={e=>setData(d=>({...d,bankBalance:e.target.value}))} placeholder="from statement" style={inp}/>
         <input value={data.asOf} onChange={e=>setData(d=>({...d,asOf:e.target.value}))} placeholder="as of date" style={{...inp,maxWidth:110}}/>
       </div>
+      <button onClick={async()=>{
+        if(!window.confirm("Start fresh?\n\nEvery cheque, payment and deposit below is cleared out. "+
+          "Type today's bank balance and add only what has not yet hit the account.\n\nThis cannot be undone.")) return;
+        const fresh={ bankBalance:"", asOf:new Date().toISOString().slice(0,10),
+          cheques:[], payments:[], deposits:[] };
+        setData(fresh);
+        try{ await sheetsAPI("savePortfolio",{ key:"available_funds", data:fresh });
+          setSavedMsg("✓ Cleared — type today's bank balance"); }
+        catch(e){ setSavedMsg("Cleared here, but the save failed"); }
+        setTimeout(()=>setSavedMsg(""),4000);
+      }} style={{ fontSize:11, padding:"5px 12px", borderRadius:6, border:"1px solid #d8c8a8",
+        background:"#fdfaf4", color:"#8a6a2a", cursor:"pointer", marginBottom:11 }}>
+        ↺ Start fresh</button>
 
       {/* Uncleared cheques */}
       <div style={{ marginBottom:10 }}>
