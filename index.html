@@ -10690,11 +10690,19 @@ function AIMTrading({ onClose }) {
   // is never deleted, only the position is marked closed.
   const removeShare=async(sym)=>{
     if(!window.confirm("Remove "+sym+" from the "+book+" book?\n\nAIM stops managing it. Ledger history is kept.")) return;
+    // Opening a position took its cost out of cash. Whether that money should
+    // come back depends entirely on why it is being removed, and only the
+    // person removing it knows which case this is.
+    const refund=window.confirm(
+      "Was "+sym+" entered by mistake?\n\n"+
+      "OK — it was a wrong or test entry. Put the money back into cash.\n\n"+
+      "Cancel — the shares were genuinely sold. Leave cash as it is.");
     setBusy("rm"); setMsg("");
     try{
-      const r=await api({action:"closePosition",symbol:sym});
+      const r=await api({action:"closePosition",symbol:sym,refundCash:refund});
       if(!r.ok) throw new Error(r.error||"could not remove");
-      setMsg("✓ "+sym+" removed · ledger history kept");
+      setMsg("✓ "+sym+" removed"+
+        (r.cashRestored?(" · "+cur+fmtN(r.cashRestored)+" returned to cash"):" · cash unchanged"));
       setOpenSym(null); load();
     }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");

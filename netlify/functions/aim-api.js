@@ -372,10 +372,25 @@ exports.handler = async (event) => {
     if (action === "closePosition") {
       const symbol = String(body.symbol || "").trim().toUpperCase();
       const id = book + "|" + symbol;
-      // verify it exists first
-      const check = await sb("GET", "/rest/v1/aim_holdings?select=id&id=eq." + encodeURIComponent(id));
+      // verify it exists first, and keep the row so cash can be put back if the
+      // position was entered by mistake rather than genuinely sold.
+      const check = await sb("GET", "/rest/v1/aim_holdings?select=*&id=eq." + encodeURIComponent(id));
       if (check.status >= 300 || !check.body || !check.body.length) {
         return FAIL("holding " + symbol + " not found in " + book + " — it may already be closed");
+      }
+      const row = check.body[0];
+
+      // Opening a position deducts its cost from cash. If the entry was a
+      // mistake, that money never actually left the account, so hand it back.
+      let cashRestored = 0;
+      if (body.refundCash) {
+        const basis = n(row.shares) * n(row.avg_cost);
+        const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + encodeURIComponent(book));
+        const cashNow = (cr.status < 300 && cr.body && cr.body.length) ? n(cr.body[0].cash) : 0;
+        cashRestored = r2(basis);
+        await sb("POST", "/rest/v1/aim_cash",
+          { book, cash: r2(cashNow + basis), updated_at: new Date().toISOString() },
+          { "Prefer": "resolution=merge-duplicates" });
       }
       // Delete outright. Ledger history lives in its own table and is untouched,
       // so nothing is lost, and there is no flag left behind to resurrect the row.
@@ -395,7 +410,7 @@ exports.handler = async (event) => {
       if (after.status < 300 && after.body && after.body.length && after.body[0].active !== false) {
         return FAIL("removal did not take effect for " + symbol + " — row still present");
       }
-      return OK({ ok: true, removed: symbol });
+      return OK({ ok: true, removed: symbol, cashRestored: cashRestored });
     }
 
     // ------------------------------------------------------------- GATE CHECK
