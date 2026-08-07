@@ -369,16 +369,41 @@ exports.handler = async (event) => {
     }
 
     // ------------------------------------------------------- CLOSE / DEACTIVATE
+    // Plain look at what is actually in the table, so a stubborn row can be
+    // identified rather than guessed at.
+    if (action === "rawHoldings") {
+      const raw = await sb("GET", "/rest/v1/aim_holdings?select=id,book,symbol,shares,avg_cost,active&book=eq." + encodeURIComponent(book));
+      return OK({ ok: true, status: raw.status, rows: raw.body || [] });
+    }
+
     if (action === "closePosition") {
       const symbol = String(body.symbol || "").trim().toUpperCase();
       const id = book + "|" + symbol;
       // verify it exists first, and keep the row so cash can be put back if the
       // position was entered by mistake rather than genuinely sold.
-      const check = await sb("GET", "/rest/v1/aim_holdings?select=*&id=eq." + encodeURIComponent(id));
-      if (check.status >= 300 || !check.body || !check.body.length) {
+      // Do not trust the constructed id. Rows entered by hand, or created by an
+      // earlier version, may not follow book+"|"+symbol at all. Find the row by
+      // its natural key instead, and fall back to the id only if that misses.
+      let row = null;
+      let bySym = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." +
+        encodeURIComponent(book) + "&symbol=eq." + encodeURIComponent(symbol));
+      if (bySym.status < 300 && bySym.body && bySym.body.length) row = bySym.body[0];
+      if (!row) {
+        const byId = await sb("GET", "/rest/v1/aim_holdings?select=*&id=eq." + encodeURIComponent(id));
+        if (byId.status < 300 && byId.body && byId.body.length) row = byId.body[0];
+      }
+      if (!row) {
+        // Last resort: case-insensitive scan of the whole book.
+        const all = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book));
+        if (all.status < 300 && all.body) {
+          row = all.body.find(function (x) {
+            return String(x.symbol || "").trim().toUpperCase() === symbol;
+          }) || null;
+        }
+      }
+      if (!row) {
         return FAIL("holding " + symbol + " not found in " + book + " — it may already be closed");
       }
-      const row = check.body[0];
 
       // Opening a position deducts its cost from cash. If the entry was a
       // mistake, that money never actually left the account, so hand it back.
@@ -394,21 +419,26 @@ exports.handler = async (event) => {
       }
       // Delete outright. Ledger history lives in its own table and is untouched,
       // so nothing is lost, and there is no flag left behind to resurrect the row.
-      const r = await sb("DELETE", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(id));
+      const realId = row.id;
+      let r = await sb("DELETE", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(realId));
       if (r.status >= 300) {
-        console.log("closePosition DELETE FAIL: id=" + id + " status=" + r.status + " body=" + JSON.stringify(r.body));
-        // Fall back to marking it inactive if the delete was refused.
-        const p = await sb("PATCH", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(id),
+        // Some tables refuse delete by id; try the natural key.
+        r = await sb("DELETE", "/rest/v1/aim_holdings?book=eq." + encodeURIComponent(book) +
+          "&symbol=eq." + encodeURIComponent(symbol));
+      }
+      if (r.status >= 300) {
+        const p = await sb("PATCH", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(realId),
           { active: false, updated_at: new Date().toISOString() });
         if (p.status >= 300) {
-          return FAIL("could not remove " + symbol + ": status " + r.status +
-            (r.body && r.body.message ? (" — " + r.body.message) : ""));
+          return FAIL("could not remove " + symbol + " (id " + realId + "): delete status " +
+            r.status + (r.body && r.body.message ? (" — " + r.body.message) : "") +
+            "; patch status " + p.status);
         }
       }
-      // Confirm it is really gone before reporting success.
-      const after = await sb("GET", "/rest/v1/aim_holdings?select=id,active&id=eq." + encodeURIComponent(id));
+      const after = await sb("GET", "/rest/v1/aim_holdings?select=id,active&book=eq." +
+        encodeURIComponent(book) + "&symbol=eq." + encodeURIComponent(symbol));
       if (after.status < 300 && after.body && after.body.length && after.body[0].active !== false) {
-        return FAIL("removal did not take effect for " + symbol + " — row still present");
+        return FAIL("removal did not take for " + symbol + " — row id " + after.body[0].id + " still present");
       }
       return OK({ ok: true, removed: symbol, cashRestored: cashRestored });
     }

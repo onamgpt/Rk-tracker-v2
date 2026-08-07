@@ -10688,6 +10688,20 @@ function AIMTrading({ onClose }) {
 
   // Removing a share stops AIM managing it. The ledger is untouched — history
   // is never deleted, only the position is marked closed.
+  const showRaw=async()=>{
+    setBusy("raw"); setMsg("");
+    try{
+      const r=await api({action:"rawHoldings"});
+      const rows=(r&&r.rows)||[];
+      const txt=rows.length
+        ? rows.map(x=>"id="+x.id+"  sym="+x.symbol+"  sh="+x.shares+"  active="+String(x.active)).join("\n")
+        : "(no rows returned)";
+      window.alert("Rows actually stored in the "+book+" book:\n\n"+txt);
+      setMsg("✓ "+rows.length+" row(s) — see the box");
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
   const removeShare=async(sym)=>{
     if(!window.confirm("Remove "+sym+" from the "+book+" book?\n\nAIM stops managing it. Ledger history is kept.")) return;
     // Opening a position took its cost out of cash. Whether that money should
@@ -10700,7 +10714,7 @@ function AIMTrading({ onClose }) {
     setBusy("rm"); setMsg("");
     try{
       const r=await api({action:"closePosition",symbol:sym,refundCash:refund});
-      if(!r.ok) throw new Error(r.error||"could not remove");
+      if(!r.ok) throw new Error(r.error||JSON.stringify(r)||"could not remove");
       setMsg("✓ "+sym+" removed"+
         (r.cashRestored?(" · "+cur+fmtN(r.cashRestored)+" returned to cash"):" · cash unchanged"));
       setOpenSym(null); load();
@@ -11033,6 +11047,9 @@ function AIMTrading({ onClose }) {
               <button onClick={loadFills} disabled={!!busy} style={{...btn,background:"#eee",color:"#333",flex:1}}>
                 {busy==="fills"?"…":"⚡ Today's trades"}</button>
             </div>}
+          <button onClick={showRaw} disabled={!!busy} style={{...btn,background:"#f4f4f4",
+            color:"#666",width:"100%",marginTop:5,fontSize:12}}>
+            {busy==="raw"?"…":"🔍 Show what is stored"}</button>
           {kite&&<button onClick={loadHoldings} disabled={!!busy} style={{...btn,background:"#eee",color:"#333",width:"100%",marginTop:5}}>
             {busy==="zh"?"…":"📥 Import holdings from Zerodha"}</button>}
       </div>}
