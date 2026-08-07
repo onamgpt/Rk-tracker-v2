@@ -8212,8 +8212,14 @@ function AvailableFunds() {
   const paymentsTotal = (data.payments||[]).reduce((s,p)=> s + pos(p.amount), 0);
   const creditedDeposits = (data.deposits||[]).reduce((s,d)=> s + (d.credited?pos(d.amount):0), 0);
   const inTransitDeposits = (data.deposits||[]).reduce((s,d)=> s + (d.credited?0:pos(d.amount)), 0);
-  const available = bank - clearedCheques - paymentsTotal + creditedDeposits;
-  const projected = available - pendingCheques + inTransitDeposits;
+  // Your bank balance already contains everything that has settled. So the only
+  // things that adjust it are the ones that have NOT hit the account yet:
+  // cheques still to clear, payments still to make, deposits still to land.
+  // Subtracting a cleared cheque, as this once did, counts it twice.
+  const stillToGoOut = pendingCheques + paymentsTotal;
+  const stillToComeIn = inTransitDeposits;
+  const available = bank - stillToGoOut;
+  const projected = available + stillToComeIn;
 
   const save = async () => {
     setSaving(true); setSavedMsg("");
@@ -8244,12 +8250,12 @@ function AvailableFunds() {
       <div style={{ background: available>=0?"linear-gradient(135deg,#1a7a4a,#0a5a2a)":"linear-gradient(135deg,#a33,#822)", borderRadius:12, padding:"14px 16px", color:"#fff", marginBottom:12 }}>
         <div style={{ fontSize:11, opacity:.9, letterSpacing:".05em" }}>TRUE AVAILABLE FUNDS</div>
         <div style={{ fontSize:28, fontWeight:800, lineHeight:1.1 }}>{fmt(available)}</div>
-        <div style={{ fontSize:10.5, opacity:.85, marginTop:3 }}>
-          Bank {fmt(bank)} − Cleared cheques {fmt(clearedCheques)} − Payments due {fmt(paymentsTotal)}{creditedDeposits>0?" + Credited deposits "+fmt(creditedDeposits):""}
+        <div style={{ fontSize:11, opacity:.9, marginTop:6, lineHeight:1.7 }}>
+          <div>Bank balance <b>{fmt(bank)}</b></div>
+          {stillToGoOut>0 && <div>− still to go out <b>{fmt(stillToGoOut)}</b></div>}
         </div>
-        {(pendingCheques>0||inTransitDeposits>0) && <div style={{ fontSize:11, marginTop:6, paddingTop:6, borderTop:"1px solid rgba(255,255,255,.25)" }}>
-          <span style={{ opacity:.9 }}>{pendingCheques>0?"− Pending cheques "+fmt(pendingCheques)+" ":""}{inTransitDeposits>0?"+ In transit "+fmt(inTransitDeposits)+" ":""}→ </span>
-          <b>Projected once settled {fmt(projected)}</b>
+        {stillToComeIn>0 && <div style={{ fontSize:11.5, marginTop:7, paddingTop:7, borderTop:"1px solid rgba(255,255,255,.25)" }}>
+          + {fmt(stillToComeIn)} still to come in → <b>{fmt(projected)}</b> once everything settles
         </div>}
       </div>
 
@@ -8263,20 +8269,33 @@ function AvailableFunds() {
       {/* Uncleared cheques */}
       <div style={{ marginBottom:10 }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
-          <span style={{ fontSize:12.5, fontWeight:700, color:"#1a5a3a" }}>Cheques issued (tick when cleared)</span>
+          <span style={{ fontSize:12.5, fontWeight:700, color:"#1a5a3a" }}>Cheques still to clear</span>
           <button onClick={addCheque} style={{ fontSize:11, padding:"3px 10px", borderRadius:6, border:"1px solid #1a7a4a", background:"#eafaf0", color:"#1a5a3a", cursor:"pointer" }}>+ Cheque</button>
         </div>
-        {(data.cheques||[]).map((c,i)=>(
+        {(data.cheques||[]).map((c,i)=>c.cleared?null:(
           <div key={i} style={{ display:"flex", gap:5, marginBottom:5, alignItems:"center" }}>
             <input value={c.payee} onChange={e=>upCheque(i,"payee",e.target.value)} placeholder="payee" style={{...inp,flex:2}}/>
             <input value={c.amount} onChange={e=>upCheque(i,"amount",e.target.value)} placeholder="₹" style={{...inp,flex:1}}/>
-            <label style={{ fontSize:10.5, display:"flex", alignItems:"center", gap:3, color: c.cleared?"#1a7a3a":"#a33", whiteSpace:"nowrap" }}>
-              <input type="checkbox" checked={!!c.cleared} onChange={e=>upCheque(i,"cleared",e.target.checked)}/>{c.cleared?"cleared":"pending"}
-            </label>
+            <button onClick={()=>upCheque(i,"cleared",true)} title="it has come out of the account"
+              style={{ padding:"6px 10px", borderRadius:6, border:"1px solid #a8d8b8", background:"#f0fff4",
+              color:"#1a5a3a", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>✓ cleared</button>
             <button onClick={()=>delCheque(i)} style={{ border:"none", background:"none", color:"#c33", cursor:"pointer", fontSize:14 }}>×</button>
           </div>
         ))}
-        {(!data.cheques||!data.cheques.length) && <div style={{fontSize:11,color:"#8a9a8a",fontStyle:"italic"}}>No cheques logged. Add each cheque you issue.</div>}
+        {(()=>{ const done=(data.cheques||[]).filter(c=>c.cleared);
+          const open=(data.cheques||[]).filter(c=>!c.cleared);
+          return <div>
+            {!open.length && <div style={{fontSize:11,color:"#8a9a8a",fontStyle:"italic"}}>
+              Nothing waiting to clear. Add each cheque as you issue it.</div>}
+            {done.length>0 && <details style={{marginTop:5}}>
+              <summary style={{fontSize:10.5,color:"#8a9a8a",cursor:"pointer"}}>
+                {done.length} already cleared — in your bank balance</summary>
+              {done.map((c,i)=><div key={i} style={{fontSize:11,color:"#9a9a9a",padding:"2px 0",
+                display:"flex",justifyContent:"space-between"}}>
+                <span>{c.payee||"—"}</span><span>{fmt(Number(c.amount)||0)}</span></div>)}
+            </details>}
+          </div>;
+        })()}
       </div>
 
       {/* Committed payments */}
@@ -8297,20 +8316,33 @@ function AvailableFunds() {
       {/* Deposits received */}
       <div style={{ marginBottom:12 }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
-          <span style={{ fontSize:12.5, fontWeight:700, color:"#1a5a3a" }}>Deposits in (tick when credited)</span>
+          <span style={{ fontSize:12.5, fontWeight:700, color:"#1a5a3a" }}>Deposits still to land</span>
           <button onClick={addDeposit} style={{ fontSize:11, padding:"3px 10px", borderRadius:6, border:"1px solid #1a7a4a", background:"#eafaf0", color:"#1a5a3a", cursor:"pointer" }}>+ Deposit</button>
         </div>
-        {(data.deposits||[]).map((c,i)=>(
+        {(data.deposits||[]).map((c,i)=>c.credited?null:(
           <div key={i} style={{ display:"flex", gap:5, marginBottom:5, alignItems:"center" }}>
             <input value={c.from} onChange={e=>upDeposit(i,"from",e.target.value)} placeholder="from (party / cheque no.)" style={{...inp,flex:2}}/>
             <input value={c.amount} onChange={e=>upDeposit(i,"amount",e.target.value)} placeholder="₹" style={{...inp,flex:1}}/>
-            <label style={{ fontSize:10.5, display:"flex", alignItems:"center", gap:3, color: c.credited?"#1a7a3a":"#c8860a", whiteSpace:"nowrap" }}>
-              <input type="checkbox" checked={!!c.credited} onChange={e=>upDeposit(i,"credited",e.target.checked)}/>{c.credited?"credited":"in transit"}
-            </label>
+            <button onClick={()=>upDeposit(i,"credited",true)} title="it has landed in the account"
+              style={{ padding:"6px 10px", borderRadius:6, border:"1px solid #a8d8b8", background:"#f0fff4",
+              color:"#1a5a3a", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>✓ landed</button>
             <button onClick={()=>delDeposit(i)} style={{ border:"none", background:"none", color:"#c33", cursor:"pointer", fontSize:14 }}>×</button>
           </div>
         ))}
-        {(!data.deposits||!data.deposits.length) && <div style={{fontSize:11,color:"#8a9a8a",fontStyle:"italic"}}>Cheques/cash deposited but not yet in the account. "In transit" shows as projected; tick "credited" and it's added to True Available. The bank figure above is never changed by the app — type it yourself from your statement.</div>}
+        {(()=>{ const done=(data.deposits||[]).filter(c=>c.credited);
+          const open=(data.deposits||[]).filter(c=>!c.credited);
+          return <div>
+            {!open.length && <div style={{fontSize:11,color:"#8a9a8a",fontStyle:"italic"}}>
+              Nothing waiting to land. Add cheques and cash you have deposited but not yet seen in the account.</div>}
+            {done.length>0 && <details style={{marginTop:5}}>
+              <summary style={{fontSize:10.5,color:"#8a9a8a",cursor:"pointer"}}>
+                {done.length} already landed — in your bank balance</summary>
+              {done.map((c,i)=><div key={i} style={{fontSize:11,color:"#9a9a9a",padding:"2px 0",
+                display:"flex",justifyContent:"space-between"}}>
+                <span>{c.from||"—"}</span><span>{fmt(Number(c.amount)||0)}</span></div>)}
+            </details>}
+          </div>;
+        })()}
       </div>
 
       <div style={{ display:"flex", gap:8, alignItems:"center" }}>
@@ -8318,7 +8350,7 @@ function AvailableFunds() {
         {savedMsg && <span style={{ fontSize:12, color:"#1a7a3a", fontWeight:600 }}>{savedMsg}</span>}
       </div>
       <div style={{ fontSize:10, color:"#8a9a8a", marginTop:8, fontStyle:"italic" }}>
-        Type your bank balance once — the app never changes it. Cheques subtract when you tick "cleared"; deposits add when you tick "credited". Pending/in-transit items show only in "Projected". "True available" = what you can actually spend right now. Your data stays in your own database.
+        Your bank balance already contains everything that has settled, so only unsettled items adjust it. Mark a cheque ✓ cleared or a deposit ✓ landed once you see it on the statement and it drops out of the list. Type the bank figure yourself — the app never changes it.
       </div>
       <div style={{ borderBottom:"1px solid #dde", margin:"14px 0" }}/>
     </div>
