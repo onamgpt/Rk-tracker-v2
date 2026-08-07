@@ -12,13 +12,16 @@ exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: h, body: "" };
 
   const key  = process.env.RESEND_API_KEY;
-  const from = process.env.MAIL_FROM || "orders@onamagarbathi.com";
+  // No hardcoded fallback. A literal address here matches the MAIL_FROM value
+  // and Netlify's secret scanner blocks the whole deploy over it.
+  const from = process.env.MAIL_FROM;
 
-  if (!key) {
+  if (!key || !from) {
     // Not configured yet. Report it plainly rather than failing silently —
     // the caller treats mail as best-effort and the order still goes through.
     return { statusCode: 200, headers: h,
-      body: JSON.stringify({ ok: false, skipped: true, reason: "RESEND_API_KEY not set" }) };
+      body: JSON.stringify({ ok: false, skipped: true,
+        reason: !key ? "RESEND_API_KEY not set" : "MAIL_FROM not set" }) };
   }
 
   let body = {};
