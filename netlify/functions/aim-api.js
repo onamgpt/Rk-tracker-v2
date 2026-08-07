@@ -150,7 +150,14 @@ exports.handler = async (event) => {
     if (action === "dashboard") {
       // active=false means the position was closed. Without this filter a removed
       // holding reappears on the next load and "remove" looks broken.
-      const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&or=(active.is.null,active.eq.true)&order=symbol.asc");
+      // Hide closed positions, but never let that filter blank the portfolio:
+      // if the column is missing on an older table the query would 400, so we
+      // fall back to an unfiltered read rather than showing the user nothing.
+      let hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&or=(active.is.null,active.eq.true)&order=symbol.asc");
+      if (hr.status >= 300) {
+        console.log("holdings filtered read failed (" + hr.status + ") - falling back to unfiltered");
+        hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&order=symbol.asc");
+      }
       if (hr.status >= 300) return FAIL("holdings read failed: " + JSON.stringify(hr.body));
       const holdings = hr.body || [];
 
@@ -326,7 +333,10 @@ exports.handler = async (event) => {
     // ----------------------------------------------------------------- AUDIT
     // Recompute PC from the full ledger and compare against what is stored.
     if (action === "audit") {
-      const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&or=(active.is.null,active.eq.true)");
+      let hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&or=(active.is.null,active.eq.true)");
+      if (hr.status >= 300) {
+        hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book));
+      }
       if (hr.status >= 300) return FAIL("holdings read failed");
       const holdings = hr.body || [];
 
