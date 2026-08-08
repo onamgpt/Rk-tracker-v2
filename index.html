@@ -10888,7 +10888,28 @@ function AIMTrading({ onClose }) {
   // Live prices -> every AIM signal recomputes without any typing
   const refreshPrices=async()=>{
     if(!data||!data.holdings.length){ setMsg("✗ No holdings to price"); return; }
-    if(book!=="INDIA"){ setMsg("✗ Zerodha prices cover the India book only"); return; }
+    // The USA book has its own source — Zerodha covers India only.
+    if(book==="USA"){
+      setBusy("prices"); setMsg("");
+      try{
+        const syms=data.holdings.map(h=>h.symbol);
+        const r=await fetch("/.netlify/functions/usquote",{method:"POST",
+          headers:{"Content-Type":"application/json"},body:JSON.stringify({symbols:syms})});
+        const j=await r.json();
+        if(!j||!j.ok) throw new Error((j&&j.error)||"no price data");
+        let n=0, asOf="";
+        for(const h of data.holdings){
+          const row=j.prices&&j.prices[String(h.symbol).toUpperCase()];
+          if(row&&row.price){ await api({action:"updatePrice",symbol:h.symbol,price:row.price}); n++; asOf=row.asOf||asOf; }
+        }
+        const bad=j.failed||[];
+        setMsg("✓ "+n+" price(s) updated"+(asOf?(" · as of "+asOf):"")+
+          (bad.length?(" · no quote for "+bad.join(", ")):""));
+        load();
+      }catch(e){ setMsg("✗ "+String(e.message||e)); }
+      setBusy(""); return;
+    }
+    if(book!=="INDIA"){ setMsg("✗ No price source for this book"); return; }
     if(!kite){ setMsg("✗ Connect Zerodha first"); return; }
     setBusy("prices"); setMsg("");
     try{
@@ -11093,6 +11114,21 @@ function AIMTrading({ onClose }) {
         </div>
       </div>}
 
+      {book==="USA"&&<div style={card}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontSize:11,color:"#888",fontWeight:700}}>US MARKET PRICES</div>
+          <span style={{fontSize:10,color:"#999"}}>daily close</span>
+        </div>
+        <button onClick={refreshPrices} disabled={!!busy}
+          style={{...btn,background:"#1a3a6a",color:"#fff",width:"100%",marginTop:6}}>
+          {busy==="prices"?"…":"🔄 Refresh US prices"}</button>
+        <div style={{fontSize:10.5,color:"#8a8a80",marginTop:5,lineHeight:1.5}}>
+          Until you refresh, US holdings are valued at the last price you typed in —
+          which can be weeks old, and makes every signal on this book unreliable.
+          This book also trades in fractions, so signals act below one whole share.
+        </div>
+      </div>}
+
       {book==="INDIA"&&<div style={card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div style={{fontSize:11,color:"#888",fontWeight:700}}>ZERODHA</div>
@@ -11222,6 +11258,20 @@ function AIMTrading({ onClose }) {
             <div><span style={{color:"#888"}}>SAFE </span><b>{cur}{fmtN(s.safe)}</b></div>
             <div><span style={{color:"#888"}}>Advice </span><b>{cur}{fmtN(s.advice)}</b></div>
           </div>
+
+          {s.action==="HOLD"&&<div style={{background:"#f7f7f5",borderRadius:6,padding:"6px 9px",marginTop:6,
+            fontSize:10.5,color:"#8a8a80",lineHeight:1.5}}>
+            {(()=>{
+              const mv=Number(s.mv)||0, pc=Number(h.portfolio_control)||0, safe=Number(s.safe)||0;
+              const gap=mv-pc;
+              if(Math.abs(gap)<=safe)
+                return "Inside the safe zone — "+cur+fmtN(Math.abs(gap))+" from Portfolio Control, and the zone absorbs "+cur+fmtN(safe)+".";
+              const beyond=Math.abs(gap)-safe;
+              const px=Number(h.last_price)||0;
+              const sh=px?(beyond/px):0;
+              return "Signal is only "+cur+fmtN(beyond)+" — about "+sh.toFixed(3)+" shares at "+cur+fmtN(px)+", too small to trade.";
+            })()}
+          </div>}
 
           {s.action!=="HOLD"&&<div style={{background:s.action==="BUY"?"#e3f2fd":"#e8f5e9",borderRadius:6,padding:"7px 9px",marginTop:6}}>
             <div style={{fontSize:12,fontWeight:800,color:sigColor(s.action)}}>

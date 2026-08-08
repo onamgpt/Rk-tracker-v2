@@ -65,7 +65,8 @@ const r2 = (v) => Math.round(n(v) * 100) / 100;
 // ---------------------------------------------------------------- AIM core
 // Single source of truth for the arithmetic. Used by both the live signal and
 // the audit, so the two can never drift apart.
-function aimSignal(shares, price, pc) {
+function aimSignal(shares, price, pc, opts) {
+  const fractional = !!(opts && opts.fractional);
   const mv     = n(shares) * n(price);
   const safe   = 0.10 * mv;
   const advice = n(pc) - mv;
@@ -79,13 +80,23 @@ function aimSignal(shares, price, pc) {
     action = "SELL";
     amount = mv - n(pc) - safe;
   }
-  if (amount > 0 && n(price) > 0) qty = Math.floor(amount / n(price));
-  // A signal that cannot buy or sell at least one whole share is not actionable.
-  if (qty < 1) { action = "HOLD"; amount = 0; qty = 0; }
+
+  if (amount > 0 && n(price) > 0) {
+    // Whole shares on markets that trade whole shares; fractions where the
+    // broker supports them, otherwise a genuine signal worth less than one
+    // share is silently discarded and never acts at all.
+    qty = fractional
+      ? Math.floor((amount / n(price)) * 1000) / 1000
+      : Math.floor(amount / n(price));
+  }
+
+  const minQty = fractional ? 0.001 : 1;
+  if (qty < minQty) { action = "HOLD"; amount = 0; qty = 0; }
+  else if (!fractional) { amount = qty * n(price); }
 
   return {
     mv: r2(mv), safe: r2(safe), advice: r2(advice),
-    action, amount: r2(amount), qty
+    action, amount: r2(amount), qty, fractional
   };
 }
 
@@ -164,8 +175,9 @@ exports.handler = async (event) => {
       const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + encodeURIComponent(book));
       const cash = (cr.status < 300 && cr.body && cr.body.length) ? n(cr.body[0].cash) : 0;
 
+      const allowFractional = (book === "USA");
       const withSignals = holdings.map(h => {
-        const sig = aimSignal(h.shares, h.last_price, h.portfolio_control);
+        const sig = aimSignal(h.shares, h.last_price, h.portfolio_control, { fractional: allowFractional });
         return Object.assign({}, h, { signal: sig });
       });
 
@@ -272,7 +284,7 @@ exports.handler = async (event) => {
         { "Prefer": "return=representation" });
       if (r.status >= 300) return FAIL("price update failed: " + JSON.stringify(r.body));
       const row = Array.isArray(r.body) && r.body.length ? r.body[0] : null;
-      return OK({ ok: true, holding: row, signal: row ? aimSignal(row.shares, row.last_price, row.portfolio_control) : null });
+      return OK({ ok: true, holding: row, signal: row ? aimSignal(row.shares, row.last_price, row.portfolio_control, { fractional: book === "USA" }) : null });
     }
 
     // ------------------------------------------------------------ RECORD TRADE
@@ -334,7 +346,7 @@ exports.handler = async (event) => {
         ok: true, symbol, action: act,
         pcBefore: r2(pcBefore), pcAfter: r2(pcAfter),
         shares: r2(newShares), cash: r2(cashAfter),
-        signal: aimSignal(newShares, price, pcAfter)
+        signal: aimSignal(newShares, price, pcAfter, { fractional: book === "USA" })
       });
     }
 
