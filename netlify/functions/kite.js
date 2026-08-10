@@ -117,11 +117,11 @@ exports.handler = async (event) => {
           // ticker were wrong.
           if (parsed && parsed.status === "error") {
             var et = String(parsed.error_type || "");
-            if (/Token|PermissionException|Forbidden/i.test(et) ||
-                /access_token|api_key|permission/i.test(String(parsed.message || ""))) {
-              authError = parsed.message || et || "session expired";
-              break;
-            }
+            // Any error that repeats for every symbol is an account-level
+            // problem, not a bad ticker. Pass Zerodha's own wording through.
+            authError = (parsed.message || et || "request rejected") +
+                        (et ? (" [" + et + "]") : "");
+            break;
           }
 
           if (parsed && parsed.data && parsed.data[key]) out[key] = parsed.data[key];

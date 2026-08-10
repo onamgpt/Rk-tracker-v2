@@ -11028,8 +11028,14 @@ function AIMTrading({ onClose }) {
         if(p){ await api({action:"updatePrice",symbol:h.symbol,price:p}); n++; }
       }
       if(q&&q.authError){
-        clearKite();
-        setMsg("✗ Zerodha session expired — the Connect Zerodha button is back above, tap it and log in again");
+        // Show what Zerodha actually said. A lapsed subscription and an expired
+        // session both fail here, and only their wording tells them apart.
+        const raw=String(q.authError);
+        const expired=/token|session|expired|invalid/i.test(raw);
+        if(expired) clearKite();
+        setMsg("✗ Zerodha says: \""+raw+"\""+
+          (expired?" — tap Connect Zerodha and log in again."
+                 :" — this is not a login problem. Check that your Kite Connect subscription is active at developers.kite.trade."));
         setBusy(""); return;
       }
       const bad=(q&&q.failed)||[];
