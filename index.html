@@ -2730,13 +2730,13 @@ function TravelPlanner({ onClose }) {
     name: "New trip",
     kind: "business",
     start: new Date().toISOString().slice(0,10),
-    pax: 1,
+    pax: 3,
     daily: 2000,
     currency: "₹",
     origin: { city:"Bangalore", code:"BLR" },
     stops: [{ city:"", code:"", nights:2, flight:0, hotel:0, note:"", booked:false, ref:"", actual:0 }],
     ret: { flight:0, booked:false, ref:"", actual:0 },
-    easyPace: false
+    comfort: true
   });
 
   const [trips,setTrips]=useState([]);
@@ -2744,6 +2744,7 @@ function TravelPlanner({ onClose }) {
   const [busy,setBusy]=useState("");
   const [msg,setMsg]=useState("");
   const [openEdit,setOpenEdit]=useState({});
+  const [view,setView]=useState("book");   // book | plan
 
   useEffect(()=>{ (async()=>{
     try{
@@ -2812,6 +2813,13 @@ function TravelPlanner({ onClose }) {
   const hotelLink=(city,ci,co)=>"https://www.booking.com/searchresults.html?ss="+
     encodeURIComponent(city+" city centre")+"&checkin="+ci+"&checkout="+co+
     "&group_adults="+(cur?cur.pax:1)+"&no_rooms=1";
+  const yymmdd=(iso)=>{ const p=iso.split("-"); return p[0].slice(2)+p[1]+p[2]; };
+  const skyLink=(from,to,iso)=>"https://www.skyscanner.co.in/transport/flights/"+
+    String(from).toLowerCase()+"/"+String(to).toLowerCase()+"/"+yymmdd(iso)+
+    "/?adultsv2="+(cur?cur.pax:1)+"&cabinclass=economy&rtn=0";
+  const mmtLink=(from,to,iso)=>{ const p=iso.split("-");
+    return "https://www.makemytrip.com/flight/search?itinerary="+from+"-"+to+"-"+
+      p[2]+"/"+p[1]+"/"+p[0]+"&tripType=O&paxType=A-"+(cur?cur.pax:1)+"-C-0-I-0&cabinClass=E"; };
 
   const inp={width:"100%",padding:"8px",borderRadius:7,border:"1.5px solid #cfd8cf",fontSize:13,marginBottom:8,boxSizing:"border-box"};
   const lab={fontSize:11,fontWeight:700,color:"#1a5a3a",display:"block",marginBottom:3};
@@ -2834,6 +2842,134 @@ function TravelPlanner({ onClose }) {
       {msg&&<div style={{fontSize:12.5,color:msg[0]==="✓"?"#1a7a3a":"#a33",
         background:msg[0]==="✓"?"#e8f5e9":"#fdecea",padding:"7px 10px",borderRadius:8,marginBottom:9}}>{msg}</div>}
 
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        <button onClick={()=>setView("book")} style={{flex:1,padding:"11px",borderRadius:10,border:"none",
+          background:view==="book"?"linear-gradient(135deg,#1a5a3a,#0d3a24)":"#eef2ec",
+          color:view==="book"?"#fff":"#5a7a5a",fontWeight:800,fontSize:14,cursor:"pointer"}}>
+          ✈️ Book it</button>
+        <button onClick={()=>setView("plan")} style={{flex:1,padding:"11px",borderRadius:10,border:"none",
+          background:view==="plan"?"linear-gradient(135deg,#1a3a6a,#0d2a4a)":"#eef2f6",
+          color:view==="plan"?"#fff":"#4a6a8a",fontWeight:800,fontSize:14,cursor:"pointer"}}>
+          🗓 Change the plan</button>
+      </div>
+
+      {view==="book"&&<div>
+        <div style={{background:"linear-gradient(135deg,#1a5a3a,#0d3a24)",borderRadius:12,
+          padding:"14px 16px",marginBottom:12,color:"#fff"}}>
+          <div style={{fontSize:10,opacity:.8,fontWeight:700,letterSpacing:.4}}>
+            {cur.name.toUpperCase()}</div>
+          <div style={{fontSize:19,fontWeight:800,marginTop:3}}>
+            {(cur.stops||[]).filter(s=>s.city).map(s=>s.city).join(" · ")||"add your cities"}</div>
+          <div style={{fontSize:12,opacity:.9,marginTop:5,lineHeight:1.6}}>
+            {pretty(cur.start)} → {pretty(sch.home)} · {f.nights+1} days · {cur.pax} travelling<br/>
+            About {money(f.total)} all in, {money(f.total/Math.max(1,cur.pax))} each
+          </div>
+          <div style={{marginTop:9,paddingTop:9,borderTop:"1px solid rgba(255,255,255,.25)",
+            fontSize:12.5,fontWeight:700}}>
+            {f.booked} of {(cur.stops||[]).length+1} sectors booked
+            {f.booked===(cur.stops||[]).length+1?" — all done ✓":""}
+          </div>
+        </div>
+
+        <div style={{fontSize:11,color:"#8a8a80",marginBottom:9,lineHeight:1.5}}>
+          Each row opens the booking site with your dates and {cur.pax} travellers already filled in.
+          Book it, come back, tap the tick.
+        </div>
+
+        {(cur.stops||[]).map((s,i)=>{
+          const from = i===0 ? cur.origin : cur.stops[i-1];
+          const r = sch.rows[i] || {fly:cur.start,arrive:cur.start,leave:cur.start};
+          const ready = s.code && from.code;
+          return <div key={"bk"+i} style={{border:"1px solid "+(s.booked?"#7ab88a":"#e6ece6"),
+            background:s.booked?"#f4faf5":"#fff",borderRadius:11,padding:"12px 13px",marginBottom:9}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}>
+              <b style={{fontSize:14,color:"#1a5a3a"}}>
+                {i+1}. {from.city||"?"} → {s.city||"?"}</b>
+              <span style={{fontSize:11,color:"#8a9a8a"}}>{pretty(r.fly)}</span>
+            </div>
+            <div style={{fontSize:11.5,color:"#8a8a80",marginTop:2}}>
+              {s.nights} {Number(s.nights)===1?"night":"nights"} in {s.city||"?"} ·{" "}
+              {pretty(r.arrive)} → {pretty(r.leave)}
+              {s.ref?(" · ref "+s.ref):""}
+            </div>
+
+            <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+              {ready
+                ? <a href={flightLink(from.code,s.code,r.fly)} target="_blank" rel="noopener"
+                    style={{flex:"1 1 150px",padding:"12px",borderRadius:9,border:"none",
+                    background:"#1a5a3a",color:"#fff",fontWeight:800,fontSize:13.5,
+                    textAlign:"center",textDecoration:"none"}}>✈️ Book the flight</a>
+                : <span style={{flex:1,fontSize:11.5,color:"#a0661a"}}>
+                    Add the airport codes under "Change the plan" first.</span>}
+              {s.city&&Number(s.nights)>0&&
+                <a href={hotelLink(s.city,r.arrive,r.leave)} target="_blank" rel="noopener"
+                  style={{flex:"1 1 150px",padding:"12px",borderRadius:9,
+                  border:"1.5px solid #c8d8e8",background:"#f4f8fc",color:"#1a3a7a",
+                  fontWeight:800,fontSize:13.5,textAlign:"center",textDecoration:"none"}}>
+                  🛏 Book the hotel</a>}
+            </div>
+
+            {ready&&<div style={{display:"flex",gap:10,marginTop:7}}>
+              <a href={skyLink(from.code,s.code,r.fly)} target="_blank" rel="noopener"
+                style={{fontSize:10.5,color:"#5a7a9a"}}>compare on Skyscanner</a>
+              <a href={mmtLink(from.code,s.code,r.fly)} target="_blank" rel="noopener"
+                style={{fontSize:10.5,color:"#5a7a9a"}}>MakeMyTrip</a>
+            </div>}
+
+            <button onClick={()=>upStop(i,"booked",!s.booked)}
+              style={{width:"100%",marginTop:9,padding:"9px",borderRadius:8,
+              border:s.booked?"none":"1.5px solid #e0b0b0",
+              background:s.booked?"#1a7a3a":"#fff",
+              color:s.booked?"#fff":"#c0392b",fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
+              {s.booked?"✓ Booked — tap to undo":"Tick when booked"}</button>
+          </div>;
+        })}
+
+        {(()=>{
+          const last=(cur.stops||[])[cur.stops.length-1]||cur.origin;
+          const ready=last.code&&cur.origin.code;
+          return <div style={{border:"1px solid "+(cur.ret.booked?"#7ab88a":"#e6ece6"),
+            background:cur.ret.booked?"#f4faf5":"#fff",borderRadius:11,padding:"12px 13px",marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}>
+              <b style={{fontSize:14,color:"#1a5a3a"}}>
+                {(cur.stops||[]).length+1}. {last.city||"?"} → home</b>
+              <span style={{fontSize:11,color:"#8a9a8a"}}>{pretty(sch.home)}</span>
+            </div>
+            {ready&&<a href={flightLink(last.code,cur.origin.code,sch.home)} target="_blank" rel="noopener"
+              style={{display:"block",marginTop:10,padding:"12px",borderRadius:9,border:"none",
+              background:"#1a5a3a",color:"#fff",fontWeight:800,fontSize:13.5,
+              textAlign:"center",textDecoration:"none"}}>✈️ Book the flight home</a>}
+            <button onClick={()=>setCur({...cur,ret:{...cur.ret,booked:!cur.ret.booked}})}
+              style={{width:"100%",marginTop:9,padding:"9px",borderRadius:8,
+              border:cur.ret.booked?"none":"1.5px solid #e0b0b0",
+              background:cur.ret.booked?"#1a7a3a":"#fff",
+              color:cur.ret.booked?"#fff":"#c0392b",fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
+              {cur.ret.booked?"✓ Booked — tap to undo":"Tick when booked"}</button>
+          </div>;
+        })()}
+
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          <button onClick={saveCur} disabled={!!busy} style={{...btn,flex:1}}>
+            {busy==="s"?"Saving…":"Save trip"}</button>
+          <button onClick={()=>{
+            const lines=[cur.name,pretty(cur.start)+" → "+pretty(sch.home)+" · "+cur.pax+" of us",""];
+            (cur.stops||[]).forEach((s,i)=>{
+              const r=sch.rows[i]||{}; const from=i===0?cur.origin:cur.stops[i-1];
+              lines.push((s.booked?"✓ ":"○ ")+pretty(r.fly)+"  "+(from.city||"?")+" → "+(s.city||"?")+
+                "  ("+s.nights+" nights)"+(s.ref?"  ref "+s.ref:""));
+            });
+            const last=(cur.stops||[])[cur.stops.length-1]||cur.origin;
+            lines.push((cur.ret.booked?"✓ ":"○ ")+pretty(sch.home)+"  "+(last.city||"?")+" → home");
+            lines.push(""); lines.push("About "+money(f.total)+" all in, "+money(f.total/Math.max(1,cur.pax))+" each");
+            const txt=lines.join("\n");
+            if(navigator.share){ navigator.share({title:cur.name,text:txt}).catch(()=>{}); }
+            else if(navigator.clipboard){ navigator.clipboard.writeText(txt)
+              .then(()=>setMsg("✓ Copied — paste it to them"),()=>setMsg("✗ could not copy")); }
+          }} style={ghost}>📤 Send to family</button>
+        </div>
+      </div>}
+
+      {view==="plan"&&<div>
       <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
         <select value={cur.id} onChange={e=>{
             const t=trips.find(x=>x.id===e.target.value);
@@ -2874,11 +3010,11 @@ function TravelPlanner({ onClose }) {
           </div>
         </div>
         <label style={{fontSize:12,color:"#4a5a4a",display:"flex",alignItems:"center",gap:7,cursor:"pointer"}}>
-          <input type="checkbox" checked={!!cur.easyPace}
-            onChange={e=>setCur({...cur,easyPace:e.target.checked})}/>
-          Gentle pace — flat ground, seating, no long walks
+          <input type="checkbox" checked={!!cur.comfort}
+            onChange={e=>setCur({...cur,comfort:e.target.checked})}/>
+          Comfortable pace — no single-night stops, room to breathe
         </label>
-        {cur.easyPace&&<div style={{fontSize:10.5,color:"#8a7a5a",marginTop:5,lineHeight:1.5}}>
+        {cur.comfort&&<div style={{fontSize:10.5,color:"#8a7a5a",marginTop:5,lineHeight:1.5}}>
           Warnings appear below if any stop is shorter than 2 nights or the trip runs long without a rest day.</div>}
       </div>
 
@@ -2904,7 +3040,7 @@ function TravelPlanner({ onClose }) {
       {(cur.stops||[]).map((s,i)=>{
         const from = i===0 ? cur.origin : cur.stops[i-1];
         const r = sch.rows[i] || {fly:cur.start,arrive:cur.start,leave:cur.start};
-        const rushed = cur.easyPace && Number(s.nights)>0 && Number(s.nights)<2;
+        const rushed = cur.comfort && Number(s.nights)>0 && Number(s.nights)<2;
         return <div key={i} style={{background:"#fff",border:"1px solid "+(s.booked?"#7ab88a":"#e6ece6"),
           borderRadius:11,marginBottom:10,overflow:"hidden"}}>
           <div style={{padding:"11px 13px"}}>
@@ -2939,7 +3075,7 @@ function TravelPlanner({ onClose }) {
             {s.note&&<div style={{fontSize:11.5,color:"#6a7a6a",marginTop:5,fontStyle:"italic"}}>{s.note}</div>}
             {rushed&&<div style={{fontSize:11,color:"#a0661a",background:"#fdf8ec",
               padding:"6px 9px",borderRadius:7,marginTop:6}}>
-              One night here is hard going at a gentle pace — two gives a proper rest day.</div>}
+              Only one night here. Two would give you a full day without packing again.</div>}
 
             <div style={{display:"flex",gap:6,marginTop:9,flexWrap:"wrap"}}>
               {s.code&&from.code&&<a href={flightLink(from.code,s.code,r.fly)} target="_blank" rel="noopener"
@@ -3042,6 +3178,8 @@ function TravelPlanner({ onClose }) {
           setCur(list.length?list[0]:blankTrip());
         }} style={{...ghost,color:"#c33",borderColor:"#e8c0c0"}}>Delete</button>}
       </div>
+
+      </div>}
 
       <div style={{fontSize:10.5,color:"#8a9a8a",marginTop:14,lineHeight:1.6,
         borderLeft:"2px solid #dde4dd",paddingLeft:10}}>
