@@ -2894,6 +2894,18 @@ function cheapestNearby(destCode, iso) {
   return { month: names[best-1], idx: bestIdx, saving: 1 - bestIdx/arr[m-1] };
 }
 
+// Practical things that catch people out abroad, kept alongside the airports
+// so the itinerary can warn without anyone looking them up.
+const REGION_INFO = {
+  EUR:  { ccy:"EUR €",  visa:"Schengen visa needed — apply 4 to 6 weeks ahead", plug:"Type C/F, 230V" },
+  GULF: { ccy:"AED/OMR/QAR", visa:"Visa on arrival or e-visa for Indian passports — check per country", plug:"Type G, 230V" },
+  SEA:  { ccy:"local",  visa:"Visa on arrival or e-visa for most — Malaysia and Thailand are easy", plug:"varies, carry universal" },
+  FE:   { ccy:"local",  visa:"Visa needed in advance for China, Japan, Korea", plug:"Type A/B or C" },
+  AME:  { ccy:"USD $",  visa:"Visa needed well in advance — interview waits can be long", plug:"Type A/B, 110V" },
+  IN:   { ccy:"INR ₹",  visa:"", plug:"Type C/D/M, 230V" },
+  OTHER:{ ccy:"local",  visa:"Check visa requirements for an Indian passport", plug:"carry universal" }
+};
+
 function TravelPlanner({ onClose }) {
   const blankTrip = () => ({
     id: "tr_" + Date.now(),
@@ -3128,10 +3140,14 @@ function TravelPlanner({ onClose }) {
           background:view==="book"?"linear-gradient(135deg,#1a5a3a,#0d3a24)":"#eef2ec",
           color:view==="book"?"#fff":"#5a7a5a",fontWeight:800,fontSize:14,cursor:"pointer"}}>
           ✈️ Book it</button>
+        <button onClick={()=>setView("trip")} style={{flex:1,padding:"11px",borderRadius:10,border:"none",
+          background:view==="trip"?"linear-gradient(135deg,#7a4a1a,#4a2a08)":"#f6f0e8",
+          color:view==="trip"?"#fff":"#7a5a2a",fontWeight:800,fontSize:14,cursor:"pointer"}}>
+          📖 The trip</button>
         <button onClick={()=>setView("plan")} style={{flex:1,padding:"11px",borderRadius:10,border:"none",
           background:view==="plan"?"linear-gradient(135deg,#1a3a6a,#0d2a4a)":"#eef2f6",
           color:view==="plan"?"#fff":"#4a6a8a",fontWeight:800,fontSize:14,cursor:"pointer"}}>
-          🗓 Change the plan</button>
+          🗓 Edit</button>
       </div>
 
       {view==="book"&&<div>
@@ -3258,6 +3274,130 @@ function TravelPlanner({ onClose }) {
           }} style={ghost}>📤 Send to family</button>
         </div>
       </div>}
+
+      {view==="trip"&&(()=>{
+        // Every day laid out in order, so the trip reads as days lived rather
+        // than sectors booked. Tickets open from the day you need them.
+        const days=[];
+        (cur.stops||[]).forEach((s,i)=>{
+          const from = i===0 ? cur.origin : cur.stops[i-1];
+          const r = sch.rows[i] || {fly:cur.start,arrive:cur.start,leave:cur.start};
+          const n = Math.max(0,Number(s.nights)||0);
+          for(let d=0; d<n; d++){
+            days.push({ date: addDays(r.arrive,d), stop:s, idx:i,
+              arrival: d===0 ? from : null, dayOf: d+1, of: n });
+          }
+          if(n===0) days.push({ date:r.arrive, stop:s, idx:i, arrival:from, dayOf:0, of:0 });
+        });
+
+        const info = (code)=>REGION_INFO[regionOf(code)]||REGION_INFO.OTHER;
+        const mapLink=(place,city)=>"https://www.google.com/maps/search/?api=1&query="+
+          encodeURIComponent(place+" "+city);
+
+        return <div>
+          <div style={{background:"linear-gradient(135deg,#7a4a1a,#4a2a08)",borderRadius:12,
+            padding:"14px 16px",marginBottom:12,color:"#fff"}}>
+            <div style={{fontSize:19,fontWeight:800}}>{cur.name}</div>
+            <div style={{fontSize:12,opacity:.9,marginTop:4,lineHeight:1.6}}>
+              {pretty(cur.start)} → {pretty(sch.home)} · {days.length+1} days · {cur.pax} travelling<br/>
+              About {money(f.total/Math.max(1,cur.pax))} each, all in
+            </div>
+          </div>
+
+          {(()=>{
+            const regions=[...new Set((cur.stops||[]).map(s=>regionOf(s.code)).filter(x=>x!=="IN"))];
+            if(!regions.length) return null;
+            return <div style={{background:"#fdf8ec",border:"1px solid #e8d8b0",borderRadius:10,
+              padding:"11px 13px",marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:800,color:"#8a6a1a",marginBottom:6}}>BEFORE YOU GO</div>
+              {regions.map(rg=>{
+                const inf=REGION_INFO[rg]||REGION_INFO.OTHER;
+                return <div key={rg} style={{fontSize:11.5,color:"#6a5a3a",marginBottom:4,lineHeight:1.5}}>
+                  • {inf.visa||"No visa formalities"}<br/>
+                  <span style={{color:"#9a8a6a"}}>Money {inf.ccy} · plugs {inf.plug}</span>
+                </div>;
+              })}
+              <div style={{fontSize:11,color:"#9a8a6a",marginTop:5}}>
+                Also worth carrying: travel insurance, a copy of every passport, and one card that works abroad.</div>
+            </div>;
+          })()}
+
+          {days.map((d,k)=>{
+            const s=d.stop;
+            const r=sch.rows[d.idx]||{};
+            const attractions=String(s.note||"").split(/[,\n]/).map(x=>x.trim()).filter(Boolean);
+            return <div key={k} style={{display:"flex",gap:10,marginBottom:2}}>
+              <div style={{width:52,flexShrink:0,textAlign:"right",paddingTop:12}}>
+                <div style={{fontSize:10,color:"#a0a090",fontWeight:700}}>DAY {k+1}</div>
+                <div style={{fontSize:11,color:"#6a7a6a",fontWeight:700}}>{pretty(d.date).slice(4)}</div>
+              </div>
+              <div style={{flex:1,borderLeft:"2px solid "+(d.arrival?"#7a4a1a":"#e6e0d4"),
+                paddingLeft:12,paddingBottom:12}}>
+                {d.arrival&&<div style={{background:"#fff",border:"1px solid #e6ece6",
+                  borderRadius:10,padding:"10px 12px",marginBottom:7}}>
+                  <div style={{fontSize:11,color:"#8a8a80"}}>
+                    ✈️ {d.arrival.city||"?"} → {s.city||"?"} · {pretty(r.fly)}</div>
+                  {s.ref&&<div style={{fontSize:11,color:"#6a7a6a",marginTop:2}}>ref {s.ref}</div>}
+                  <div style={{display:"flex",gap:6,marginTop:7,flexWrap:"wrap"}}>
+                    {s.docFlight&&<button onClick={()=>openDoc("flight",d.idx)} disabled={!!busy}
+                      style={{padding:"7px 10px",borderRadius:7,border:"1.5px solid #a8c8a8",
+                      background:"#f2f9f2",color:"#1a5a3a",fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                      📄 Ticket</button>}
+                    {s.docHotel&&<button onClick={()=>openDoc("hotel",d.idx)} disabled={!!busy}
+                      style={{padding:"7px 10px",borderRadius:7,border:"1.5px solid #a8c8d8",
+                      background:"#f2f7fc",color:"#1a3a7a",fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                      🛏 Hotel booking</button>}
+                    {!s.docFlight&&!s.docHotel&&<span style={{fontSize:10.5,color:"#b0b0a0"}}>
+                      no documents attached yet</span>}
+                  </div>
+                </div>}
+
+                <div style={{fontSize:13.5,fontWeight:700,color:"#1a5a3a"}}>
+                  {s.city||"?"}{d.of>1?<span style={{fontWeight:400,color:"#a0a090",fontSize:11}}>
+                    {"  day "+d.dayOf+" of "+d.of}</span>:null}
+                </div>
+
+                {attractions.length>0&&d.dayOf<=1&&
+                  <div style={{marginTop:6,display:"flex",gap:5,flexWrap:"wrap"}}>
+                    {attractions.slice(0,6).map((a,z)=>
+                      <a key={z} href={mapLink(a,s.city)} target="_blank" rel="noopener"
+                        style={{fontSize:11,padding:"5px 9px",borderRadius:20,
+                        background:"#f2f6f2",color:"#3a5a3a",textDecoration:"none",
+                        border:"1px solid #e0e8e0"}}>📍 {a}</a>)}
+                  </div>}
+
+                <div style={{fontSize:10.5,color:"#a0a090",marginTop:6}}>
+                  about {money(Number(cur.daily)||0)} each today
+                  {s.city&&<> · <a href={mapLink("things to do",s.city)} target="_blank" rel="noopener"
+                    style={{color:"#5a7a9a"}}>what to see here</a></>}
+                </div>
+              </div>
+            </div>;
+          })}
+
+          <div style={{display:"flex",gap:10,marginBottom:2}}>
+            <div style={{width:52,flexShrink:0,textAlign:"right",paddingTop:12}}>
+              <div style={{fontSize:10,color:"#a0a090",fontWeight:700}}>DAY {days.length+1}</div>
+              <div style={{fontSize:11,color:"#6a7a6a",fontWeight:700}}>{pretty(sch.home).slice(4)}</div>
+            </div>
+            <div style={{flex:1,borderLeft:"2px solid #7a4a1a",paddingLeft:12,paddingBottom:12}}>
+              <div style={{background:"#fff",border:"1px solid #e6ece6",borderRadius:10,padding:"10px 12px"}}>
+                <div style={{fontSize:11,color:"#8a8a80"}}>✈️ Home to {cur.origin.city}</div>
+                {cur.ret.doc&&<button onClick={()=>openDoc("ret",0)} disabled={!!busy}
+                  style={{marginTop:7,padding:"7px 10px",borderRadius:7,border:"1.5px solid #a8c8a8",
+                  background:"#f2f9f2",color:"#1a5a3a",fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                  📄 Ticket</button>}
+              </div>
+            </div>
+          </div>
+
+          <div style={{fontSize:10.5,color:"#8a9a8a",marginTop:10,lineHeight:1.6,
+            borderLeft:"2px solid #dde4dd",paddingLeft:10}}>
+            Places come from the "what you will do here" note on each city — separate them with commas
+            and each becomes a map link. Tickets open from the day you need them.
+          </div>
+        </div>;
+      })()}
 
       {view==="plan"&&<div>
       <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
