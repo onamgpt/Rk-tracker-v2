@@ -4145,6 +4145,7 @@ function FieldAdmin({ onClose }) {
   };
   const inp={width:"100%",padding:"8px",borderRadius:7,border:"1.5px solid #cfd8cf",fontSize:13,boxSizing:"border-box"};
   const lab={fontSize:11,fontWeight:700,color:"#1a5a3a",display:"block",marginBottom:3};
+  const btn={width:"100%",padding:"11px",borderRadius:9,border:"none",background:"#1a5a3a",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"};
   const tabBtn=(k,l)=>(<button key={k} onClick={()=>{setTab(k);setMsg("");}} style={{padding:"7px 11px",borderRadius:8,border:"none",
     background:tab===k?"#1a5a3a":"#e8f0e8",color:tab===k?"#fff":"#3a5a3a",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>{l}</button>);
   const STATUSES=["Placed","Confirmed","Packed","Dispatched","Delivered"];
