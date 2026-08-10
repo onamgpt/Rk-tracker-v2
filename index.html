@@ -10941,7 +10941,7 @@ function AIMTrading({ onClose }) {
   const kiteLogin=async()=>{
     const d=await kiteCall({action:"loginUrl"});
     if(d&&d.url) window.open(d.url,"_blank");
-    setMsg("Log in, then copy the request_token from the address bar and paste it below.");
+    setMsg("Log in, then copy the WHOLE address from the address bar and paste it below. The token will be picked out of it.");
   };
 
   // Zerodha request tokens are single-use. If the redirect lands anywhere that
@@ -10971,7 +10971,12 @@ function AIMTrading({ onClose }) {
     if(!reqTok.trim()) return;
     setBusy("kite"); setMsg("");
     try{
-      const d=await kiteCall({action:"getToken",request_token:reqTok.trim()});
+      // On a phone it is far easier to copy the whole redirect URL from the
+      // address bar than to select the token out of it, so accept either.
+      let rt=reqTok.trim();
+      const m=rt.match(/request_token=([^&\s]+)/);
+      if(m) rt=m[1];
+      const d=await kiteCall({action:"getToken",request_token:rt});
       const t=d&&d.data&&d.data.access_token;
       if(!t) throw new Error((d&&d.message)||"could not exchange token");
       saveKite(t); setReqTok(""); setMsg("✓ Zerodha connected for today");
@@ -11243,7 +11248,7 @@ function AIMTrading({ onClose }) {
               <button onClick={kiteLogin} style={{...btn,background:"#5a3a1a",color:"#fff",width:"100%",marginBottom:6}}>
                 Open Zerodha login</button>
               <div style={{display:"flex",gap:5}}>
-                <input value={reqTok} onChange={e=>setReqTok(e.target.value)} placeholder="paste request_token" style={{...inp,marginBottom:0}}/>
+                <input value={reqTok} onChange={e=>setReqTok(e.target.value)} placeholder="paste the whole address, or just the token" style={{...inp,marginBottom:0}}/>
                 <button onClick={exchangeToken} disabled={!!busy} style={{...btn,background:"#555",color:"#fff",flexShrink:0}}>
                   {busy==="kite"?"…":"Connect"}</button>
               </div>
