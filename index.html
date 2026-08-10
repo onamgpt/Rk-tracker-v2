@@ -2956,6 +2956,86 @@ function TravelPlanner({ onClose }) {
   };
 
   const upStop=(i,f,v)=>setCur(c=>({...c,stops:c.stops.map((s,j)=>j===i?{...s,[f]:v}:s)}));
+
+  const MAX_DOC = 4 * 1024 * 1024;   // 4 MB
+
+  // Each attachment lives under its own key. Tickets are large, and holding
+  // them inside the trip record would make every save carry every document.
+  const docKey = (kind, i) => "travel_doc_" + cur.id + "_" + i + "_" + kind;
+
+  const attachDoc = async (kind, i, file) => {
+    if(!file) return;
+    if(file.size > MAX_DOC){
+      setMsg("✗ That file is "+(file.size/1048576).toFixed(1)+" MB — 4 MB is the limit");
+      return;
+    }
+    setBusy("doc"+kind+i); setMsg("");
+    try{
+      const b64 = await new Promise((res,rej)=>{
+        const r=new FileReader();
+        r.onload=()=>res(String(r.result));
+        r.onerror=()=>rej(new Error("could not read the file"));
+        r.readAsDataURL(file);
+      });
+      await sheetsAPI("savePortfolio",{key:docKey(kind,i),user:"main",
+        data:{ name:file.name, type:file.type, size:file.size, b64 }});
+      const meta={ name:file.name, size:file.size, at:new Date().toISOString().slice(0,10) };
+      if(kind==="ret") setCur(c=>({...c,ret:{...c.ret,doc:meta}}));
+      else upStop(i, kind==="flight"?"docFlight":"docHotel", meta);
+      setMsg("✓ "+file.name+" attached — remember to save the trip");
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const openDoc = async (kind, i) => {
+    setBusy("open"+kind+i);
+    try{
+      const r=await sheetsAPI("getPortfolio",{key:docKey(kind,i),user:"main"});
+      const d=r&&r.data;
+      if(!d||!d.b64) throw new Error("the file could not be found");
+      const parts=String(d.b64).split(",");
+      const bin=atob(parts[1]||"");
+      const arr=new Uint8Array(bin.length);
+      for(let k=0;k<bin.length;k++) arr[k]=bin.charCodeAt(k);
+      const url=URL.createObjectURL(new Blob([arr],{type:d.type||"application/pdf"}));
+      window.open(url,"_blank");
+      setTimeout(()=>URL.revokeObjectURL(url),60000);
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const removeDoc = async (kind, i) => {
+    if(!window.confirm("Remove this attachment?")) return;
+    try{ await sheetsAPI("savePortfolio",{key:docKey(kind,i),user:"main",data:null}); }catch(e){}
+    if(kind==="ret") setCur(c=>({...c,ret:{...c.ret,doc:null}}));
+    else upStop(i, kind==="flight"?"docFlight":"docHotel", null);
+    setMsg("✓ Removed — remember to save the trip");
+  };
+
+  const docRow = (kind, i, meta, label) => (
+    <div style={{display:"flex",alignItems:"center",gap:7,marginTop:6}}>
+      {meta
+        ? <>
+            <button onClick={()=>openDoc(kind,i)} disabled={!!busy}
+              style={{flex:1,padding:"9px",borderRadius:8,border:"1.5px solid #a8c8a8",
+              background:"#f2f9f2",color:"#1a5a3a",fontWeight:700,fontSize:12,
+              cursor:"pointer",textAlign:"left"}}>
+              📄 {meta.name.length>26?meta.name.slice(0,24)+"…":meta.name}
+              <span style={{color:"#8a9a8a",fontWeight:400}}>
+                {"  "+(meta.size/1024).toFixed(0)+" KB"}</span>
+            </button>
+            <button onClick={()=>removeDoc(kind,i)}
+              style={{border:"none",background:"none",color:"#c33",fontSize:15,cursor:"pointer"}}>×</button>
+          </>
+        : <label style={{flex:1,padding:"9px",borderRadius:8,border:"1px dashed #c8c8b8",
+            background:"#fdfdfa",color:"#8a8a70",fontWeight:600,fontSize:11.5,
+            cursor:"pointer",textAlign:"center",display:"block"}}>
+            {busy==="doc"+kind+i ? "Attaching…" : "📎 "+label}
+            <input type="file" accept="application/pdf,image/*" style={{display:"none"}}
+              onChange={e=>{ attachDoc(kind,i,e.target.files&&e.target.files[0]); e.target.value=""; }}/>
+          </label>}
+    </div>
+  );
   const flightLink=(from,to,iso)=>"https://www.google.com/travel/flights?q="+
     encodeURIComponent("Flights from "+from+" to "+to+" on "+iso+" one way for "+(cur?cur.pax:1)+" passengers");
   const hotelLink=(city,ci,co)=>"https://www.booking.com/searchresults.html?ss="+
@@ -3016,6 +3096,11 @@ function TravelPlanner({ onClose }) {
             fontSize:12.5,fontWeight:700}}>
             {f.booked} of {(cur.stops||[]).length+1} sectors booked
             {f.booked===(cur.stops||[]).length+1?" — all done ✓":""}
+            {(()=>{
+              const docs=(cur.stops||[]).reduce((n,s)=>n+(s.docFlight?1:0)+(s.docHotel?1:0),0)
+                + (cur.ret&&cur.ret.doc?1:0);
+              return docs?<span style={{fontWeight:400,opacity:.85}}>{" · "+docs+" document"+(docs===1?"":"s")+" attached"}</span>:null;
+            })()}
           </div>
         </div>
 
@@ -3070,6 +3155,9 @@ function TravelPlanner({ onClose }) {
               background:s.booked?"#1a7a3a":"#fff",
               color:s.booked?"#fff":"#c0392b",fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
               {s.booked?"✓ Booked — tap to undo":"Tick when booked"}</button>
+
+            {docRow("flight",i,s.docFlight,"Attach the ticket")}
+            {Number(s.nights)>0&&docRow("hotel",i,s.docHotel,"Attach the hotel booking")}
           </div>;
         })}
 
@@ -3093,6 +3181,7 @@ function TravelPlanner({ onClose }) {
               background:cur.ret.booked?"#1a7a3a":"#fff",
               color:cur.ret.booked?"#fff":"#c0392b",fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
               {cur.ret.booked?"✓ Booked — tap to undo":"Tick when booked"}</button>
+            {docRow("ret",0,cur.ret.doc,"Attach the ticket")}
           </div>;
         })()}
 
