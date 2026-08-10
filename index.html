@@ -2959,6 +2959,30 @@ function FieldConsole({ onClose, rootMode, onOpenFull }) {
     try{ const sk=await sheetsAPI("getPortfolio",{key:"field_stock",user:"main"}); if(sk&&sk.data&&Array.isArray(sk.data)) setStock(sk.data); }catch(e){}
   })(); },[]);
 
+  // Brand names offered as they type, drawn from the product master, any
+  // published rates, and whatever has actually been ordered before. This means
+  // no rate list has to be maintained just so an order can be placed — a list
+  // that goes stale the moment a price or discount changes.
+  const brandSuggestions = React.useMemo(()=>{
+    const s=new Set();
+    (pmaster||[]).forEach(m=>{ if(m.name) s.add(String(m.name).trim()); });
+    (rates||[]).forEach(r=>{ if(r.name) s.add(String(r.name).trim()); });
+    (allOrders||[]).forEach(o=>(o.lines||[]).forEach(l=>{ if(l.item) s.add(String(l.item).trim()); }));
+    (stock||[]).forEach(x=>{ if(x.name) s.add(String(x.name).trim()); });
+    return Array.from(s).sort((a,b)=>a.localeCompare(b));
+  },[pmaster,rates,allOrders,stock]);
+
+  // The last rate this party was charged for an item, so a repeat order does
+  // not mean remembering a number.
+  const lastRateFor = (item, partyName) => {
+    const rows=(allOrders||[]).filter(o=>!partyName||o.party===partyName);
+    for(let i=0;i<rows.length;i++){
+      const hit=(rows[i].lines||[]).find(l=>String(l.item).toLowerCase()===String(item).toLowerCase());
+      if(hit&&Number(hit.rate)>0) return Number(hit.rate);
+    }
+    return 0;
+  };
+
   const rateOf = n => {
     const c=cart&&cart[n];
     if(c&&Number(c.rate)>0) return Number(c.rate);   // item entered by hand
@@ -3153,6 +3177,10 @@ function FieldConsole({ onClose, rootMode, onOpenFull }) {
         background:msg[0]==="✓"?"#e8f5e9":"#fdecea",padding:"8px 10px",borderRadius:8}}>{msg}</div>}
 
       {tab==="order"&&<div>
+        <datalist id="rk-brands">
+          {brandSuggestions.map(b=><option key={b} value={b}/>)}
+        </datalist>
+
         {askOutlet&&<div style={{background:"#fdf8ec",border:"1.5px solid #e8d0a0",borderRadius:12,
           padding:"13px 14px",marginBottom:12}}>
           <div style={{fontSize:9.5,fontWeight:800,color:"#8a6a1a",letterSpacing:.4,marginBottom:5}}>
@@ -3224,21 +3252,29 @@ function FieldConsole({ onClose, rootMode, onOpenFull }) {
           ? <div style={{marginBottom:9}}>
               <div style={{fontSize:11.5,color:"#8a6a1a",background:"#fdf8ec",padding:"10px 12px",
                 borderRadius:9,marginBottom:8}}>
-                No rate list published yet. You can still book by entering the item and rate yourself.</div>
+                Type the brand and the rate you quoted. Past brands are suggested as you type.</div>
               {otherOpen
                 ? <div style={{background:"#fdf8ec",border:"1.5px solid #e8d0a0",borderRadius:10,padding:"11px 12px"}}>
-                    <input value={otherName} onChange={e=>setOtherName(e.target.value)}
-                      placeholder="item the party asked for" style={{...inp,marginBottom:6}}/>
+                    <input value={otherName} list="rk-brands"
+                      onChange={e=>{
+                        setOtherName(e.target.value);
+                        const r=lastRateFor(e.target.value,party);
+                        if(r>0) setOtherRate(String(r));
+                      }}
+                      placeholder="start typing the brand" style={{...inp,marginBottom:6}}/>
                     <input type="number" value={otherRate} inputMode="decimal"
                       onChange={e=>setOtherRate(e.target.value)}
-                      placeholder="rate you quoted (₹)" style={{...inp,marginBottom:8}}/>
-                    <div style={{display:"flex",gap:6}}>
+                      placeholder="rate you quoted (₹)" style={{...inp,marginBottom:4}}/>
+                    {otherName&&lastRateFor(otherName,party)>0&&
+                      <div style={{fontSize:10.5,color:"#8a7a5a",marginBottom:8}}>
+                        last time this party paid ₹{lastRateFor(otherName,party)} — change it if today's rate differs</div>}
+                    <div style={{display:"flex",gap:6,marginTop:4}}>
                       <button onClick={()=>{
                         if(!otherName.trim()) return;
                         setCart({...cart,[otherName.trim()]:{qty:1,unit:"cases",
                           rate:Number(otherRate)||0, offList:true}});
                         setOtherName("");setOtherRate("");setOtherOpen(false);
-                        setMsg("✓ Added — the office will confirm the rate");
+                        setMsg("✓ Added — set the quantity below");
                       }} style={{flex:1,padding:"9px",borderRadius:8,border:"none",
                         background:"#c98a1a",color:"#fff",fontWeight:800,fontSize:12.5,cursor:"pointer"}}>
                         Add to cart</button>
@@ -3308,8 +3344,13 @@ function FieldConsole({ onClose, rootMode, onOpenFull }) {
                     padding:"11px 12px",marginBottom:10}}>
                     <div style={{fontSize:11,fontWeight:800,color:"#8a6a1a",marginBottom:6}}>
                       ITEM NOT ON THE LIST</div>
-                    <input value={otherName} onChange={e=>setOtherName(e.target.value)}
-                      placeholder="what the party asked for" style={{...inp,marginBottom:6}}/>
+                    <input value={otherName} list="rk-brands"
+                      onChange={e=>{
+                        setOtherName(e.target.value);
+                        const r=lastRateFor(e.target.value,party);
+                        if(r>0) setOtherRate(String(r));
+                      }}
+                      placeholder="start typing the brand" style={{...inp,marginBottom:6}}/>
                     <input type="number" value={otherRate} inputMode="decimal"
                       onChange={e=>setOtherRate(e.target.value)}
                       placeholder="rate you quoted (₹)" style={{...inp,marginBottom:8}}/>
@@ -12157,16 +12198,16 @@ function App(){
                 {l:"🔒 PIN Access",fn:()=>setShowPins(true), ownerOnly:true},
                 {l:"📊 Tally",fn:()=>setShowTally(true), ownerOnly:true},
                 {l:"📍 Location",fn:()=>setShowLocation(true), ownerOnly:true},
-                {l:"📒 Day Book",fn:()=>setShowDayBook(true)},
+                {l:"📒 Day Book",fn:()=>setShowDayBook(true), notSales:true},
                 {l:"🏥 Health",fn:()=>setShowHealth(true), personalOnly:true},
                 {l:"🏋️ Gym",fn:()=>setShowGym(true), personalOnly:true},
                 {l:"👨‍👩‍👧 Family",fn:()=>setShowFamily(true), personalOnly:true},
                 {l:"💬 Remind",fn:()=>setShowPaymentReminders(true), ownerOnly:true},
                 {l:"🚚 Logistics",fn:()=>setShowLogistics(true), ownerOnly:true},
                 {l:"📧 Email Scan",fn:()=>setShowEmailScan(true), ownerOnly:true},
-                {l:"🔗 Share",fn:()=>setShowShare(true)},
-                {l:"⚙️ Settings",fn:()=>setShowDD(true)}
-              ].filter(item => (!item.ownerOnly || IS_OWNER) && (!item.personalOnly || IS_OWNER || IS_FAMILY) && (!item.ordersOnly || IS_ORDERS_USER)).map(it=><button key={it.l} onClick={()=>{setNavMenuOpen(false);it.fn();}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:6,border:"none",background:"transparent",color:"#f0dcae",cursor:"pointer",fontSize:13,fontWeight:600}}>{it.l}</button>)}
+                {l:"🔗 Share",fn:()=>setShowShare(true), notSales:true},
+                {l:"⚙️ Settings",fn:()=>setShowDD(true), notSales:true}
+              ].filter(item => (!item.ownerOnly || IS_OWNER) && (!item.personalOnly || IS_OWNER || IS_FAMILY) && (!item.ordersOnly || IS_ORDERS_USER) && (!item.notSales || !IS_SALES)).map(it=><button key={it.l} onClick={()=>{setNavMenuOpen(false);it.fn();}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:6,border:"none",background:"transparent",color:"#f0dcae",cursor:"pointer",fontSize:13,fontWeight:600}}>{it.l}</button>)}
             </div>}
           </div>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
