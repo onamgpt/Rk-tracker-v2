@@ -4163,6 +4163,65 @@ function FieldAdmin({ onClose }) {
       {msg&&<div style={{fontSize:13,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:9,
         background:msg[0]==="✓"?"#e8f5e9":"#fdecea",padding:"8px 10px",borderRadius:8}}>{msg}</div>}
 
+      {(()=>{
+        // Everything the nine men need before the link is worth sending them.
+        // An empty catalogue or a missing target is a bad first impression that
+        // is expensive to undo with people changing how they work after decades.
+        const rateCount=(rates||[]).length;
+        const ratesLinked=(rates||[]).filter(r=>r.sku).length;
+        const withTarget=TEAM.filter(u=>Number((targets||{})[u])>0).length;
+        const withHQ=TEAM.filter(u=>(locs||[]).some(l=>
+          String(l.name||"").toLowerCase()===u.toLowerCase()&&(l.coordinates||l.address))).length;
+        const slabsSet=["hq","exhq","outstation"].filter(k=>Number((slabs||{})[k])>0).length;
+        const gameSet=Number((incent||{}).rupeesPerPoint)>0;
+
+        const checks=[
+          { ok: rateCount>0, label:"Rate list published",
+            detail: rateCount>0?(rateCount+" items"):"empty — their catalogue will be blank",
+            fix:"💵 Rates → Pull products from the master → Publish" },
+          { ok: rateCount>0&&ratesLinked===rateCount, label:"Every rate linked to the master",
+            detail: rateCount===0?"no rates yet":(ratesLinked+" of "+rateCount+" linked"),
+            fix:"💵 Rates → paste the SKU into each item, or profit scoring stays blank" },
+          { ok: withTarget===TEAM.length, label:"Daily targets set",
+            detail: withTarget+" of "+TEAM.length+" people",
+            fix:"🎯 Targets → enter a daily rupee figure for each person" },
+          { ok: withHQ===TEAM.length, label:"Headquarters on file",
+            detail: withHQ+" of "+TEAM.length+" people",
+            fix:"📍 Locations → choose the person, paste their coordinates" },
+          { ok: slabsSet===3, label:"Allowance rates set",
+            detail: slabsSet+" of 3 bands",
+            fix:"📍 Locations → Allowance slabs → HQ, Ex-HQ, Outstation" },
+          { ok: gameSet, label:"Incentive value set",
+            detail: gameSet?("₹"+incent.rupeesPerPoint+" per point"):"not set",
+            fix:"🏏 Game → rupees per point and the minimum to claim" }
+        ];
+        const done=checks.filter(c=>c.ok).length;
+        if(done===checks.length) return <div style={{background:"#e8f5e9",border:"1.5px solid #7ab88a",
+          borderRadius:11,padding:"11px 13px",marginBottom:11}}>
+          <b style={{fontSize:13,color:"#1a5a3a"}}>✓ Ready to hand over</b>
+          <div style={{fontSize:11.5,color:"#3a6a3a",marginTop:3}}>
+            Everything the team needs is in place. Send one person the link first and
+            have him book a real order before the rest.</div>
+        </div>;
+
+        return <details open style={{background:"#fdf8ec",border:"1.5px solid #e8d0a0",
+          borderRadius:11,padding:"11px 13px",marginBottom:11}}>
+          <summary style={{fontSize:13,fontWeight:800,color:"#8a6a1a",cursor:"pointer"}}>
+            Before you send the link — {done} of {checks.length} ready</summary>
+          <div style={{marginTop:8}}>
+            {checks.map((c,i)=><div key={i} style={{padding:"6px 0",
+              borderTop:i?"1px solid #f0e4c8":"none"}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                <span style={{fontSize:12.5,fontWeight:700,color:c.ok?"#1a7a3a":"#8a5a1a"}}>
+                  {c.ok?"✓":"○"} {c.label}</span>
+                <span style={{fontSize:11,color:"#8a8a7a",textAlign:"right"}}>{c.detail}</span>
+              </div>
+              {!c.ok&&<div style={{fontSize:11,color:"#9a7a4a",marginTop:2}}>{c.fix}</div>}
+            </div>)}
+          </div>
+        </details>;
+      })()}
+
       {tab==="report"&&(()=>{
         const {rows,tot}=rollupField(reports,orders,parties,days,gpOf);
         const ranked=rows.slice().sort((a,b)=>{
