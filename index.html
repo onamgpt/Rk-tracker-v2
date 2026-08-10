@@ -12923,7 +12923,11 @@ function App(){
           <button onClick={()=>setShowAI(true)} className="ai-btn" style={{fontSize:11,padding:"6px 11px"}}>🧠 AI</button>
           <div style={{position:"relative",display:"inline-block"}}>
             <button onClick={()=>setNavMenuOpen(o=>!o)} style={{fontSize:12,padding:"7px 14px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#5a3a1a,#3a2a0a)",color:"#fff",fontWeight:700,cursor:"pointer"}}>☰ Menu ▾</button>
-            {navMenuOpen&&<div style={{position:"absolute",top:"112%",left:0,zIndex:950,background:"#2a2318",border:"1px solid #c8a060",borderRadius:10,padding:5,minWidth:180,boxShadow:"0 8px 22px rgba(0,0,0,.5)"}}>
+            {navMenuOpen&&<div style={{position:"absolute",top:"112%",left:0,zIndex:950,background:"#2a2318",border:"1px solid #c8a060",borderRadius:10,padding:5,minWidth:180,boxShadow:"0 8px 22px rgba(0,0,0,.5)",
+              // Twenty-odd entries run past the bottom of a phone screen with
+              // nothing to scroll, so the last items were simply unreachable.
+              maxHeight:"70vh",overflowY:"auto",WebkitOverflowScrolling:"touch",
+              overscrollBehavior:"contain"}}>
               {[
                 {l:"📈 CFO Brief",fn:()=>setShowCFO(true), ownerOnly:true},
                 {l:"🏦 Bank Archive",fn:()=>setShowBank(true), ownerOnly:true},
