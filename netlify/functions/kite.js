@@ -104,16 +104,36 @@ exports.handler = async (event) => {
       var list = (body.symbols || []).filter(Boolean);
       var out = {};
       var failed = [];
+      var authError = null;
+
       for (var i = 0; i < list.length; i++) {
         var key = "NSE:" + list[i];
         try {
           var raw = await kiteGet("/quote?i=" + encodeURIComponent(key), body.access_token);
           var parsed = JSON.parse(raw);
+
+          // An expired or invalid session fails every symbol identically. Report
+          // it as what it is, rather than listing the whole portfolio as if each
+          // ticker were wrong.
+          if (parsed && parsed.status === "error") {
+            var et = String(parsed.error_type || "");
+            if (/Token|PermissionException|Forbidden/i.test(et) ||
+                /access_token|api_key|permission/i.test(String(parsed.message || ""))) {
+              authError = parsed.message || et || "session expired";
+              break;
+            }
+          }
+
           if (parsed && parsed.data && parsed.data[key]) out[key] = parsed.data[key];
           else failed.push(list[i]);
         } catch (e) {
           failed.push(list[i]);
         }
+      }
+
+      if (authError) {
+        return {statusCode:200, headers:h,
+          body: JSON.stringify({ status:"error", authError: authError, data: {}, failed: [] })};
       }
       return {statusCode:200, headers:h,
         body: JSON.stringify({ status:"success", data: out, failed: failed })};

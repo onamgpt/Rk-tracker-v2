@@ -11012,6 +11012,10 @@ function AIMTrading({ onClose }) {
         const p=row&&row.last_price;
         if(p){ await api({action:"updatePrice",symbol:h.symbol,price:p}); n++; }
       }
+      if(q&&q.authError){
+        setMsg("✗ Zerodha session expired — tap Connect Zerodha above, then refresh prices again");
+        setBusy(""); return;
+      }
       const bad=(q&&q.failed)||[];
       setMsg("✓ "+n+" price(s) updated"+
         (bad.length?(" · no NSE quote for "+bad.join(", ")+" — check the symbol"):" · signals recomputed"));
