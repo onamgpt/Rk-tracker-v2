@@ -2718,6 +2718,341 @@ function rollupField(reports, orders, parties, days, gpOf) {
 // selling rates only. Everything submitted is marked unverified
 // until the office reconciles it.
 // ============================================================
+// ------------------------------------------------------------
+// Travel Planner. Sector-by-sector: change one date or night count
+// and everything after it moves. Stored in Supabase like the rest of
+// the tracker, so a trip planned on the desktop is on the phone at
+// the airport.
+// ------------------------------------------------------------
+function TravelPlanner({ onClose }) {
+  const blankTrip = () => ({
+    id: "tr_" + Date.now(),
+    name: "New trip",
+    kind: "business",
+    start: new Date().toISOString().slice(0,10),
+    pax: 1,
+    daily: 2000,
+    currency: "₹",
+    origin: { city:"Bangalore", code:"BLR" },
+    stops: [{ city:"", code:"", nights:2, flight:0, hotel:0, note:"", booked:false, ref:"", actual:0 }],
+    ret: { flight:0, booked:false, ref:"", actual:0 },
+    easyPace: false
+  });
+
+  const [trips,setTrips]=useState([]);
+  const [cur,setCur]=useState(null);
+  const [busy,setBusy]=useState("");
+  const [msg,setMsg]=useState("");
+  const [openEdit,setOpenEdit]=useState({});
+
+  useEffect(()=>{ (async()=>{
+    try{
+      const r=await sheetsAPI("getPortfolio",{key:"travel_trips",user:"main"});
+      const list=(r&&r.data&&Array.isArray(r.data))?r.data:[];
+      setTrips(list);
+      setCur(list.length?list[0]:blankTrip());
+    }catch(e){ setCur(blankTrip()); }
+  })(); },[]);
+
+  const persist=async(list)=>{
+    setTrips(list);
+    try{ await sheetsAPI("savePortfolio",{key:"travel_trips",user:"main",data:list}); }
+    catch(e){ setMsg("✗ could not save"); }
+  };
+
+  const saveCur=async()=>{
+    if(!cur) return;
+    setBusy("s");
+    const list=trips.some(t=>t.id===cur.id)
+      ? trips.map(t=>t.id===cur.id?cur:t)
+      : [cur,...trips];
+    await persist(list);
+    setMsg("✓ Saved"); setBusy("");
+    setTimeout(()=>setMsg(""),2500);
+  };
+
+  const addDays=(iso,n)=>{ const p=iso.split("-");
+    const d=new Date(Date.UTC(+p[0],+p[1]-1,+p[2])); d.setUTCDate(d.getUTCDate()+n);
+    return d.toISOString().slice(0,10); };
+  const pretty=(iso)=>{ if(!iso) return "";
+    const p=iso.split("-"), d=new Date(Date.UTC(+p[0],+p[1]-1,+p[2]));
+    const dd=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], mm=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return dd[d.getUTCDay()]+" "+d.getUTCDate()+" "+mm[d.getUTCMonth()]; };
+  const money=(n)=>"₹"+Math.round(Number(n)||0).toLocaleString("en-IN");
+
+  const schedule=()=>{
+    if(!cur) return {rows:[],home:""};
+    const rows=[]; let cursor=cur.start;
+    (cur.stops||[]).forEach(s=>{
+      const leave=addDays(cursor,Math.max(0,Number(s.nights)||0));
+      rows.push({fly:cursor,arrive:cursor,leave:leave});
+      cursor=leave;
+    });
+    return {rows,home:cursor};
+  };
+
+  const figures=()=>{
+    if(!cur) return {nights:0,booked:0,total:0,actual:0};
+    let nights=0,flights=0,hotels=0,booked=0,actual=0;
+    (cur.stops||[]).forEach(s=>{
+      const n=Math.max(0,Number(s.nights)||0);
+      nights+=n; flights+=Number(s.flight)||0; hotels+=(Number(s.hotel)||0)*n;
+      if(s.booked) booked++; actual+=Number(s.actual)||0;
+    });
+    flights+=Number(cur.ret.flight)||0;
+    if(cur.ret.booked) booked++;
+    actual+=Number(cur.ret.actual)||0;
+    const total=flights*cur.pax+hotels+(Number(cur.daily)||0)*cur.pax*(nights+1);
+    return {nights,booked,total,actual};
+  };
+
+  const upStop=(i,f,v)=>setCur(c=>({...c,stops:c.stops.map((s,j)=>j===i?{...s,[f]:v}:s)}));
+  const flightLink=(from,to,iso)=>"https://www.google.com/travel/flights?q="+
+    encodeURIComponent("Flights from "+from+" to "+to+" on "+iso+" one way for "+(cur?cur.pax:1)+" passengers");
+  const hotelLink=(city,ci,co)=>"https://www.booking.com/searchresults.html?ss="+
+    encodeURIComponent(city+" city centre")+"&checkin="+ci+"&checkout="+co+
+    "&group_adults="+(cur?cur.pax:1)+"&no_rooms=1";
+
+  const inp={width:"100%",padding:"8px",borderRadius:7,border:"1.5px solid #cfd8cf",fontSize:13,marginBottom:8,boxSizing:"border-box"};
+  const lab={fontSize:11,fontWeight:700,color:"#1a5a3a",display:"block",marginBottom:3};
+  const btn={padding:"9px 12px",borderRadius:8,border:"none",background:"#1a5a3a",color:"#fff",fontWeight:700,fontSize:12.5,cursor:"pointer"};
+  const ghost={...btn,background:"#fff",color:"#5a6a5a",border:"1px solid #d8e0d8"};
+
+  if(!cur) return <div style={{padding:20,fontSize:13,color:"#888"}}>Loading…</div>;
+  const sch=schedule(), f=figures();
+
+  return (
+    <div style={{padding:"14px 13px 40px",maxWidth:640,margin:"0 auto"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+        <span style={{fontSize:26}}>🧳</span>
+        <div style={{flex:1}}>
+          <h2 style={{margin:0,fontSize:18,color:"#1a5a3a"}}>Travel Planner</h2>
+          <div style={{fontSize:11,color:"#6a7a6a"}}>one hop at a time · saved to your account</div>
+        </div>
+      </div>
+
+      {msg&&<div style={{fontSize:12.5,color:msg[0]==="✓"?"#1a7a3a":"#a33",
+        background:msg[0]==="✓"?"#e8f5e9":"#fdecea",padding:"7px 10px",borderRadius:8,marginBottom:9}}>{msg}</div>}
+
+      <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+        <select value={cur.id} onChange={e=>{
+            const t=trips.find(x=>x.id===e.target.value);
+            if(t){ setCur(t); setOpenEdit({}); }
+          }} style={{...inp,flex:1,marginBottom:0,minWidth:150}}>
+          {!trips.some(t=>t.id===cur.id)&&<option value={cur.id}>{cur.name} (unsaved)</option>}
+          {trips.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <button onClick={()=>{setCur(blankTrip());setOpenEdit({});}} style={ghost}>+ New</button>
+      </div>
+
+      <div style={{background:"#f7faf7",borderRadius:10,padding:"11px 12px",marginBottom:11}}>
+        <label style={lab}>Trip name</label>
+        <input value={cur.name} onChange={e=>setCur({...cur,name:e.target.value})} style={inp}/>
+        <div style={{display:"flex",gap:6}}>
+          <div style={{flex:1}}>
+            <label style={lab}>Leaving</label>
+            <input type="date" value={cur.start} onChange={e=>setCur({...cur,start:e.target.value})} style={inp}/>
+          </div>
+          <div style={{width:90}}>
+            <label style={lab}>Travellers</label>
+            <input type="number" min="1" value={cur.pax} inputMode="numeric"
+              onChange={e=>setCur({...cur,pax:Math.max(1,Number(e.target.value)||1)})} style={inp}/>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          <div style={{flex:1}}>
+            <label style={lab}>Daily spend each (₹)</label>
+            <input type="number" value={cur.daily} inputMode="decimal"
+              onChange={e=>setCur({...cur,daily:Number(e.target.value)||0})} style={inp}/>
+          </div>
+          <div style={{flex:1}}>
+            <label style={lab}>Kind of trip</label>
+            <select value={cur.kind} onChange={e=>setCur({...cur,kind:e.target.value})} style={inp}>
+              <option value="business">Business</option>
+              <option value="family">Family</option>
+            </select>
+          </div>
+        </div>
+        <label style={{fontSize:12,color:"#4a5a4a",display:"flex",alignItems:"center",gap:7,cursor:"pointer"}}>
+          <input type="checkbox" checked={!!cur.easyPace}
+            onChange={e=>setCur({...cur,easyPace:e.target.checked})}/>
+          Gentle pace — flat ground, seating, no long walks
+        </label>
+        {cur.easyPace&&<div style={{fontSize:10.5,color:"#8a7a5a",marginTop:5,lineHeight:1.5}}>
+          Warnings appear below if any stop is shorter than 2 nights or the trip runs long without a rest day.</div>}
+      </div>
+
+      <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+        {[[String(f.nights+1)+" days", pretty(cur.start)+" → "+pretty(sch.home)],
+          [money(f.total), "estimated, all in"],
+          [money(f.total/Math.max(1,cur.pax)), "each"],
+          [f.booked+" / "+((cur.stops||[]).length+1), "sectors booked"]].map(([big,small],i)=>
+          <div key={i} style={{flex:"1 1 120px",background:"#fff",border:"1px solid #e6ece6",
+            borderRadius:9,padding:"9px 11px"}}>
+            <div style={{fontSize:15,fontWeight:800,color:"#1a5a3a"}}>{big}</div>
+            <div style={{fontSize:9.5,color:"#8a9a8a",fontWeight:700,letterSpacing:.3,textTransform:"uppercase"}}>{small}</div>
+          </div>)}
+      </div>
+
+      {f.actual>0&&<div style={{background:"#eef4fb",borderRadius:9,padding:"9px 12px",marginBottom:11,
+        fontSize:12,color:"#1a3a7a"}}>
+        Actually paid so far <b>{money(f.actual)}</b>
+        {f.total>0&&<span style={{color:f.actual>f.total?"#c0392b":"#1a7a3a"}}>
+          {" · "}{f.actual>f.total?"over":"under"} the estimate by {money(Math.abs(f.actual-f.total))}</span>}
+      </div>}
+
+      {(cur.stops||[]).map((s,i)=>{
+        const from = i===0 ? cur.origin : cur.stops[i-1];
+        const r = sch.rows[i] || {fly:cur.start,arrive:cur.start,leave:cur.start};
+        const rushed = cur.easyPace && Number(s.nights)>0 && Number(s.nights)<2;
+        return <div key={i} style={{background:"#fff",border:"1px solid "+(s.booked?"#7ab88a":"#e6ece6"),
+          borderRadius:11,marginBottom:10,overflow:"hidden"}}>
+          <div style={{padding:"11px 13px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:10,
+              color:"#8a9a8a",fontWeight:700,letterSpacing:.4}}>
+              <span>SECTOR {i+1}</span><span>{pretty(r.fly)}</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10,margin:"4px 0 2px"}}>
+              <b style={{fontSize:20,color:"#1a5a3a",fontFamily:"monospace"}}>{from.code||"—"}</b>
+              <span style={{flex:1,height:1,background:"#dde4dd"}}/>
+              <b style={{fontSize:20,color:"#1a5a3a",fontFamily:"monospace"}}>{s.code||"—"}</b>
+            </div>
+            <div style={{fontSize:11.5,color:"#8a8a80"}}>
+              {(from.city||"—")+" to "+(s.city||"—")}{s.ref?(" · ref "+s.ref):""}</div>
+
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+              marginTop:9,gap:8,flexWrap:"wrap"}}>
+              <b style={{fontSize:15,color:"#1a5a3a"}}>{s.city||"City"}</b>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <button onClick={()=>upStop(i,"nights",Math.max(0,(Number(s.nights)||0)-1))}
+                  style={{width:28,height:28,borderRadius:7,border:"1px solid #d8e0d8",
+                  background:"#fff",fontSize:16,cursor:"pointer",lineHeight:1}}>−</button>
+                <span style={{fontSize:12.5,minWidth:64,textAlign:"center",color:"#5a6a5a"}}>
+                  {s.nights} {Number(s.nights)===1?"night":"nights"}</span>
+                <button onClick={()=>upStop(i,"nights",(Number(s.nights)||0)+1)}
+                  style={{width:28,height:28,borderRadius:7,border:"none",
+                  background:"#1a5a3a",color:"#fff",fontSize:16,cursor:"pointer",lineHeight:1}}>+</button>
+              </div>
+            </div>
+            <div style={{fontSize:11,color:"#8a9a8a",marginTop:3}}>
+              {pretty(r.arrive)} → {pretty(r.leave)} · room about {money((Number(s.hotel)||0)*Math.max(0,Number(s.nights)||0))}</div>
+            {s.note&&<div style={{fontSize:11.5,color:"#6a7a6a",marginTop:5,fontStyle:"italic"}}>{s.note}</div>}
+            {rushed&&<div style={{fontSize:11,color:"#a0661a",background:"#fdf8ec",
+              padding:"6px 9px",borderRadius:7,marginTop:6}}>
+              One night here is hard going at a gentle pace — two gives a proper rest day.</div>}
+
+            <div style={{display:"flex",gap:6,marginTop:9,flexWrap:"wrap"}}>
+              {s.code&&from.code&&<a href={flightLink(from.code,s.code,r.fly)} target="_blank" rel="noopener"
+                style={{...btn,textDecoration:"none",display:"inline-block"}}>Find flights</a>}
+              {s.city&&Number(s.nights)>0&&<a href={hotelLink(s.city,r.arrive,r.leave)} target="_blank" rel="noopener"
+                style={{...ghost,textDecoration:"none",display:"inline-block"}}>Find a hotel</a>}
+              <button onClick={()=>upStop(i,"booked",!s.booked)}
+                style={{...btn,background:s.booked?"#1a7a3a":"#fff",
+                color:s.booked?"#fff":"#c0392b",border:s.booked?"none":"1px solid #e0b0b0"}}>
+                {s.booked?"Booked ✓":"Mark booked"}</button>
+              <button onClick={()=>setOpenEdit(o=>({...o,[i]:!o[i]}))} style={ghost}>Edit</button>
+            </div>
+          </div>
+
+          {openEdit[i]&&<div style={{borderTop:"1px dashed #dde4dd",padding:"11px 13px",background:"#fbfdfb"}}>
+            <div style={{display:"flex",gap:6}}>
+              <div style={{flex:2}}><label style={lab}>City</label>
+                <input value={s.city} onChange={e=>upStop(i,"city",e.target.value)} style={inp}/></div>
+              <div style={{width:90}}><label style={lab}>Airport</label>
+                <input value={s.code} onChange={e=>upStop(i,"code",e.target.value.toUpperCase().slice(0,3))} style={inp}/></div>
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <div style={{flex:1}}><label style={lab}>Flight ₹ each</label>
+                <input type="number" value={s.flight} inputMode="decimal"
+                  onChange={e=>upStop(i,"flight",Number(e.target.value)||0)} style={inp}/></div>
+              <div style={{flex:1}}><label style={lab}>Hotel ₹ / night</label>
+                <input type="number" value={s.hotel} inputMode="decimal"
+                  onChange={e=>upStop(i,"hotel",Number(e.target.value)||0)} style={inp}/></div>
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <div style={{flex:1}}><label style={lab}>Actually paid ₹</label>
+                <input type="number" value={s.actual||""} inputMode="decimal" placeholder="fill in after booking"
+                  onChange={e=>upStop(i,"actual",Number(e.target.value)||0)} style={inp}/></div>
+              <div style={{flex:1}}><label style={lab}>Booking ref</label>
+                <input value={s.ref} onChange={e=>upStop(i,"ref",e.target.value)} style={inp}/></div>
+            </div>
+            <label style={lab}>What you will do here</label>
+            <textarea value={s.note} rows={2} onChange={e=>upStop(i,"note",e.target.value)}
+              style={{...inp,resize:"vertical",fontFamily:"inherit"}}/>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              <button onClick={()=>{ if(i>0){ const a=[...cur.stops]; const x=a.splice(i,1)[0];
+                a.splice(i-1,0,x); setCur({...cur,stops:a}); setOpenEdit({}); } }} style={ghost}>Earlier</button>
+              <button onClick={()=>{ if(i<cur.stops.length-1){ const a=[...cur.stops]; const x=a.splice(i,1)[0];
+                a.splice(i+1,0,x); setCur({...cur,stops:a}); setOpenEdit({}); } }} style={ghost}>Later</button>
+              <button onClick={()=>{ if(cur.stops.length<=1){ setMsg("✗ keep at least one city"); return; }
+                setCur({...cur,stops:cur.stops.filter((_,j)=>j!==i)}); setOpenEdit({}); }}
+                style={{...ghost,color:"#c33",borderColor:"#e8c0c0"}}>Remove city</button>
+              <button onClick={()=>setOpenEdit(o=>({...o,[i]:false}))} style={ghost}>Done</button>
+            </div>
+          </div>}
+        </div>;
+      })}
+
+      <div style={{background:"#fff",border:"1px solid "+(cur.ret.booked?"#7ab88a":"#e6ece6"),
+        borderRadius:11,padding:"11px 13px",marginBottom:12}}>
+        <div style={{fontSize:10,color:"#8a9a8a",fontWeight:700,letterSpacing:.4}}>HOME · {pretty(sch.home)}</div>
+        <div style={{display:"flex",alignItems:"center",gap:10,margin:"4px 0 2px"}}>
+          <b style={{fontSize:20,color:"#1a5a3a",fontFamily:"monospace"}}>
+            {(cur.stops[cur.stops.length-1]||cur.origin).code||"—"}</b>
+          <span style={{flex:1,height:1,background:"#dde4dd"}}/>
+          <b style={{fontSize:20,color:"#1a5a3a",fontFamily:"monospace"}}>{cur.origin.code}</b>
+        </div>
+        <div style={{display:"flex",gap:6,marginTop:9,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:110}}><label style={lab}>Flight ₹ each</label>
+            <input type="number" value={cur.ret.flight} inputMode="decimal"
+              onChange={e=>setCur({...cur,ret:{...cur.ret,flight:Number(e.target.value)||0}})} style={inp}/></div>
+          <div style={{flex:1,minWidth:110}}><label style={lab}>Actually paid ₹</label>
+            <input type="number" value={cur.ret.actual||""} inputMode="decimal"
+              onChange={e=>setCur({...cur,ret:{...cur.ret,actual:Number(e.target.value)||0}})} style={inp}/></div>
+        </div>
+        <button onClick={()=>setCur({...cur,ret:{...cur.ret,booked:!cur.ret.booked}})}
+          style={{...btn,background:cur.ret.booked?"#1a7a3a":"#fff",
+          color:cur.ret.booked?"#fff":"#c0392b",border:cur.ret.booked?"none":"1px solid #e0b0b0"}}>
+          {cur.ret.booked?"Booked ✓":"Mark booked"}</button>
+      </div>
+
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        <button onClick={()=>setCur({...cur,stops:[...cur.stops,
+          {city:"",code:"",nights:2,flight:0,hotel:0,note:"",booked:false,ref:"",actual:0}]})}
+          style={ghost}>+ Add a city</button>
+        <button onClick={saveCur} disabled={!!busy} style={{...btn,flex:1}}>
+          {busy==="s"?"Saving…":"Save trip"}</button>
+        <button onClick={()=>{
+          const lines=[cur.name+" · "+cur.pax+" travelling",""];
+          (cur.stops||[]).forEach((s,i)=>{
+            const r=sch.rows[i]||{}; const from=i===0?cur.origin:cur.stops[i-1];
+            lines.push((i+1)+". "+pretty(r.fly)+"  "+(from.code||"?")+" → "+(s.code||"?")+
+              "   "+(s.city||"?")+", "+s.nights+" nights"+(s.booked?"  [booked"+(s.ref?" "+s.ref:"")+"]":""));
+          });
+          lines.push((cur.stops.length+1)+". "+pretty(sch.home)+"  → "+cur.origin.code+
+            (cur.ret.booked?"  [booked]":""));
+          const txt=lines.join("\n");
+          if(navigator.clipboard) navigator.clipboard.writeText(txt)
+            .then(()=>setMsg("✓ Plan copied"),()=>setMsg("✗ could not copy"));
+        }} style={ghost}>Copy plan</button>
+        {trips.some(t=>t.id===cur.id)&&<button onClick={async()=>{
+          if(!window.confirm("Delete the trip \""+cur.name+"\"?")) return;
+          const list=trips.filter(t=>t.id!==cur.id);
+          await persist(list);
+          setCur(list.length?list[0]:blankTrip());
+        }} style={{...ghost,color:"#c33",borderColor:"#e8c0c0"}}>Delete</button>}
+      </div>
+
+      <div style={{fontSize:10.5,color:"#8a9a8a",marginTop:14,lineHeight:1.6,
+        borderLeft:"2px solid #dde4dd",paddingLeft:10}}>
+        Prices are your own estimates until you fill in what you actually paid.
+        The buttons open live search with your dates and traveller count already filled in.
+        Trips are saved to your account, so this plan is on every device you sign in from.
+      </div>
+    </div>
+  );
+}
+
 function FieldConsole({ onClose, rootMode, onOpenFull }) {
   const me = (typeof URL_USER!=="undefined"?URL_USER:"main");
   const officer = me.charAt(0).toUpperCase()+me.slice(1);
@@ -11754,6 +12089,7 @@ function App(){
   const [showAIM,setShowAIM]=useState(false);
   const [tgShareEntry,setTgShareEntry]=useState(null);
   const [capMode,setCapMode]=useState(null); // "purchase" | "sales" | null
+  const [showTravel,setShowTravel]=useState(false);
   const [showFieldReport,setShowFieldReport]=useState(false);
   const [showFieldConsole,setShowFieldConsole]=useState(false);
   const [showFieldAdmin,setShowFieldAdmin]=useState(false);
@@ -12198,6 +12534,7 @@ function App(){
                 {l:"🔒 PIN Access",fn:()=>setShowPins(true), ownerOnly:true},
                 {l:"📊 Tally",fn:()=>setShowTally(true), ownerOnly:true},
                 {l:"📍 Location",fn:()=>setShowLocation(true), ownerOnly:true},
+                {l:"🧳 Travel Planner",fn:()=>setShowTravel(true), personalOnly:true},
                 {l:"📒 Day Book",fn:()=>setShowDayBook(true), notSales:true},
                 {l:"🏥 Health",fn:()=>setShowHealth(true), personalOnly:true},
                 {l:"🏋️ Gym",fn:()=>setShowGym(true), personalOnly:true},
@@ -12466,6 +12803,7 @@ function App(){
     <Modal open={showAIM && IS_OWNER} onClose={()=>setShowAIM(false)} wide><AIMTrading onClose={()=>setShowAIM(false)}/></Modal>
     <Modal open={!!tgShareEntry} onClose={()=>setTgShareEntry(null)}><TelegramShare entry={tgShareEntry} onClose={()=>setTgShareEntry(null)}/></Modal>
     <Modal open={!!capMode} onClose={()=>setCapMode(null)}><PurchaseSalesCapture mode={capMode} onSaveEntry={saveEntry} onClose={()=>setCapMode(null)}/></Modal>
+    <Modal open={showTravel} onClose={()=>setShowTravel(false)}><TravelPlanner onClose={()=>setShowTravel(false)}/></Modal>
     <Modal open={showFieldConsole} onClose={()=>setShowFieldConsole(false)}><FieldConsole onClose={()=>setShowFieldConsole(false)}/></Modal>
     <Modal open={showFieldAdmin} onClose={()=>setShowFieldAdmin(false)}><FieldAdmin onClose={()=>setShowFieldAdmin(false)}/></Modal>
     <Modal open={showFieldReport} onClose={()=>setShowFieldReport(false)}><FieldReport onClose={()=>setShowFieldReport(false)}/></Modal>
