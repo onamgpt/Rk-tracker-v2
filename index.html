@@ -2776,6 +2776,71 @@ function fareGuess(km) {
   return Math.round(raw / 100) * 100;
 }
 
+// Fares swing far more by season than by anything else, and the swing differs
+// by region — Europe is dearest in its own summer, the Gulf when the weather
+// turns pleasant, South East Asia in the dry months. These are modelled
+// patterns rather than scraped fares: no free source of historical pricing
+// exists, so this says "dear month or cheap month" rather than a real quote.
+function regionOf(code) {
+  const c = String(code||"").toUpperCase();
+  const IN=["BLR","BOM","DEL","MAA","COK","CCU","HYD","TRV","CCJ","GOI","IXE","PNY"];
+  const GULF=["DXB","AUH","SHJ","DOH","MCT","KWI","BAH","RUH","JED"];
+  const SEA=["SIN","KUL","BKK","HKT","CGK","MNL","HAN","SGN","CMB","MLE"];
+  const EUR=["LHR","LGW","CDG","ORY","AMS","FRA","MUC","ZRH","VIE","FCO","MXP","VCE",
+             "MAD","BCN","LIS","ATH","PRG","BUD","WAW","CPH","ARN","OSL","HEL","DUB","IST"];
+  const FE=["HKG","PVG","PEK","ICN","NRT","HND","KIX","TPE"];
+  const AME=["JFK","EWR","ORD","LAX","SFO","IAD","BOS","YYZ"];
+  if(IN.includes(c)) return "IN";
+  if(GULF.includes(c)) return "GULF";
+  if(SEA.includes(c)) return "SEA";
+  if(EUR.includes(c)) return "EUR";
+  if(FE.includes(c)) return "FE";
+  if(AME.includes(c)) return "AME";
+  return "OTHER";
+}
+
+// Index by month, 1.00 = ordinary. Jan..Dec.
+const SEASON_INDEX = {
+  EUR:  [0.85,0.82,0.88,0.95,1.05,1.25,1.35,1.30,1.05,0.92,0.85,1.20],
+  GULF: [1.10,1.05,1.00,0.95,0.85,0.80,0.85,0.90,0.95,1.05,1.15,1.25],
+  SEA:  [1.15,1.10,1.00,1.05,0.90,0.85,0.90,0.95,0.90,1.00,1.10,1.30],
+  FE:   [0.95,0.95,1.10,1.15,1.00,0.95,1.10,1.10,1.00,1.05,0.95,1.15],
+  AME:  [0.90,0.85,0.95,1.00,1.10,1.25,1.30,1.20,1.00,0.95,1.05,1.25],
+  IN:   [1.05,0.95,0.95,1.10,1.15,1.00,0.90,0.90,0.90,1.10,1.15,1.25],
+  OTHER:[1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00]
+};
+
+function seasonFor(destCode, iso) {
+  if(!iso) return null;
+  const m = parseInt(iso.split("-")[1],10);
+  if(!m) return null;
+  const reg = regionOf(destCode);
+  const idx = (SEASON_INDEX[reg]||SEASON_INDEX.OTHER)[m-1];
+  let label;
+  if(idx >= 1.20)      label = "peak season";
+  else if(idx >= 1.05) label = "busy";
+  else if(idx <= 0.90) label = "quiet — good time to fly";
+  else                 label = "ordinary";
+  return { idx, label, region: reg, month: m };
+}
+
+// The cheapest nearby month, so the decision is visible rather than guessed.
+function cheapestNearby(destCode, iso) {
+  if(!iso) return null;
+  const m = parseInt(iso.split("-")[1],10);
+  const reg = regionOf(destCode);
+  const arr = SEASON_INDEX[reg]||SEASON_INDEX.OTHER;
+  const names=["January","February","March","April","May","June","July",
+               "August","September","October","November","December"];
+  let best=m, bestIdx=arr[m-1];
+  for(let d=-2; d<=2; d++){
+    const mm=((m-1+d)+12)%12;
+    if(arr[mm] < bestIdx){ bestIdx=arr[mm]; best=mm+1; }
+  }
+  if(best===m) return null;
+  return { month: names[best-1], idx: bestIdx, saving: 1 - bestIdx/arr[m-1] };
+}
+
 function TravelPlanner({ onClose }) {
   const blankTrip = () => ({
     id: "tr_" + Date.now(),
@@ -2851,13 +2916,17 @@ function TravelPlanner({ onClose }) {
     return best;
   };
 
-  const suggestFare=(from,to)=>{
+  const suggestFare=(from,to,iso)=>{
     const past=pastFare(from,to);
     if(past) return {amount:past.amount, why:(past.actual?"you paid this on ":"your estimate on ")+past.trip};
     const km=greatCircleKm(from,to);
-    const g=fareGuess(km);
-    if(g) return {amount:g, why:"rough guess from "+km.toLocaleString("en-IN")+" km — replace with a real quote"};
-    return null;
+    const base=fareGuess(km);
+    if(!base) return null;
+    const s=seasonFor(to,iso);
+    const amount=Math.round(base*(s?s.idx:1)/100)*100;
+    return { amount, km, season:s,
+      low:Math.round(amount*0.8/100)*100, high:Math.round(amount*1.35/100)*100,
+      why:"typical for "+km.toLocaleString("en-IN")+" km"+(s?(" in "+s.label):"") };
   };
 
   const schedule=()=>{
@@ -3181,7 +3250,7 @@ function TravelPlanner({ onClose }) {
                     // Fill a starting fare the moment the route is known, so a
                     // new city is never left sitting at zero.
                     if(code.length===3 && !Number(s.flight)){
-                      const sug=suggestFare(from.code,code);
+                      const sug=suggestFare(from.code,code,r.fly);
                       if(sug) upStop(i,"flight",sug.amount);
                     }
                   }} style={inp}/></div>
@@ -3191,13 +3260,21 @@ function TravelPlanner({ onClose }) {
                 <input type="number" value={s.flight} inputMode="decimal"
                   onChange={e=>upStop(i,"flight",Number(e.target.value)||0)} style={inp}/>
                 {(()=>{
-                  const sug=suggestFare(from.code,s.code);
-                  if(!sug||Number(s.flight)===sug.amount) return null;
-                  return <button onClick={()=>upStop(i,"flight",sug.amount)}
-                    style={{border:"none",background:"none",color:"#1a5a9a",fontSize:10.5,
-                    cursor:"pointer",padding:0,marginTop:-4,marginBottom:8,textAlign:"left",
-                    textDecoration:"underline",display:"block"}}>
-                    use {money(sug.amount)} — {sug.why}</button>;
+                  const sug=suggestFare(from.code,s.code,r.fly);
+                  if(!sug) return null;
+                  const cheap=cheapestNearby(s.code,r.fly);
+                  return <div style={{marginTop:-4,marginBottom:8}}>
+                    {Number(s.flight)!==sug.amount&&
+                      <button onClick={()=>upStop(i,"flight",sug.amount)}
+                        style={{border:"none",background:"none",color:"#1a5a9a",fontSize:10.5,
+                        cursor:"pointer",padding:0,textAlign:"left",
+                        textDecoration:"underline",display:"block"}}>
+                        use {money(sug.amount)} — {sug.why}</button>}
+                    {sug.low&&<div style={{fontSize:10,color:"#9a9a90",marginTop:2}}>
+                      usually {money(sug.low)}–{money(sug.high)} each</div>}
+                    {cheap&&cheap.saving>0.08&&<div style={{fontSize:10,color:"#a0661a",marginTop:2}}>
+                      {cheap.month} is about {Math.round(cheap.saving*100)}% cheaper on this route</div>}
+                  </div>;
                 })()}</div>
               <div style={{flex:1}}><label style={lab}>Hotel ₹ / night</label>
                 <input type="number" value={s.hotel} inputMode="decimal"
