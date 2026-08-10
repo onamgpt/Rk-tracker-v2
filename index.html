@@ -2926,7 +2926,8 @@ function TravelPlanner({ onClose }) {
   const [busy,setBusy]=useState("");
   const [msg,setMsg]=useState("");
   const [openEdit,setOpenEdit]=useState({});
-  const [view,setView]=useState("book");   // book | plan
+  const [view,setView]=useState("book");   // book | trip | plan
+  const [wx,setWx]=useState({});
 
   useEffect(()=>{ (async()=>{
     try{
@@ -2992,6 +2993,25 @@ function TravelPlanner({ onClose }) {
     return { amount, km, season:s,
       low:Math.round(amount*0.8/100)*100, high:Math.round(amount*1.35/100)*100,
       why:"typical for "+km.toLocaleString("en-IN")+" km"+(s?(" in "+s.label):"") };
+  };
+
+  // Weather is only worth fetching when the day list is actually on screen.
+  const loadWeather=async(dayList)=>{
+    const places=dayList.map(d=>{
+      const a=AIRPORTS[String(d.stop.code||"").toUpperCase()];
+      if(!a) return null;
+      return { key:d.stop.code+"|"+d.date, lat:a[0], lon:a[1], date:d.date };
+    }).filter(Boolean);
+    // one ask per city per day is plenty; drop repeats
+    const seen={}, uniq=[];
+    places.forEach(p=>{ if(!seen[p.key]){ seen[p.key]=1; uniq.push(p); } });
+    if(!uniq.length) return;
+    try{
+      const r=await fetch("/.netlify/functions/weather",{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({places:uniq.slice(0,30)})});
+      const j=await r.json();
+      if(j&&j.ok) setWx(j.weather||{});
+    }catch(e){}
   };
 
   const schedule=()=>{
@@ -3291,6 +3311,7 @@ function TravelPlanner({ onClose }) {
         });
 
         const info = (code)=>REGION_INFO[regionOf(code)]||REGION_INFO.OTHER;
+        if(days.length && !Object.keys(wx).length) setTimeout(()=>loadWeather(days),0);
         const mapLink=(place,city)=>"https://www.google.com/maps/search/?api=1&query="+
           encodeURIComponent(place+" "+city);
 
@@ -3366,6 +3387,19 @@ function TravelPlanner({ onClose }) {
                         border:"1px solid #e0e8e0"}}>📍 {a}</a>)}
                   </div>}
 
+                {(()=>{
+                  const w=wx[s.code+"|"+d.date];
+                  if(!w) return null;
+                  const warm=w.high>=32, cold=w.low<=8, wet=w.rain>=5;
+                  return <div style={{fontSize:11,color:"#5a6a7a",marginTop:6,
+                    background:"#f4f7fa",borderRadius:7,padding:"5px 9px",display:"inline-block"}}>
+                    {warm?"☀️":cold?"❄️":wet?"🌧":"⛅"} {w.high}° / {w.low}°
+                    {w.rain>0?"  ·  "+w.rain+" mm rain":""}
+                    <span style={{color:"#a0aab4"}}>
+                      {w.kind==="forecast"?"  ·  forecast":"  ·  typical, last "+w.years+" years"}</span>
+                  </div>;
+                })()}
+
                 <div style={{fontSize:10.5,color:"#a0a090",marginTop:6}}>
                   about {money(Number(cur.daily)||0)} each today
                   {s.city&&<> · <a href={mapLink("things to do",s.city)} target="_blank" rel="noopener"
@@ -3391,10 +3425,67 @@ function TravelPlanner({ onClose }) {
             </div>
           </div>
 
+          <button onClick={()=>{
+            // One page holding every reference and address, for an airport with
+            // no signal. Printed or saved as PDF it needs nothing at all.
+            const esc=(t)=>String(t==null?"":t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+            const rows=(cur.stops||[]).map((s,i)=>{
+              const from=i===0?cur.origin:cur.stops[i-1];
+              const r=sch.rows[i]||{};
+              const w=wx[s.code+"|"+r.arrive];
+              return "<tr><td>"+esc(pretty(r.fly))+"</td>"+
+                "<td><b>"+esc(from.code||"?")+" &rarr; "+esc(s.code||"?")+"</b><br><span class=sm>"+
+                  esc(from.city||"")+" to "+esc(s.city||"")+"</span></td>"+
+                "<td>"+esc(s.nights)+" nights<br><span class=sm>"+esc(pretty(r.arrive))+" &ndash; "+esc(pretty(r.leave))+"</span></td>"+
+                "<td>"+(s.ref?("<b>"+esc(s.ref)+"</b>"):"<span class=sm>no ref</span>")+
+                  (s.booked?"<br><span class=ok>booked</span>":"<br><span class=no>NOT BOOKED</span>")+"</td>"+
+                "<td>"+(w?(w.high+"&deg; / "+w.low+"&deg;"):"")+"</td></tr>";
+            }).join("");
+            const last=(cur.stops||[])[cur.stops.length-1]||cur.origin;
+            const retRow="<tr><td>"+esc(pretty(sch.home))+"</td>"+
+              "<td><b>"+esc(last.code||"?")+" &rarr; "+esc(cur.origin.code)+"</b><br><span class=sm>"+
+              esc(last.city||"")+" to "+esc(cur.origin.city)+"</span></td><td>home</td>"+
+              "<td>"+(cur.ret.ref?("<b>"+esc(cur.ret.ref)+"</b>"):"<span class=sm>no ref</span>")+
+              (cur.ret.booked?"<br><span class=ok>booked</span>":"<br><span class=no>NOT BOOKED</span>")+"</td><td></td></tr>";
+            const notes=(cur.stops||[]).filter(s=>s.note).map(s=>
+              "<p><b>"+esc(s.city)+"</b> &mdash; "+esc(s.note)+"</p>").join("");
+            const regions=[...new Set((cur.stops||[]).map(s=>regionOf(s.code)).filter(x=>x!=="IN"))];
+            const before=regions.map(rg=>{const inf=REGION_INFO[rg]||REGION_INFO.OTHER;
+              return "<li>"+esc(inf.visa||"No visa formalities")+" &middot; "+esc(inf.ccy)+" &middot; plugs "+esc(inf.plug)+"</li>";}).join("");
+            const w=window.open("","_blank");
+            if(!w){ setMsg("✗ Allow pop-ups to print the trip sheet"); return; }
+            w.document.write(
+              "<!doctype html><html><head><meta charset=utf-8><title>"+esc(cur.name)+"</title>"+
+              "<style>body{font-family:Georgia,serif;color:#1a1a14;max-width:760px;margin:24px auto;padding:0 18px;line-height:1.5}"+
+              "h1{font-size:22px;margin:0 0 2px}.head{color:#666;font-size:13px;margin-bottom:18px}"+
+              "table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:18px}"+
+              "th{text-align:left;border-bottom:2px solid #333;padding:6px 5px;font-size:11px;text-transform:uppercase;letter-spacing:.05em}"+
+              "td{border-bottom:1px solid #ddd;padding:8px 5px;vertical-align:top}"+
+              ".sm{color:#777;font-size:11px}.ok{color:#1a7a3a;font-size:11px}.no{color:#c0392b;font-size:11px;font-weight:bold}"+
+              "h2{font-size:14px;margin:18px 0 6px;border-bottom:1px solid #ccc;padding-bottom:3px}"+
+              "p{font-size:12.5px;margin:5px 0}li{font-size:12.5px;margin-bottom:4px}"+
+              "@media print{body{margin:0}}</style></head><body>"+
+              "<h1>"+esc(cur.name)+"</h1>"+
+              "<div class=head>"+esc(pretty(cur.start))+" &rarr; "+esc(pretty(sch.home))+
+                " &middot; "+cur.pax+" travelling &middot; about "+esc(money(f.total/Math.max(1,cur.pax)))+" each</div>"+
+              "<table><tr><th>Date</th><th>Flight</th><th>Stay</th><th>Reference</th><th>Weather</th></tr>"+
+              rows+retRow+"</table>"+
+              (before?"<h2>Before you go</h2><ul>"+before+"</ul>":"")+
+              (notes?"<h2>In each city</h2>"+notes:"")+
+              "<h2>Carry</h2><p>Passports (six months validity), visas, travel insurance, "+
+              "one card that works abroad, and printed copies of every booking.</p>"+
+              "<p class=sm>Printed from RK Tracker. Documents are attached in the app.</p>"+
+              "</body></html>");
+            w.document.close();
+            setTimeout(()=>{ try{ w.print(); }catch(e){} },400);
+          }} style={{...ghost,width:"100%",marginTop:12,padding:"11px"}}>
+            🖨 Print / save the trip sheet</button>
+
           <div style={{fontSize:10.5,color:"#8a9a8a",marginTop:10,lineHeight:1.6,
             borderLeft:"2px solid #dde4dd",paddingLeft:10}}>
             Places come from the "what you will do here" note on each city — separate them with commas
             and each becomes a map link. Tickets open from the day you need them.
+            The trip sheet prints, or saves as a PDF, for an airport with no signal.
           </div>
         </div>;
       })()}
