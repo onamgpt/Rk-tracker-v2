@@ -10930,6 +10930,10 @@ function AIMTrading({ onClose }) {
   };
 
   const saveKite=(t)=>{ setKite(t); try{ localStorage.setItem("aim_kite_token",t); }catch(e){} };
+  // A stored token that Zerodha has expired still reads as "connected", which
+  // hides the Connect button and leaves no way back in. Clear it so the button
+  // reappears the moment the session is known to be dead.
+  const clearKite=()=>{ setKite(null); try{ localStorage.removeItem("aim_kite_token"); }catch(e){} };
 
   const kiteCall=(payload)=>fetch("/.netlify/functions/kite",{method:"POST",
     headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(r=>r.json());
@@ -11014,7 +11018,8 @@ function AIMTrading({ onClose }) {
         if(p){ await api({action:"updatePrice",symbol:h.symbol,price:p}); n++; }
       }
       if(q&&q.authError){
-        setMsg("✗ Zerodha session expired — tap Connect Zerodha above, then refresh prices again");
+        clearKite();
+        setMsg("✗ Zerodha session expired — the Connect Zerodha button is back above, tap it and log in again");
         setBusy(""); return;
       }
       const bad=(q&&q.failed)||[];
@@ -11227,7 +11232,11 @@ function AIMTrading({ onClose }) {
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div style={{fontSize:11,color:"#888",fontWeight:700}}>ZERODHA</div>
           <span style={{fontSize:10.5,fontWeight:700,color:kite?"#2e7d32":"#c62828"}}>
-            {kite?"connected":"not connected"}</span>
+            {kite?"connected":"not connected"}
+            {kite&&<button onClick={clearKite} title="log in to Zerodha again"
+              style={{marginLeft:8,border:"none",background:"none",color:"#1a5a9a",
+              fontSize:10.5,fontWeight:700,cursor:"pointer",padding:0,
+              textDecoration:"underline"}}>reconnect</button>}</span>
         </div>
         {!kite
           ? <div style={{marginTop:6}}>
