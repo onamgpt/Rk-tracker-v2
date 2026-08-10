@@ -2728,29 +2728,82 @@ function rollupField(reports, orders, parties, days, gpOf) {
 // here: no key, no quota, works offline, and these are the airports a trip from
 // Bangalore actually touches.
 const AIRPORTS = {
-  BLR:[12.95,77.67], BOM:[19.09,72.87], DEL:[28.56,77.10], MAA:[12.99,80.17],
-  COK:[10.15,76.40], CCU:[22.65,88.45], HYD:[17.24,78.43], TRV:[8.48,76.92],
-  CCJ:[11.14,75.96], GOI:[15.38,73.83], IXE:[12.96,74.89], PNY:[11.97,79.81],
-  DXB:[25.25,55.36], AUH:[24.43,54.65], SHJ:[25.33,55.52], DOH:[25.27,51.61],
-  MCT:[23.59,58.28], KWI:[29.23,47.97], BAH:[26.27,50.63], RUH:[24.96,46.70],
-  JED:[21.68,39.16], CAI:[30.11,31.41], IST:[41.28,28.75], TLV:[32.01,34.89],
-  SIN:[1.36,103.99], KUL:[2.75,101.71], BKK:[13.69,100.75], HKT:[8.11,98.32],
-  CGK:[-6.13,106.66], MNL:[14.51,121.02], HAN:[21.22,105.81], SGN:[10.82,106.66],
-  HKG:[22.31,113.91], PVG:[31.14,121.81], PEK:[40.08,116.58], ICN:[37.46,126.44],
-  NRT:[35.77,140.39], HND:[35.55,139.78], KIX:[34.43,135.24], TPE:[25.08,121.23],
-  CMB:[7.18,79.88], KTM:[27.70,85.36], DAC:[23.84,90.40], MLE:[4.19,73.53],
-  LHR:[51.47,-0.45], LGW:[51.15,-0.19], CDG:[49.01,2.55], ORY:[48.73,2.36],
-  AMS:[52.31,4.76], FRA:[50.04,8.56], MUC:[48.35,11.79], ZRH:[47.46,8.55],
-  VIE:[48.11,16.57], FCO:[41.80,12.25], MXP:[45.63,8.72], VCE:[45.51,12.35],
-  MAD:[40.47,-3.56], BCN:[41.30,2.08], LIS:[38.77,-9.13], ATH:[37.94,23.95],
-  PRG:[50.10,14.26], BUD:[47.44,19.26], WAW:[52.17,20.97], CPH:[55.62,12.66],
-  ARN:[59.65,17.92], OSL:[60.19,11.10], HEL:[60.32,24.96], DUB:[53.42,-6.27],
-  JFK:[40.64,-73.78], EWR:[40.69,-74.17], ORD:[41.98,-87.90], LAX:[33.94,-118.41],
-  SFO:[37.62,-122.38], IAD:[38.95,-77.46], BOS:[42.36,-71.01], YYZ:[43.68,-79.63],
-  SYD:[-33.95,151.18], MEL:[-37.67,144.84], AKL:[-37.01,174.79],
-  JNB:[-26.13,28.24], NBO:[-1.32,36.93], MRU:[-20.43,57.68], RUN:[-20.89,55.51],
-  ADD:[8.98,38.80], LOS:[6.58,3.32], CMN:[33.37,-7.59]
+  BLR:[12.95,77.67,"Bangalore","Kempegowda"], BOM:[19.09,72.87,"Mumbai","Chhatrapati Shivaji"],
+  DEL:[28.56,77.10,"Delhi","Indira Gandhi"], MAA:[12.99,80.17,"Chennai","Chennai Intl"],
+  COK:[10.15,76.40,"Kochi","Cochin Intl"], CCU:[22.65,88.45,"Kolkata","Netaji Subhas"],
+  HYD:[17.24,78.43,"Hyderabad","Rajiv Gandhi"], TRV:[8.48,76.92,"Thiruvananthapuram","Trivandrum Intl"],
+  CCJ:[11.14,75.96,"Kozhikode","Calicut Intl"], GOI:[15.38,73.83,"Goa","Dabolim"],
+  IXE:[12.96,74.89,"Mangalore","Mangalore Intl"], PNY:[11.97,79.81,"Puducherry","Puducherry"],
+  MDU:[9.83,78.09,"Madurai","Madurai Intl"], IXM:[9.83,78.09,"Madurai","Madurai"],
+  DXB:[25.25,55.36,"Dubai","Dubai Intl"], DWC:[24.90,55.16,"Dubai","Al Maktoum"],
+  AUH:[24.43,54.65,"Abu Dhabi","Zayed Intl"], SHJ:[25.33,55.52,"Sharjah","Sharjah Intl"],
+  DOH:[25.27,51.61,"Doha","Hamad Intl"], MCT:[23.59,58.28,"Muscat","Muscat Intl"],
+  KWI:[29.23,47.97,"Kuwait","Kuwait Intl"], BAH:[26.27,50.63,"Bahrain","Bahrain Intl"],
+  RUH:[24.96,46.70,"Riyadh","King Khalid"], JED:[21.68,39.16,"Jeddah","King Abdulaziz"],
+  CAI:[30.11,31.41,"Cairo","Cairo Intl"], IST:[41.28,28.75,"Istanbul","Istanbul Airport"],
+  SAW:[40.90,29.31,"Istanbul","Sabiha Gokcen"], TLV:[32.01,34.89,"Tel Aviv","Ben Gurion"],
+  SIN:[1.36,103.99,"Singapore","Changi"], KUL:[2.75,101.71,"Kuala Lumpur","KLIA"],
+  BKK:[13.69,100.75,"Bangkok","Suvarnabhumi"], DMK:[13.91,100.61,"Bangkok","Don Mueang"],
+  HKT:[8.11,98.32,"Phuket","Phuket Intl"], CGK:[-6.13,106.66,"Jakarta","Soekarno-Hatta"],
+  DPS:[-8.75,115.17,"Bali","Ngurah Rai"], MNL:[14.51,121.02,"Manila","Ninoy Aquino"],
+  HAN:[21.22,105.81,"Hanoi","Noi Bai"], SGN:[10.82,106.66,"Ho Chi Minh City","Tan Son Nhat"],
+  PEN:[5.30,100.28,"Penang","Penang Intl"], LGK:[6.33,99.73,"Langkawi","Langkawi Intl"],
+  HKG:[22.31,113.91,"Hong Kong","Hong Kong Intl"], PVG:[31.14,121.81,"Shanghai","Pudong"],
+  PEK:[40.08,116.58,"Beijing","Capital"], ICN:[37.46,126.44,"Seoul","Incheon"],
+  NRT:[35.77,140.39,"Tokyo","Narita"], HND:[35.55,139.78,"Tokyo","Haneda"],
+  KIX:[34.43,135.24,"Osaka","Kansai"], TPE:[25.08,121.23,"Taipei","Taoyuan"],
+  CMB:[7.18,79.88,"Colombo","Bandaranaike"], KTM:[27.70,85.36,"Kathmandu","Tribhuvan"],
+  DAC:[23.84,90.40,"Dhaka","Hazrat Shahjalal"], MLE:[4.19,73.53,"Male","Velana Intl"],
+  LHR:[51.47,-0.45,"London","Heathrow"], LGW:[51.15,-0.19,"London","Gatwick"],
+  STN:[51.89,0.24,"London","Stansted"], MAN:[53.36,-2.27,"Manchester","Manchester"],
+  CDG:[49.01,2.55,"Paris","Charles de Gaulle"], ORY:[48.73,2.36,"Paris","Orly"],
+  BVA:[49.45,2.11,"Paris","Beauvais"], NCE:[43.66,7.22,"Nice","Cote d Azur"],
+  AMS:[52.31,4.76,"Amsterdam","Schiphol"], FRA:[50.04,8.56,"Frankfurt","Frankfurt"],
+  MUC:[48.35,11.79,"Munich","Munich"], BER:[52.37,13.50,"Berlin","Brandenburg"],
+  ZRH:[47.46,8.55,"Zurich","Zurich"], GVA:[46.24,6.11,"Geneva","Geneva"],
+  VIE:[48.11,16.57,"Vienna","Vienna Intl"], FCO:[41.80,12.25,"Rome","Fiumicino"],
+  CIA:[41.80,12.59,"Rome","Ciampino"], MXP:[45.63,8.72,"Milan","Malpensa"],
+  LIN:[45.45,9.28,"Milan","Linate"], BGY:[45.67,9.70,"Milan","Bergamo"],
+  VCE:[45.51,12.35,"Venice","Marco Polo"], TSF:[45.65,12.19,"Venice","Treviso"],
+  NAP:[40.89,14.29,"Naples","Capodichino"], FLR:[43.81,11.20,"Florence","Peretola"],
+  MAD:[40.47,-3.56,"Madrid","Barajas"], BCN:[41.30,2.08,"Barcelona","El Prat"],
+  LIS:[38.77,-9.13,"Lisbon","Humberto Delgado"], ATH:[37.94,23.95,"Athens","Eleftherios Venizelos"],
+  PRG:[50.10,14.26,"Prague","Vaclav Havel"], BUD:[47.44,19.26,"Budapest","Ferenc Liszt"],
+  WAW:[52.17,20.97,"Warsaw","Chopin"], CPH:[55.62,12.66,"Copenhagen","Kastrup"],
+  ARN:[59.65,17.92,"Stockholm","Arlanda"], OSL:[60.19,11.10,"Oslo","Gardermoen"],
+  HEL:[60.32,24.96,"Helsinki","Vantaa"], DUB:[53.42,-6.27,"Dublin","Dublin"],
+  BRU:[50.90,4.48,"Brussels","Zaventem"], EDI:[55.95,-3.37,"Edinburgh","Edinburgh"],
+  JFK:[40.64,-73.78,"New York","JFK"], EWR:[40.69,-74.17,"New York","Newark"],
+  LGA:[40.78,-73.87,"New York","LaGuardia"], ORD:[41.98,-87.90,"Chicago","O Hare"],
+  LAX:[33.94,-118.41,"Los Angeles","LAX"], SFO:[37.62,-122.38,"San Francisco","SFO"],
+  IAD:[38.95,-77.46,"Washington","Dulles"], BOS:[42.36,-71.01,"Boston","Logan"],
+  YYZ:[43.68,-79.63,"Toronto","Pearson"], YVR:[49.19,-123.18,"Vancouver","Vancouver"],
+  SYD:[-33.95,151.18,"Sydney","Kingsford Smith"], MEL:[-37.67,144.84,"Melbourne","Tullamarine"],
+  AKL:[-37.01,174.79,"Auckland","Auckland"], PER:[-31.94,115.97,"Perth","Perth"],
+  JNB:[-26.13,28.24,"Johannesburg","OR Tambo"], CPT:[-33.97,18.60,"Cape Town","Cape Town"],
+  NBO:[-1.32,36.93,"Nairobi","Jomo Kenyatta"], MRU:[-20.43,57.68,"Mauritius","Sir Seewoosagur"],
+  RUN:[-20.89,55.51,"Reunion","Roland Garros"], ADD:[8.98,38.80,"Addis Ababa","Bole"],
+  LOS:[6.58,3.32,"Lagos","Murtala Muhammed"], CMN:[33.37,-7.59,"Casablanca","Mohammed V"],
+  SEZ:[-4.67,55.52,"Seychelles","Seychelles Intl"]
 };
+
+// Type a city and get its airports back — several of them where a city has
+// more than one, because "Paris" or "London" is an ambiguous instruction and
+// the choice between Heathrow and Gatwick changes both price and journey.
+function airportsForCity(text) {
+  const q = String(text||"").trim().toLowerCase();
+  if (q.length < 2) return [];
+  const exact = [], partial = [];
+  Object.keys(AIRPORTS).forEach(code => {
+    const a = AIRPORTS[code];
+    const city = String(a[2]||"").toLowerCase();
+    const name = String(a[3]||"").toLowerCase();
+    if (city === q || code.toLowerCase() === q) exact.push({ code, city:a[2], name:a[3] });
+    else if (city.indexOf(q) === 0 || name.indexOf(q) === 0) partial.push({ code, city:a[2], name:a[3] });
+    else if (city.indexOf(q) > -1) partial.push({ code, city:a[2], name:a[3] });
+  });
+  return exact.concat(partial).slice(0, 8);
+}
 
 function greatCircleKm(a, b) {
   const A = AIRPORTS[String(a||"").toUpperCase()], B = AIRPORTS[String(b||"").toUpperCase()];
@@ -3330,7 +3383,8 @@ function TravelPlanner({ onClose }) {
           {openEdit[i]&&<div style={{borderTop:"1px dashed #dde4dd",padding:"11px 13px",background:"#fbfdfb"}}>
             <div style={{display:"flex",gap:6}}>
               <div style={{flex:2}}><label style={lab}>City</label>
-                <input value={s.city} onChange={e=>upStop(i,"city",e.target.value)} style={inp}/></div>
+                <input value={s.city} placeholder="type a city — London, Paris…"
+                  onChange={e=>upStop(i,"city",e.target.value)} style={inp}/></div>
               <div style={{width:90}}><label style={lab}>Airport</label>
                 <input value={s.code} placeholder="e.g. DXB"
                   onChange={e=>{
@@ -3344,6 +3398,35 @@ function TravelPlanner({ onClose }) {
                     }
                   }} style={inp}/></div>
             </div>
+            {(()=>{
+              const opts=airportsForCity(s.city);
+              if(!opts.length) return null;
+              const already=opts.length===1&&opts[0].code===s.code;
+              if(already) return null;
+              return <div style={{marginBottom:9}}>
+                <div style={{fontSize:10.5,color:"#8a8a80",marginBottom:4}}>
+                  {opts.length>1?"This city has "+opts.length+" airports — pick one:":"Airport:"}</div>
+                <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                  {opts.map(o=><button key={o.code}
+                    onClick={()=>{
+                      upStop(i,"code",o.code);
+                      if(String(s.city).toLowerCase()!==String(o.city).toLowerCase()) upStop(i,"city",o.city);
+                      if(!Number(s.flight)){
+                        const sug=suggestFare(from.code,o.code,r.fly);
+                        if(sug) upStop(i,"flight",sug.amount);
+                      }
+                    }}
+                    style={{padding:"7px 10px",borderRadius:8,cursor:"pointer",fontSize:11.5,
+                    border:s.code===o.code?"none":"1px solid #d8e0d8",
+                    background:s.code===o.code?"#1a5a3a":"#fff",
+                    color:s.code===o.code?"#fff":"#4a5a4a",fontWeight:700}}>
+                    <b style={{fontFamily:"monospace"}}>{o.code}</b>
+                    <span style={{fontWeight:400,opacity:.8}}>{" "+o.name}</span>
+                  </button>)}
+                </div>
+              </div>;
+            })()}
+
             <div style={{display:"flex",gap:6}}>
               <div style={{flex:1}}><label style={lab}>Flight ₹ each</label>
                 <input type="number" value={s.flight} inputMode="decimal"
