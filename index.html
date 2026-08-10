@@ -10939,9 +10939,14 @@ function AIMTrading({ onClose }) {
     headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(r=>r.json());
 
   const kiteLogin=async()=>{
+    setMsg("Opening Zerodha…");
     const d=await kiteCall({action:"loginUrl"});
-    if(d&&d.url) window.open(d.url,"_blank");
-    setMsg("Log in, then copy the WHOLE address from the address bar and paste it below. The token will be picked out of it.");
+    if(!d||!d.url){ setMsg("✗ Could not get the Zerodha login address"); return; }
+    // Navigate in this same tab rather than opening a new one. On a phone a new
+    // tab is either blocked outright, or the redirect lands in the new tab while
+    // the person is still looking at the old one — which still reads as not
+    // connected because it never saw the token come back.
+    window.location.href = d.url;
   };
 
   // Zerodha request tokens are single-use. If the redirect lands anywhere that
