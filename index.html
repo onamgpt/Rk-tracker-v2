@@ -11650,6 +11650,38 @@ function AIMTrading({ onClose }) {
 function App(){
   if(IS_VIEW_MODE) return<ShareableView/>;
 
+  // Zerodha redirects to the site root after login, carrying a single-use
+  // request_token that expires within minutes. The AIM window is closed at that
+  // moment, so anything waiting inside it never sees the token. Capture and
+  // exchange it here, the instant the page loads, whatever screen is showing.
+  useEffect(()=>{
+    let rt=null;
+    try{
+      const p=new URLSearchParams(window.location.search);
+      if(p.get("status")==="success") rt=p.get("request_token");
+    }catch(e){}
+    if(!rt) return;
+    try{ window.history.replaceState({},document.title,window.location.pathname); }catch(e){}
+    (async()=>{
+      try{
+        const r=await fetch("/.netlify/functions/kite",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({action:"getToken",request_token:rt})});
+        const d=await r.json();
+        const t=d&&d.data&&d.data.access_token;
+        if(t){
+          try{ localStorage.setItem("aim_kite_token",t); }catch(e){}
+          window.alert("✓ Zerodha connected for today.\n\nOpen AIM Trading and tap Live prices.");
+        } else {
+          window.alert("Zerodha login came back but the token could not be exchanged"+
+            ((d&&d.message)?(":\n\n"+d.message):"."));
+        }
+      }catch(e){
+        window.alert("Zerodha login came back but the exchange failed: "+String(e.message||e));
+      }
+    })();
+  },[]);
+
   const [entries,setEntries]=useState(loadCache);
   const [dropdowns,setDropdowns]=useState(loadDD);
   const [loading,setLoading]=useState(false);
