@@ -4116,6 +4116,15 @@ function FieldAdmin({ onClose }) {
     const n=sugg.map(s=>s.id===id?{...s,actualToDate:Number(v)||0}:s);
     setSugg(n); await put("field_suggestions",n);
   };
+  const patchSugg=async(id,fields)=>{
+    const n=sugg.map(s=>s.id===id?{...s,...fields}:s);
+    setSugg(n); await put("field_suggestions",n);
+  };
+  const deleteSugg=async(id,brand)=>{
+    if(!window.confirm("Remove the brand idea \""+brand+"\"?\n\nThis cannot be undone.")) return;
+    const n=sugg.filter(s=>s.id!==id);
+    setSugg(n); await put("field_suggestions",n);
+  };
   const patchOrder=async(id,fields)=>{
     const n=orders.map(o=>o.id===id?{...o,...fields}:o);
     setOrders(n); await put("field_orders",n);
@@ -4973,6 +4982,27 @@ function FieldAdmin({ onClose }) {
             </div>
             {s.why&&<div style={{fontSize:11.5,color:"#666",marginBottom:3}}>{s.why}</div>}
             <div style={{fontSize:11.5,color:"#444"}}>Committed <b>{s.commitPerMonth} doz/month</b></div>
+            <details style={{marginTop:5}}>
+              <summary style={{fontSize:10.5,color:"#5a7a5a",cursor:"pointer"}}>edit</summary>
+              <div style={{marginTop:6}}>
+                <input value={s.brand||""} placeholder="brand name"
+                  onChange={e=>patchSugg(s.id,{brand:e.target.value})}
+                  style={{...inp,fontSize:12,padding:"6px",marginBottom:5}}/>
+                <textarea value={s.why||""} rows={2} placeholder="why this brand"
+                  onChange={e=>patchSugg(s.id,{why:e.target.value})}
+                  style={{...inp,fontSize:12,padding:"6px",marginBottom:5,resize:"vertical",fontFamily:"inherit"}}/>
+                <div style={{display:"flex",gap:5}}>
+                  <input type="number" value={s.commitPerMonth||""} inputMode="numeric"
+                    placeholder="doz/month committed"
+                    onChange={e=>patchSugg(s.id,{commitPerMonth:Number(e.target.value)||0})}
+                    style={{...inp,fontSize:12,padding:"6px",flex:1}}/>
+                  <button onClick={()=>deleteSugg(s.id,s.brand)}
+                    style={{padding:"6px 12px",borderRadius:7,border:"1px solid #e8c0c0",
+                    background:"#fff5f5",color:"#c33",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>
+                    Delete</button>
+                </div>
+              </div>
+            </details>
             <div style={{display:"flex",gap:5,marginTop:5,alignItems:"center"}}>
               <select value={s.status||"Proposed"} onChange={e=>setSuggStatus(s.id,e.target.value)} style={{...inp,fontSize:12,padding:"6px",flex:1}}>
                 <option>Proposed</option><option>Rejected</option><option>Launched</option><option>Closed</option>
