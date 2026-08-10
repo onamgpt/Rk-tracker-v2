@@ -2718,7 +2718,7 @@ function rollupField(reports, orders, parties, days, gpOf) {
 // selling rates only. Everything submitted is marked unverified
 // until the office reconciles it.
 // ============================================================
-function FieldConsole({ onClose, rootMode }) {
+function FieldConsole({ onClose, rootMode, onOpenFull }) {
   const me = (typeof URL_USER!=="undefined"?URL_USER:"main");
   const officer = me.charAt(0).toUpperCase()+me.slice(1);
   const isOwner = (typeof IS_OWNER!=="undefined") ? IS_OWNER : (me==="main");
@@ -3109,6 +3109,10 @@ function FieldConsole({ onClose, rootMode }) {
           <h2 style={{margin:0,fontSize:18,color:"#1a5a3a"}}>Field Console</h2>
           <div style={{fontSize:11,color:"#6a7a6a"}}>{officer} · {new Date().toLocaleDateString()}</div>
         </div>
+        {rootMode&&onOpenFull&&<button onClick={onOpenFull} title="open the rest of the app"
+          style={{border:"1px solid #d8e0d8",background:"#fff",borderRadius:8,
+          padding:"6px 10px",fontSize:11,cursor:"pointer",color:"#5a7a5a",marginRight:6}}>
+          ☰ Menu</button>}
         {rootMode&&<span style={{fontSize:9,color:"#c0c8c0",marginRight:6}}>{BUILD_STAMP}</span>}
         {rootMode&&<button onClick={()=>window.location.reload()} title="Refresh"
           style={{border:"1px solid #d8e0d8",background:"#fff",borderRadius:8,
@@ -11682,6 +11686,9 @@ function App(){
     })();
   },[]);
 
+  // Field staff land on the console, but they must still be able to reach the
+  // rest of the app if they need it. This lets them step out and back.
+  const [forceFull,setForceFull]=useState(false);
   const [entries,setEntries]=useState(loadCache);
   const [dropdowns,setDropdowns]=useState(loadDD);
   const [loading,setLoading]=useState(false);
@@ -12064,8 +12071,8 @@ function App(){
    // The nine field staff do not need a general-purpose tracker. Their whole
    // job is the field console, so that is the app for them — no menu hunting,
    // no note-entry screen they will never use.
-   if (IS_SALES) return <div style={{minHeight:"100vh",background:"linear-gradient(160deg,#fdf8ef,#f8f2e4)"}}>
-     <FieldConsole onClose={()=>{}} rootMode={true}/>
+   if (IS_SALES && !forceFull) return <div style={{minHeight:"100vh",background:"linear-gradient(160deg,#fdf8ef,#f8f2e4)"}}>
+     <FieldConsole onClose={()=>{}} rootMode={true} onOpenFull={()=>setForceFull(true)}/>
    </div>;
 
 
