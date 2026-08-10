@@ -2724,6 +2724,58 @@ function rollupField(reports, orders, parties, days, gpOf) {
 // the tracker, so a trip planned on the desktop is on the phone at
 // the airport.
 // ------------------------------------------------------------
+// Great-circle distance needs coordinates. A compact table beats an API call
+// here: no key, no quota, works offline, and these are the airports a trip from
+// Bangalore actually touches.
+const AIRPORTS = {
+  BLR:[12.95,77.67], BOM:[19.09,72.87], DEL:[28.56,77.10], MAA:[12.99,80.17],
+  COK:[10.15,76.40], CCU:[22.65,88.45], HYD:[17.24,78.43], TRV:[8.48,76.92],
+  CCJ:[11.14,75.96], GOI:[15.38,73.83], IXE:[12.96,74.89], PNY:[11.97,79.81],
+  DXB:[25.25,55.36], AUH:[24.43,54.65], SHJ:[25.33,55.52], DOH:[25.27,51.61],
+  MCT:[23.59,58.28], KWI:[29.23,47.97], BAH:[26.27,50.63], RUH:[24.96,46.70],
+  JED:[21.68,39.16], CAI:[30.11,31.41], IST:[41.28,28.75], TLV:[32.01,34.89],
+  SIN:[1.36,103.99], KUL:[2.75,101.71], BKK:[13.69,100.75], HKT:[8.11,98.32],
+  CGK:[-6.13,106.66], MNL:[14.51,121.02], HAN:[21.22,105.81], SGN:[10.82,106.66],
+  HKG:[22.31,113.91], PVG:[31.14,121.81], PEK:[40.08,116.58], ICN:[37.46,126.44],
+  NRT:[35.77,140.39], HND:[35.55,139.78], KIX:[34.43,135.24], TPE:[25.08,121.23],
+  CMB:[7.18,79.88], KTM:[27.70,85.36], DAC:[23.84,90.40], MLE:[4.19,73.53],
+  LHR:[51.47,-0.45], LGW:[51.15,-0.19], CDG:[49.01,2.55], ORY:[48.73,2.36],
+  AMS:[52.31,4.76], FRA:[50.04,8.56], MUC:[48.35,11.79], ZRH:[47.46,8.55],
+  VIE:[48.11,16.57], FCO:[41.80,12.25], MXP:[45.63,8.72], VCE:[45.51,12.35],
+  MAD:[40.47,-3.56], BCN:[41.30,2.08], LIS:[38.77,-9.13], ATH:[37.94,23.95],
+  PRG:[50.10,14.26], BUD:[47.44,19.26], WAW:[52.17,20.97], CPH:[55.62,12.66],
+  ARN:[59.65,17.92], OSL:[60.19,11.10], HEL:[60.32,24.96], DUB:[53.42,-6.27],
+  JFK:[40.64,-73.78], EWR:[40.69,-74.17], ORD:[41.98,-87.90], LAX:[33.94,-118.41],
+  SFO:[37.62,-122.38], IAD:[38.95,-77.46], BOS:[42.36,-71.01], YYZ:[43.68,-79.63],
+  SYD:[-33.95,151.18], MEL:[-37.67,144.84], AKL:[-37.01,174.79],
+  JNB:[-26.13,28.24], NBO:[-1.32,36.93], MRU:[-20.43,57.68], RUN:[-20.89,55.51],
+  ADD:[8.98,38.80], LOS:[6.58,3.32], CMN:[33.37,-7.59]
+};
+
+function greatCircleKm(a, b) {
+  const A = AIRPORTS[String(a||"").toUpperCase()], B = AIRPORTS[String(b||"").toUpperCase()];
+  if (!A || !B) return null;
+  const R = 6371, rad = d => d * Math.PI / 180;
+  const dLat = rad(B[0]-A[0]), dLon = rad(B[1]-A[1]);
+  const h = Math.sin(dLat/2)**2 + Math.cos(rad(A[0]))*Math.cos(rad(B[0]))*Math.sin(dLon/2)**2;
+  return Math.round(2 * R * Math.asin(Math.sqrt(h)));
+}
+
+// Economy fares do not scale evenly with distance — short hops carry a heavy
+// fixed cost per seat, long hauls spread it. These bands are rough and meant
+// only as a starting figure until a real quote replaces them.
+function fareGuess(km) {
+  if (km === null) return null;
+  let perKm;
+  if (km < 500)       perKm = 9.0;
+  else if (km < 1500) perKm = 5.5;
+  else if (km < 3500) perKm = 3.6;
+  else if (km < 7000) perKm = 2.9;
+  else                perKm = 2.4;
+  const raw = 1800 + km * perKm;
+  return Math.round(raw / 100) * 100;
+}
+
 function TravelPlanner({ onClose }) {
   const blankTrip = () => ({
     id: "tr_" + Date.now(),
@@ -2780,6 +2832,33 @@ function TravelPlanner({ onClose }) {
     const dd=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], mm=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     return dd[d.getUTCDay()]+" "+d.getUTCDate()+" "+mm[d.getUTCMonth()]; };
   const money=(n)=>"₹"+Math.round(Number(n)||0).toLocaleString("en-IN");
+
+  // What this route actually cost you before. Real history beats any estimate,
+  // so it is offered first and the distance guess only fills the gap.
+  const pastFare=(from,to)=>{
+    let best=null;
+    (trips||[]).forEach(t=>{
+      const stops=t.stops||[];
+      stops.forEach((s,i)=>{
+        const f=i===0?(t.origin||{}):stops[i-1];
+        if(String(f.code||"").toUpperCase()===String(from).toUpperCase() &&
+           String(s.code||"").toUpperCase()===String(to).toUpperCase()){
+          const paid=Number(s.actual)||Number(s.flight)||0;
+          if(paid>0) best={amount:paid, trip:t.name, actual:!!Number(s.actual)};
+        }
+      });
+    });
+    return best;
+  };
+
+  const suggestFare=(from,to)=>{
+    const past=pastFare(from,to);
+    if(past) return {amount:past.amount, why:(past.actual?"you paid this on ":"your estimate on ")+past.trip};
+    const km=greatCircleKm(from,to);
+    const g=fareGuess(km);
+    if(g) return {amount:g, why:"rough guess from "+km.toLocaleString("en-IN")+" km — replace with a real quote"};
+    return null;
+  };
 
   const schedule=()=>{
     if(!cur) return {rows:[],home:""};
@@ -3095,12 +3174,31 @@ function TravelPlanner({ onClose }) {
               <div style={{flex:2}}><label style={lab}>City</label>
                 <input value={s.city} onChange={e=>upStop(i,"city",e.target.value)} style={inp}/></div>
               <div style={{width:90}}><label style={lab}>Airport</label>
-                <input value={s.code} onChange={e=>upStop(i,"code",e.target.value.toUpperCase().slice(0,3))} style={inp}/></div>
+                <input value={s.code} placeholder="e.g. DXB"
+                  onChange={e=>{
+                    const code=e.target.value.toUpperCase().slice(0,3);
+                    upStop(i,"code",code);
+                    // Fill a starting fare the moment the route is known, so a
+                    // new city is never left sitting at zero.
+                    if(code.length===3 && !Number(s.flight)){
+                      const sug=suggestFare(from.code,code);
+                      if(sug) upStop(i,"flight",sug.amount);
+                    }
+                  }} style={inp}/></div>
             </div>
             <div style={{display:"flex",gap:6}}>
               <div style={{flex:1}}><label style={lab}>Flight ₹ each</label>
                 <input type="number" value={s.flight} inputMode="decimal"
-                  onChange={e=>upStop(i,"flight",Number(e.target.value)||0)} style={inp}/></div>
+                  onChange={e=>upStop(i,"flight",Number(e.target.value)||0)} style={inp}/>
+                {(()=>{
+                  const sug=suggestFare(from.code,s.code);
+                  if(!sug||Number(s.flight)===sug.amount) return null;
+                  return <button onClick={()=>upStop(i,"flight",sug.amount)}
+                    style={{border:"none",background:"none",color:"#1a5a9a",fontSize:10.5,
+                    cursor:"pointer",padding:0,marginTop:-4,marginBottom:8,textAlign:"left",
+                    textDecoration:"underline",display:"block"}}>
+                    use {money(sug.amount)} — {sug.why}</button>;
+                })()}</div>
               <div style={{flex:1}}><label style={lab}>Hotel ₹ / night</label>
                 <input type="number" value={s.hotel} inputMode="decimal"
                   onChange={e=>upStop(i,"hotel",Number(e.target.value)||0)} style={inp}/></div>
@@ -3153,9 +3251,14 @@ function TravelPlanner({ onClose }) {
       </div>
 
       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-        <button onClick={()=>setCur({...cur,stops:[...cur.stops,
-          {city:"",code:"",nights:2,flight:0,hotel:0,note:"",booked:false,ref:"",actual:0}]})}
-          style={ghost}>+ Add a city</button>
+        <button onClick={()=>{
+            const next=[...cur.stops,{city:"",code:"",nights:2,flight:0,hotel:0,note:"",booked:false,ref:"",actual:0}];
+            setCur({...cur,stops:next});
+            // Open the new card's editor at once. Otherwise it appears as a
+            // blank row with the name field hidden and nothing to type into.
+            setOpenEdit(o=>({...o,[next.length-1]:true}));
+            setTimeout(()=>window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"}),80);
+          }} style={ghost}>+ Add a city</button>
         <button onClick={saveCur} disabled={!!busy} style={{...btn,flex:1}}>
           {busy==="s"?"Saving…":"Save trip"}</button>
         <button onClick={()=>{
