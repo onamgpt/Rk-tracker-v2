@@ -11925,6 +11925,52 @@ function AIMTrading({ onClose }) {
     setLoading(false);
   };
 
+  const [recon,setRecon]=useState(null);
+
+  // Ask Zerodha what is actually held and compare it against this book. The
+  // ledger only knows about trades that were recorded, so this is the check
+  // that catches everything memory missed.
+  const runRecon=async()=>{
+    if(book!=="INDIA"){ setMsg("✗ Reconciliation needs Zerodha — India book only"); return; }
+    if(!kite){ setMsg("✗ Connect Zerodha first"); return; }
+    setBusy("recon"); setMsg(""); setRecon(null);
+    try{
+      const z=await kiteCall({action:"holdings",access_token:kite});
+      const real={};
+      ((z&&z.data)||[]).forEach(h=>{
+        const s=String(h.tradingsymbol||"").toUpperCase();
+        real[s]={ shares:Number(h.quantity)||0, avg:Number(h.average_price)||0,
+                  ltp:Number(h.last_price)||0 };
+      });
+
+      const book_={};
+      ((data&&data.holdings)||[]).forEach(h=>{
+        book_[String(h.symbol).toUpperCase()]={ shares:num(h.shares), avg:num(h.avg_cost) };
+      });
+
+      const syms=Array.from(new Set(Object.keys(real).concat(Object.keys(book_)))).sort();
+      const rows=syms.map(s=>{
+        const r=real[s], b=book_[s];
+        const rs=r?r.shares:0, bs=b?b.shares:0;
+        const diff=rs-bs;
+        let state;
+        if(!b && r)            state="notInBook";
+        else if(b && !r)       state="goneFromZerodha";
+        else if(Math.abs(diff)<0.001) state="match";
+        else                   state=diff>0?"moreAtZerodha":"fewerAtZerodha";
+        return { sym:s, real:rs, book:bs, diff, state,
+                 value:Math.abs(diff)*((r&&r.ltp)||(r&&r.avg)||0) };
+      });
+
+      const problems=rows.filter(x=>x.state!=="match");
+      setRecon({ rows, problems, checked:rows.length, at:new Date().toLocaleTimeString() });
+      setMsg(problems.length
+        ? ("Found "+problems.length+" difference(s) between Zerodha and this book")
+        : "✓ Every holding matches Zerodha exactly");
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
   const runAudit=async()=>{
     setLoading(true);setAudit(null);
     try{ const r=await api({action:"audit"}); if(r.ok) setAudit(r); else setErr(r.error||"audit failed"); }catch(e){ setErr(String(e.message||e)); }
@@ -13080,6 +13126,59 @@ function AIMTrading({ onClose }) {
 
     {/* ─────────────────────────────── AUDIT ─────────────────────────────── */}
     {tab==="audit"&&<div>
+      <div style={{background:"#fff",border:"1px solid #e6ece6",borderRadius:10,
+        padding:"12px 13px",marginBottom:12}}>
+        <div style={{fontSize:12.5,fontWeight:800,color:"#1a5a3a"}}>Does this book match reality?</div>
+        <div style={{fontSize:11,color:"#8a8a80",marginTop:3,marginBottom:9,lineHeight:1.5}}>
+          Compares what Zerodha says you hold against what this book thinks.
+          Any difference means a trade happened that was never recorded here.
+        </div>
+        <button onClick={runRecon} disabled={!!busy||book!=="INDIA"}
+          style={{width:"100%",padding:"11px",borderRadius:9,border:"none",
+          background:book==="INDIA"?"#1a3a6a":"#ccc",color:"#fff",
+          fontWeight:800,fontSize:13,cursor:book==="INDIA"?"pointer":"default"}}>
+          {busy==="recon"?"Checking…":"⚖️ Check against Zerodha"}</button>
+        {book!=="INDIA"&&<div style={{fontSize:10.5,color:"#a0661a",marginTop:6}}>
+          Only the India book can be checked — the others have no broker connection.</div>}
+
+        {recon&&<div style={{marginTop:11}}>
+          {!recon.problems.length
+            ? <div style={{background:"#e8f5e9",borderRadius:9,padding:"10px 12px",
+                fontSize:12.5,color:"#1a5a3a"}}>
+                ✓ All {recon.checked} holdings match Zerodha exactly. Nothing is missing
+                from the ledger.</div>
+            : <div>
+                <div style={{fontSize:11,color:"#a0661a",marginBottom:7}}>
+                  {recon.problems.length} difference(s) — each one is a trade that never
+                  reached this book.</div>
+                {recon.problems.map((p,i)=>{
+                  const wording =
+                    p.state==="notInBook"      ? "held at Zerodha but not in this book at all" :
+                    p.state==="goneFromZerodha"? "in this book but no longer held at Zerodha" :
+                    p.state==="moreAtZerodha"  ? ("you hold "+fmtN(p.diff)+" more than this book knows — an unrecorded buy") :
+                                                 ("you hold "+fmtN(-p.diff)+" fewer than this book knows — an unrecorded sell");
+                  return <div key={i} style={{border:"1px solid #f0e0d0",background:"#fffaf5",
+                    borderRadius:9,padding:"9px 11px",marginBottom:6}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                      <b style={{fontSize:12.5,color:"#1a5a3a"}}>{p.sym}</b>
+                      {p.value>0&&<span style={{fontSize:11,color:"#a0661a"}}>
+                        about {cur}{fmtN(p.value)}</span>}
+                    </div>
+                    <div style={{fontSize:11,color:"#8a7a5a",marginTop:2}}>{wording}</div>
+                    <div style={{fontSize:10.5,color:"#a0a898",marginTop:2}}>
+                      Zerodha {fmtN(p.real)} · this book {fmtN(p.book)}</div>
+                  </div>;
+                })}
+                <div style={{fontSize:10.5,color:"#8a8a80",marginTop:7,lineHeight:1.5}}>
+                  To fix: use ⚡ Today's trades if it happened today, or Record trade on
+                  the holding for anything older. Import holdings will bring in a share
+                  that is missing entirely.
+                </div>
+              </div>}
+          <div style={{fontSize:10,color:"#b0b0a8",marginTop:7}}>checked at {recon.at}</div>
+        </div>}
+      </div>
+
       <div style={{fontSize:11,color:"#888",marginBottom:8}}>
         Portfolio Control recomputed from the entire ledger and compared against the stored value.
       </div>
