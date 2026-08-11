@@ -12907,6 +12907,70 @@ function AIMTrading({ onClose }) {
         </div>;
       })()}
 
+      {(()=>{
+        // The plain question: what went in this month, what came out, what did
+        // it earn. No algorithm, just money.
+        const ym=new Date().toISOString().slice(0,7);
+        const rows=(ledger||[]).filter(t=>String(t.txn_date||"").slice(0,7)===ym);
+        const all=(ledger||[]).slice().sort((a,b)=>String(a.txn_date).localeCompare(String(b.txn_date)));
+
+        // running average cost so realised gain is right
+        const pos={}; let realisedThisMonth=0;
+        all.forEach(t=>{
+          const s=t.symbol, sh=num(t.shares), amt=num(t.amount), cst=num(t.costs);
+          if(!pos[s]) pos[s]={sh:0,val:0};
+          if(String(t.action).toUpperCase()==="SELL"){
+            const avg=pos[s].sh>0?pos[s].val/pos[s].sh:0;
+            const g=amt-avg*sh-cst;
+            pos[s].sh=Math.max(0,pos[s].sh-sh); pos[s].val=avg*pos[s].sh;
+            if(String(t.txn_date||"").slice(0,7)===ym) realisedThisMonth+=g;
+          } else { pos[s].sh+=sh; pos[s].val+=amt+cst; }
+        });
+
+        let bought=0,sold=0,charges=0,buys=0,sells=0;
+        rows.forEach(t=>{
+          charges+=num(t.costs);
+          if(String(t.action).toUpperCase()==="SELL"){ sold+=num(t.amount); sells++; }
+          else { bought+=num(t.amount); buys++; }
+        });
+
+        const names=["January","February","March","April","May","June","July",
+                     "August","September","October","November","December"];
+        const mLabel=names[new Date().getMonth()]+" "+new Date().getFullYear();
+
+        if(!rows.length) return <div style={{background:"#f7f7f4",borderRadius:10,
+          padding:"12px 13px",marginBottom:11,fontSize:12,color:"#8a8a80"}}>
+          <b style={{color:"#5a5a50"}}>{mLabel}</b> — nothing recorded yet this month.
+          If you have traded, use ⚡ Today's trades to bring the fills in.
+        </div>;
+
+        const row=(label,value,colour)=>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"3px 0"}}>
+            <span style={{color:"#5a6a5a"}}>{label}</span>
+            <b style={{color:colour||"#3a4a3a"}}>{value}</b>
+          </div>;
+
+        return <div style={{background:"#fff",border:"1px solid #e6ece6",borderRadius:10,
+          padding:"12px 13px",marginBottom:11}}>
+          <div style={{fontSize:10.5,color:"#8a9a8a",fontWeight:700,letterSpacing:.3,marginBottom:7}}>
+            {mLabel.toUpperCase()}</div>
+          {row("Money put in", cur+fmtN(bought)+(buys?("  ("+buys+" buy"+(buys>1?"s":"")+")"):""))}
+          {row("Money taken out", cur+fmtN(sold)+(sells?("  ("+sells+" sell"+(sells>1?"s":"")+")"):""))}
+          {row("Net into the market", (bought-sold>=0?"":"−")+cur+fmtN(Math.abs(bought-sold)),
+               bought-sold>=0?"#1a3a7a":"#1a7a3a")}
+          {charges>0&&row("Charges", cur+fmtN(charges), "#8a8a80")}
+          <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #f0f0ea"}}>
+            {row(realisedThisMonth>=0?"Profit banked":"Loss taken",
+                 (realisedThisMonth>=0?"+":"−")+cur+fmtN(Math.abs(realisedThisMonth)),
+                 realisedThisMonth>=0?"#1a7a3a":"#c0392b")}
+          </div>
+          <div style={{fontSize:10,color:"#a0a898",marginTop:7,lineHeight:1.5}}>
+            Counts only what is in the ledger. Import your fills or these figures
+            will understate what you actually did.
+          </div>
+        </div>;
+      })()}
+
       {!ledgerSym&&(()=>{
         // What the algorithm banked, month by month. Realised only — paper
         // value is excluded, because a rising market flatters every method.
