@@ -106,29 +106,33 @@ exports.handler = async (event) => {
       var failed = [];
       var authError = null;
 
-      for (var i = 0; i < list.length; i++) {
-        var key = "NSE:" + list[i];
+      // Fetch every symbol at the same time. One after another meant 26
+      // holdings needed 26 round trips, which ran past the function time
+      // limit — the call died and no prices came back at all.
+      var results = await Promise.all(list.map(async function (sym) {
+        var key = "NSE:" + sym;
         try {
           var raw = await kiteGet("/quote?i=" + encodeURIComponent(key), body.access_token);
-          var parsed = JSON.parse(raw);
-
-          // An expired or invalid session fails every symbol identically. Report
-          // it as what it is, rather than listing the whole portfolio as if each
-          // ticker were wrong.
-          if (parsed && parsed.status === "error") {
-            var et = String(parsed.error_type || "");
-            // Any error that repeats for every symbol is an account-level
-            // problem, not a bad ticker. Pass Zerodha's own wording through.
-            authError = (parsed.message || et || "request rejected") +
-                        (et ? (" [" + et + "]") : "");
-            break;
-          }
-
-          if (parsed && parsed.data && parsed.data[key]) out[key] = parsed.data[key];
-          else failed.push(list[i]);
+          return { sym: sym, key: key, parsed: JSON.parse(raw) };
         } catch (e) {
-          failed.push(list[i]);
+          return { sym: sym, key: key, parsed: null };
         }
+      }));
+
+      for (var i = 0; i < results.length; i++) {
+        var res = results[i], parsed = res.parsed;
+        if (!parsed) { failed.push(res.sym); continue; }
+
+        // An error that repeats for every symbol is an account-level problem,
+        // not a bad ticker. Pass Zerodha's own wording through.
+        if (parsed.status === "error") {
+          var et = String(parsed.error_type || "");
+          authError = (parsed.message || et || "request rejected") + (et ? (" [" + et + "]") : "");
+          break;
+        }
+
+        if (parsed.data && parsed.data[res.key]) out[res.key] = parsed.data[res.key];
+        else failed.push(res.sym);
       }
 
       if (authError) {
