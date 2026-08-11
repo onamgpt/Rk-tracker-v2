@@ -12046,16 +12046,28 @@ function AIMTrading({ onClose }) {
       const d=await r.json();
       if(!d||!d.api_key) throw new Error("could not read the Kite app key");
 
-      const basket=orders.map(o=>({
-        variety:"regular",
-        exchange:"NSE",
-        tradingsymbol:o.symbol,
-        transaction_type:o.side,
-        order_type:"MARKET",
-        product:"CNC",
-        quantity:Math.max(1,Math.round(o.qty)),
-        readonly:false
-      }));
+      const basket=orders.map(o=>{
+        // Trade-to-trade scrips (the -BE series) and other illiquid counters do
+        // not accept market orders on Kite — they need a limit price. Send a
+        // limit set a little in our favour and let the user adjust it there.
+        const t2t = /-BE$|-BZ$|-IL$/i.test(String(o.symbol));
+        const px  = Number(o.price)||0;
+        const useLimit = t2t && px>0;
+        const limit = useLimit
+          ? Math.round((o.side==="BUY" ? px*1.02 : px*0.98)*20)/20   // nearest 5 paise
+          : 0;
+        return {
+          variety:"regular",
+          exchange:"NSE",
+          tradingsymbol:o.symbol,
+          transaction_type:o.side,
+          order_type: useLimit ? "LIMIT" : "MARKET",
+          product:"CNC",
+          quantity:Math.max(1,Math.round(o.qty)),
+          ...(useLimit?{price:limit}:{}),
+          readonly:false
+        };
+      });
 
       const f=document.createElement("form");
       f.method="POST";
@@ -12068,7 +12080,9 @@ function AIMTrading({ onClose }) {
       document.body.appendChild(f);
       f.submit();
       setTimeout(()=>{ try{ document.body.removeChild(f); }catch(e){} },2000);
-      setMsg("Opened in Kite — review and confirm there, then record the trade here");
+      const t2tCount=basket.filter(b=>b.order_type==="LIMIT").length;
+      setMsg("Opened in Kite — review and confirm there, then record the trade here"+
+        (t2tCount?(" · "+t2tCount+" sent as a limit order (trade-to-trade scrip, market orders are refused)"):""));
     }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
@@ -12430,7 +12444,7 @@ function AIMTrading({ onClose }) {
             const sells=acts.filter(x=>x.s.action==="SELL").length;
             const buys=acts.length-sells;
             return <button onClick={()=>sendToKite(acts.map(x=>
-                ({symbol:x.h.symbol,side:x.s.action,qty:x.s.qty})))}
+                ({symbol:x.h.symbol,side:x.s.action,qty:x.s.qty,price:x.h.last_price})))}
               disabled={!!busy}
               style={{...btn,background:"#1a3a6a",color:"#fff",width:"100%",marginTop:5,fontSize:12.5}}>
               {busy==="basket"?"Opening Kite…"
@@ -12559,7 +12573,7 @@ function AIMTrading({ onClose }) {
               {s.action} {cur}{fmtN(s.amount)} · about {s.qty} shares
             </div>
             {book==="INDIA"&&kite&&Math.round(s.qty)>=1&&
-              <button onClick={()=>sendToKite([{symbol:h.symbol,side:s.action,qty:s.qty}])}
+              <button onClick={()=>sendToKite([{symbol:h.symbol,side:s.action,qty:s.qty,price:h.last_price}])}
                 disabled={!!busy}
                 style={{width:"100%",marginTop:6,padding:"9px",borderRadius:7,border:"none",
                 background:s.action==="BUY"?"#1a5a9a":"#1a7a3a",color:"#fff",
