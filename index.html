@@ -2906,6 +2906,221 @@ const REGION_INFO = {
   OTHER:{ ccy:"local",  visa:"Check visa requirements for an Indian passport", plug:"carry universal" }
 };
 
+// ------------------------------------------------------------
+// Forward test. A backtest tells you what already happened; only a
+// forward test tells you whether the screener predicts anything.
+// Freeze today's picks at today's prices, leave them alone, and read
+// the answer in six months — against the index, not against zero,
+// because a rising market lifts almost everything.
+// ------------------------------------------------------------
+function ForwardTest({ onClose }) {
+  const [runs,setRuns]=useState([]);
+  const [busy,setBusy]=useState("");
+  const [msg,setMsg]=useState("");
+  const [paste,setPaste]=useState("");
+  const [label,setLabel]=useState("");
+
+  const BENCH="NIFTY 50";
+
+  useEffect(()=>{ (async()=>{
+    try{
+      const r=await sheetsAPI("getPortfolio",{key:"screener_runs",user:"main"});
+      if(r&&r.data&&Array.isArray(r.data)) setRuns(r.data);
+    }catch(e){}
+  })(); },[]);
+
+  const persist=async(list)=>{
+    setRuns(list);
+    try{ await sheetsAPI("savePortfolio",{key:"screener_runs",user:"main",data:list}); }
+    catch(e){ setMsg("✗ could not save"); }
+  };
+
+  const kiteToken=()=>{ try{ return localStorage.getItem("aim_kite_token")||""; }catch(e){ return ""; } };
+
+  const fetchPrices=async(symbols)=>{
+    const tok=kiteToken();
+    if(!tok) throw new Error("connect Zerodha in AIM Trading first");
+    const r=await fetch("/.netlify/functions/kite",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"quote",symbols,access_token:tok})});
+    const j=await r.json();
+    if(j&&j.authError) throw new Error(j.authError);
+    const out={};
+    Object.keys((j&&j.data)||{}).forEach(k=>{
+      out[k.replace(/^NSE:/,"")]=Number(j.data[k].last_price)||0;
+    });
+    return out;
+  };
+
+  // Paste the tickers straight from a screener report.
+  const startRun=async()=>{
+    const syms=Array.from(new Set(paste.split(/[\s,\n]+/)
+      .map(s=>s.trim().toUpperCase().replace(/\.NS$/,""))
+      .filter(s=>s&&/^[A-Z0-9&\-]{2,20}$/.test(s)))).slice(0,25);
+    if(syms.length<3){ setMsg("✗ Paste at least three tickers"); return; }
+    setBusy("start"); setMsg("");
+    try{
+      const px=await fetchPrices(syms.concat([BENCH]));
+      const picks=syms.map(s=>({sym:s, entry:px[s]||0}))
+                      .filter(p=>p.entry>0);
+      const missing=syms.filter(s=>!px[s]);
+      if(!picks.length) throw new Error("no prices came back for those tickers");
+      const run={ id:"fw_"+Date.now(),
+        label: label.trim() || ("Run of "+new Date().toISOString().slice(0,10)),
+        started:new Date().toISOString().slice(0,10),
+        benchEntry: px[BENCH]||0,
+        picks, missing };
+      await persist([run,...runs]);
+      setPaste(""); setLabel("");
+      setMsg("✓ Frozen "+picks.length+" picks at today's prices"+
+        (missing.length?(" · no price for "+missing.join(", ")):"")+
+        ". Leave it alone and come back in six months.");
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const refresh=async(run)=>{
+    setBusy("r"+run.id); setMsg("");
+    try{
+      const px=await fetchPrices(run.picks.map(p=>p.sym).concat([BENCH]));
+      const picks=run.picks.map(p=>({...p, now: px[p.sym]||p.now||0}));
+      const updated={...run, picks, benchNow: px[BENCH]||run.benchNow||0,
+        checked:new Date().toISOString().slice(0,10)};
+      await persist(runs.map(x=>x.id===run.id?updated:x));
+      setMsg("✓ Updated");
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const stats=(run)=>{
+    const rets=run.picks.filter(p=>p.now>0&&p.entry>0)
+      .map(p=>({sym:p.sym, pct:(p.now-p.entry)/p.entry*100}));
+    if(!rets.length) return null;
+    const sorted=rets.slice().sort((a,b)=>b.pct-a.pct);
+    const med=sorted[Math.floor(sorted.length/2)].pct;
+    const avg=rets.reduce((s,r)=>s+r.pct,0)/rets.length;
+    const bench=(run.benchNow>0&&run.benchEntry>0)
+      ? (run.benchNow-run.benchEntry)/run.benchEntry*100 : null;
+    const beat=bench===null?null:rets.filter(r=>r.pct>bench).length;
+    const days=Math.round((new Date(run.checked||new Date())-new Date(run.started))/864e5);
+    return { rets:sorted, med, avg, bench, beat, n:rets.length, days,
+             wins:rets.filter(r=>r.pct>0).length };
+  };
+
+  const inp={width:"100%",padding:"9px",borderRadius:8,border:"1.5px solid #cfd8cf",
+    fontSize:13,marginBottom:8,boxSizing:"border-box"};
+
+  return (
+    <div style={{padding:"14px 13px 40px",maxWidth:620,margin:"0 auto"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:11}}>
+        <span style={{fontSize:26}}>🔬</span>
+        <div><h2 style={{margin:0,fontSize:18,color:"#1a5a3a"}}>Forward Test</h2>
+        <div style={{fontSize:11,color:"#6a7a6a"}}>does the screener actually predict?</div></div>
+      </div>
+
+      {msg&&<div style={{fontSize:12.5,color:msg[0]==="✓"?"#1a7a3a":"#a33",
+        background:msg[0]==="✓"?"#e8f5e9":"#fdecea",padding:"8px 10px",
+        borderRadius:8,marginBottom:10,lineHeight:1.5}}>{msg}</div>}
+
+      <div style={{background:"#f7faf7",border:"1px solid #dde6dd",borderRadius:10,
+        padding:"12px 13px",marginBottom:13}}>
+        <div style={{fontSize:12.5,fontWeight:800,color:"#1a5a3a",marginBottom:3}}>Freeze a new run</div>
+        <div style={{fontSize:10.5,color:"#8a8a80",marginBottom:8,lineHeight:1.5}}>
+          Paste the tickers the screener gave you. Today's prices are recorded and
+          never touched again. No money is involved — this only measures whether the
+          picks were any good.
+        </div>
+        <input value={label} onChange={e=>setLabel(e.target.value)}
+          placeholder="name it, e.g. Nifty 100 top 20" style={inp}/>
+        <textarea value={paste} onChange={e=>setPaste(e.target.value)} rows={4}
+          placeholder="SOLEX STLTECH KAYA CCL RBLBANK …"
+          style={{...inp,resize:"vertical",fontFamily:"monospace",fontSize:12}}/>
+        <button onClick={startRun} disabled={!!busy}
+          style={{width:"100%",padding:"11px",borderRadius:9,border:"none",
+          background:"#1a5a3a",color:"#fff",fontWeight:800,fontSize:13.5,cursor:"pointer"}}>
+          {busy==="start"?"Recording…":"🔒 Freeze at today's prices"}</button>
+      </div>
+
+      {!runs.length&&<div style={{fontSize:12,color:"#999",textAlign:"center",
+        padding:"20px 10px",lineHeight:1.6}}>
+        No runs yet. Freeze one today and the answer arrives in six months.</div>}
+
+      {runs.map(run=>{
+        const st=stats(run);
+        return <div key={run.id} style={{border:"1px solid #e6ece6",borderRadius:11,
+          padding:"12px 13px",marginBottom:11,background:"#fff"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+            <b style={{fontSize:13.5,color:"#1a5a3a"}}>{run.label}</b>
+            <span style={{fontSize:10.5,color:"#999"}}>frozen {run.started}</span>
+          </div>
+          <div style={{fontSize:11,color:"#8a9a8a",marginBottom:9}}>
+            {run.picks.length} picks{st?(" · "+st.days+" days elapsed"):""}</div>
+
+          {!st||!st.rets.some(r=>r.pct!==0)
+            ? <div style={{fontSize:11.5,color:"#8a8a80",marginBottom:8}}>
+                Nothing to read yet — refresh once some time has passed.</div>
+            : <div>
+                <div style={{background:st.bench!==null&&st.med>st.bench?"#e8f5e9":"#fdf4e8",
+                  borderRadius:9,padding:"10px 12px",marginBottom:9}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5}}>
+                    <span style={{color:"#5a6a5a"}}>Median pick</span>
+                    <b style={{color:st.med>=0?"#1a7a3a":"#c0392b"}}>
+                      {st.med>=0?"+":""}{st.med.toFixed(1)}%</b>
+                  </div>
+                  {st.bench!==null&&<div style={{display:"flex",justifyContent:"space-between",
+                    fontSize:12.5,marginTop:3}}>
+                    <span style={{color:"#5a6a5a"}}>Nifty 50 over the same days</span>
+                    <b style={{color:st.bench>=0?"#1a7a3a":"#c0392b"}}>
+                      {st.bench>=0?"+":""}{st.bench.toFixed(1)}%</b>
+                  </div>}
+                  {st.bench!==null&&<div style={{marginTop:7,paddingTop:7,
+                    borderTop:"1px solid rgba(0,0,0,.08)",fontSize:12.5,fontWeight:800,
+                    color:st.med>st.bench?"#1a7a3a":"#a0661a"}}>
+                    {st.med>st.bench
+                      ? "Beating the index by "+(st.med-st.bench).toFixed(1)+" points"
+                      : "Behind the index by "+(st.bench-st.med).toFixed(1)+" points"}
+                    <span style={{fontWeight:400,color:"#8a8a80"}}>
+                      {" · "+st.beat+" of "+st.n+" picks beat it"}</span>
+                  </div>}
+                </div>
+
+                <details>
+                  <summary style={{fontSize:11,color:"#5a7a5a",cursor:"pointer",marginBottom:6}}>
+                    every pick ({st.wins} of {st.n} up)</summary>
+                  {st.rets.map(r=><div key={r.sym} style={{display:"flex",
+                    justifyContent:"space-between",fontSize:11.5,padding:"2px 0"}}>
+                    <span style={{color:"#5a6a5a"}}>{r.sym}</span>
+                    <b style={{color:r.pct>=0?"#1a7a3a":"#c0392b"}}>
+                      {r.pct>=0?"+":""}{r.pct.toFixed(1)}%</b>
+                  </div>)}
+                </details>
+              </div>}
+
+          <div style={{display:"flex",gap:6,marginTop:9}}>
+            <button onClick={()=>refresh(run)} disabled={!!busy}
+              style={{flex:1,padding:"9px",borderRadius:8,border:"1px solid #d8e0d8",
+              background:"#fff",color:"#5a6a5a",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+              {busy==="r"+run.id?"Checking…":"↻ Check prices now"}</button>
+            <button onClick={async()=>{
+              if(!window.confirm("Delete the run \""+run.label+"\"?")) return;
+              await persist(runs.filter(x=>x.id!==run.id));
+            }} style={{padding:"9px 12px",borderRadius:8,border:"1px solid #e8c0c0",
+              background:"#fff",color:"#c33",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+              Delete</button>
+          </div>
+        </div>;
+      })}
+
+      <div style={{fontSize:10.5,color:"#8a9a8a",marginTop:14,lineHeight:1.6,
+        borderLeft:"2px solid #dde6dd",paddingLeft:10}}>
+        Judge the picks against the index, never against zero. In a rising market
+        almost everything goes up — the only question that matters is whether these
+        went up more.
+      </div>
+    </div>
+  );
+}
+
 function TravelPlanner({ onClose }) {
   const blankTrip = () => ({
     id: "tr_" + Date.now(),
@@ -13320,6 +13535,7 @@ function App(){
   const [tgShareEntry,setTgShareEntry]=useState(null);
   const [capMode,setCapMode]=useState(null); // "purchase" | "sales" | null
   const [showTravel,setShowTravel]=useState(false);
+  const [showFwd,setShowFwd]=useState(false);
   const [showFieldReport,setShowFieldReport]=useState(false);
   const [showFieldConsole,setShowFieldConsole]=useState(false);
   const [showFieldAdmin,setShowFieldAdmin]=useState(false);
@@ -13768,6 +13984,7 @@ function App(){
                 {l:"🔒 PIN Access",fn:()=>setShowPins(true), ownerOnly:true},
                 {l:"📊 Tally",fn:()=>setShowTally(true), ownerOnly:true},
                 {l:"📍 Location",fn:()=>setShowLocation(true), ownerOnly:true},
+                {l:"🔬 Forward Test",fn:()=>setShowFwd(true), ownerOnly:true},
                 {l:"🧳 Travel Planner",fn:()=>setShowTravel(true), personalOnly:true},
                 {l:"📒 Day Book",fn:()=>setShowDayBook(true), notSales:true},
                 {l:"🏥 Health",fn:()=>setShowHealth(true), personalOnly:true},
@@ -14037,6 +14254,7 @@ function App(){
     <Modal open={showAIM && IS_OWNER} onClose={()=>setShowAIM(false)} wide><AIMTrading onClose={()=>setShowAIM(false)}/></Modal>
     <Modal open={!!tgShareEntry} onClose={()=>setTgShareEntry(null)}><TelegramShare entry={tgShareEntry} onClose={()=>setTgShareEntry(null)}/></Modal>
     <Modal open={!!capMode} onClose={()=>setCapMode(null)}><PurchaseSalesCapture mode={capMode} onSaveEntry={saveEntry} onClose={()=>setCapMode(null)}/></Modal>
+    <Modal open={showFwd} onClose={()=>setShowFwd(false)}><ForwardTest onClose={()=>setShowFwd(false)}/></Modal>
     <Modal open={showTravel} onClose={()=>setShowTravel(false)}><TravelPlanner onClose={()=>setShowTravel(false)}/></Modal>
     <Modal open={showFieldConsole} onClose={()=>setShowFieldConsole(false)}><FieldConsole onClose={()=>setShowFieldConsole(false)}/></Modal>
     <Modal open={showFieldAdmin} onClose={()=>setShowFieldAdmin(false)}><FieldAdmin onClose={()=>setShowFieldAdmin(false)}/></Modal>
