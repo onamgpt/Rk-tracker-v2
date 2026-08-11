@@ -12251,12 +12251,18 @@ function AIMTrading({ onClose }) {
       const d=await kiteCall({action:"orders",access_token:kite});
       const rows=(d&&d.data)||[];
       const done=rows.filter(o=>String(o.status).toUpperCase()==="COMPLETE");
-      const held={}; (data?data.holdings:[]).forEach(h=>held[h.symbol]=1);
-      const mine=done.filter(o=>held[String(o.tradingsymbol).toUpperCase()]);
+      const held={}; (data?data.holdings:[]).forEach(h=>held[String(h.symbol).toUpperCase()]=1);
+      // Show everything that filled today. Previously only stocks already in the
+      // book were listed, so a position opened this morning was invisible — the
+      // very trade most in need of recording.
+      const mine=done.map(o=>({...o, isNew: !held[String(o.tradingsymbol).toUpperCase()]}));
       setFills(mine);
       const sel={}; mine.forEach((o,i)=>sel[i]=true);
       setPicked(sel);
-      setMsg(mine.length?("Found "+mine.length+" fill(s) in stocks you hold"):"No fills today in stocks you hold");
+      const fresh=mine.filter(o=>o.isNew).length;
+      setMsg(mine.length
+        ? ("Found "+mine.length+" fill(s) today"+(fresh?(" · "+fresh+" in stock not yet in this book"):""))
+        : "No completed fills today");
     }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
@@ -12268,11 +12274,22 @@ function AIMTrading({ onClose }) {
       for(let i=0;i<fills.length;i++){
         if(!picked[i]) continue;
         const o=fills[i];
-        const r=await api({action:"recordTrade",symbol:o.tradingsymbol,
-          tradeAction:String(o.transaction_type).toUpperCase()==="BUY"?"BUY":"SELL",
-          shares:Number(o.filled_quantity||o.quantity),price:Number(o.average_price),
-          note:"imported from Zerodha order "+o.order_id});
-        if(r.ok) n++;
+        const side=String(o.transaction_type).toUpperCase()==="BUY"?"BUY":"SELL";
+        const qty=Number(o.filled_quantity||o.quantity);
+        const px=Number(o.average_price);
+        let r;
+        if(o.isNew && side==="BUY"){
+          // Not in the book yet, so this opens the position rather than
+          // adjusting one. Cash moves, because this was a real purchase.
+          r=await api({action:"openPosition",symbol:String(o.tradingsymbol).toUpperCase(),
+            shares:qty,price:px,costs:0,name:String(o.tradingsymbol).toUpperCase(),
+            note:"opened from Zerodha order "+o.order_id});
+        } else {
+          r=await api({action:"recordTrade",symbol:o.tradingsymbol,
+            tradeAction:side,shares:qty,price:px,
+            note:"imported from Zerodha order "+o.order_id});
+        }
+        if(r&&r.ok) n++;
       }
       setMsg("✓ "+n+" trade(s) written to the ledger");
       setFills(null); load();
@@ -12491,6 +12508,8 @@ function AIMTrading({ onClose }) {
         </div>
         {fills.map((o,i)=><label key={i} style={{display:"flex",gap:7,alignItems:"flex-start",padding:"5px 0",borderBottom:i<fills.length-1?"1px solid #f0e8d8":"none",cursor:"pointer"}}>
           <input type="checkbox" checked={!!picked[i]} onChange={e=>setPicked({...picked,[i]:e.target.checked})} style={{marginTop:2}}/>
+          {o.isNew&&<span style={{fontSize:9.5,fontWeight:800,color:"#1a5a9a",background:"#e3f2fd",
+            padding:"2px 5px",borderRadius:5,marginRight:5,alignSelf:"flex-start"}}>NEW</span>}
           <span style={{fontSize:11.5}}>
             <b>{o.transaction_type} {o.tradingsymbol}</b><br/>
             <span style={{color:"#666"}}>{o.filled_quantity||o.quantity} @ Rs.{Number(o.average_price).toFixed(2)}</span>
