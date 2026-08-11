@@ -12133,10 +12133,14 @@ function AIMTrading({ onClose }) {
         // session both fail here, and only their wording tells them apart.
         const raw=String(q.authError);
         const expired=/token|session|expired|invalid/i.test(raw);
+        const busyLimit=/too many|rate|throttl/i.test(raw);
+        const permission=/permission|forbidden|subscri/i.test(raw);
         if(expired) clearKite();
         setMsg("✗ Zerodha says: \""+raw+"\""+
-          (expired?" — tap Connect Zerodha and log in again."
-                 :" — this is not a login problem. Check that your Kite Connect subscription is active at developers.kite.trade."));
+          (expired    ? " — tap Connect Zerodha and log in again."
+          :busyLimit  ? " — Zerodha is rate limiting us. Wait a minute and tap Live prices again."
+          :permission ? " — your Kite app needs to be the paid Connect type, not Personal. Check at developers.kite.trade."
+          :             " — this is not a login problem."));
         setBusy(""); return;
       }
       const bad=(q&&q.failed)||[];

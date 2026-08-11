@@ -106,34 +106,32 @@ exports.handler = async (event) => {
       var failed = [];
       var authError = null;
 
-      // Fetch every symbol at the same time. One after another meant 26
-      // holdings needed 26 round trips, which ran past the function time
-      // limit — the call died and no prices came back at all.
-      var results = await Promise.all(list.map(async function (sym) {
-        var key = "NSE:" + sym;
-        try {
-          var raw = await kiteGet("/quote?i=" + encodeURIComponent(key), body.access_token);
-          return { sym: sym, key: key, parsed: JSON.parse(raw) };
-        } catch (e) {
-          return { sym: sym, key: key, parsed: null };
-        }
-      }));
+      // One request for all of them. Kite accepts many instruments in a single
+      // quote call and simply omits any it does not recognise — so a bad ticker
+      // costs that one price, not the whole set. Firing 26 separate requests
+      // instead trips the rate limit; doing them one after another runs past
+      // the function time limit. A single batch avoids both.
+      var qs = list.map(function (s) { return "i=" + encodeURIComponent("NSE:" + s); }).join("&");
+      try {
+        var raw = await kiteGet("/quote?" + qs, body.access_token);
+        var parsed = JSON.parse(raw);
 
-      for (var i = 0; i < results.length; i++) {
-        var res = results[i], parsed = res.parsed;
-        if (!parsed) { failed.push(res.sym); continue; }
-
-        // An error that repeats for every symbol is an account-level problem,
-        // not a bad ticker. Pass Zerodha's own wording through.
-        if (parsed.status === "error") {
+        if (parsed && parsed.status === "error") {
           var et = String(parsed.error_type || "");
           authError = (parsed.message || et || "request rejected") + (et ? (" [" + et + "]") : "");
-          break;
+        } else if (parsed && parsed.data) {
+          list.forEach(function (sym) {
+            var key = "NSE:" + sym;
+            if (parsed.data[key]) out[key] = parsed.data[key];
+            else failed.push(sym);
+          });
+        } else {
+          failed = list.slice();
         }
-
-        if (parsed.data && parsed.data[res.key]) out[res.key] = parsed.data[res.key];
-        else failed.push(res.sym);
+      } catch (e) {
+        authError = "could not reach Zerodha: " + String(e && e.message ? e.message : e);
       }
+
 
       if (authError) {
         return {statusCode:200, headers:h,
