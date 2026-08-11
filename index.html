@@ -12054,7 +12054,7 @@ function AIMTrading({ onClose }) {
         const px  = Number(o.price)||0;
         const useLimit = t2t && px>0;
         const limit = useLimit
-          ? Math.round((o.side==="BUY" ? px*1.02 : px*0.98)*20)/20   // nearest 5 paise
+          ? Math.round((o.side==="BUY" ? px*1.01 : px*0.99)*20)/20   // nearest 5 paise
           : 0;
         return {
           variety:"regular",
