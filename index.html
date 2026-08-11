@@ -11894,6 +11894,7 @@ function AIMTrading({ onClose }) {
   const [fills,setFills]=useState(null);
   const [zh,setZh]=useState(null);
   const [openSym,setOpenSym]=useState(null);
+  const [ledgerSym,setLedgerSym]=useState("");
   const [zhPick,setZhPick]=useState({});
   const [picked,setPicked]=useState({});
 
@@ -12630,6 +12631,10 @@ function AIMTrading({ onClose }) {
                     PC {cur}{fmtN(t.pc_before)} → {cur}{fmtN(t.pc_after)} · cash {cur}{fmtN(t.cash_after)}
                   </div>
                 </div>)}
+            <button onClick={()=>{ setLedgerSym(h.symbol); setTab("ledger"); }}
+              style={{padding:"6px 10px",borderRadius:7,border:"1px solid #d8d8c8",
+              background:"#fff",color:"#5a6a5a",fontSize:11,fontWeight:700,cursor:"pointer",marginRight:5}}>
+              📒 History</button>
             <button onClick={()=>removeShare(h.symbol)} disabled={!!busy}
               style={{...btn,background:"#fff",color:"#c62828",border:"1px solid #e0a0a0",width:"100%",marginTop:8}}>
               {busy==="rm"?"…":"Remove "+h.symbol+" from this book"}</button>
@@ -12746,11 +12751,83 @@ function AIMTrading({ onClose }) {
       <div style={{fontSize:11,color:"#888",marginBottom:8}}>
         Append-only. Corrections are entered as new adjusting rows, never by editing history.
       </div>
+
+      {(()=>{
+        const syms=Array.from(new Set((ledger||[]).map(t=>t.symbol))).sort();
+        if(!syms.length) return null;
+        return <select value={ledgerSym} onChange={e=>setLedgerSym(e.target.value)}
+          style={{width:"100%",padding:"9px",borderRadius:8,border:"1.5px solid #d8d8c8",
+          fontSize:13,marginBottom:9,background:"#fff"}}>
+          <option value="">Every share ({syms.length})</option>
+          {syms.map(s=><option key={s} value={s}>{s}</option>)}
+        </select>;
+      })()}
+
+      {ledgerSym&&(()=>{
+        // One share's whole story: what went in, what came out, what it left behind.
+        const rows=(ledger||[]).filter(t=>t.symbol===ledgerSym);
+        let bought=0,boughtVal=0,sold=0,soldVal=0,costs=0;
+        rows.forEach(t=>{
+          const sh=num(t.shares), amt=num(t.amount);
+          costs+=num(t.costs);
+          if(String(t.action).toUpperCase()==="SELL"){ sold+=sh; soldVal+=amt; }
+          else { bought+=sh; boughtVal+=amt; }
+        });
+        const held=(data&&data.holdings||[]).find(h=>h.symbol===ledgerSym);
+        const openShares=held?num(held.shares):Math.max(0,bought-sold);
+        const avgBuy=bought>0?boughtVal/bought:0;
+        // Realised on the shares actually sold, against average cost.
+        const realised=sold>0?(soldVal-avgBuy*sold):0;
+        const mktVal=held?num(held.shares)*num(held.last_price):0;
+        const unreal=held?(mktVal-avgBuy*openShares):0;
+        const first=rows.length?rows[rows.length-1].txn_date:"";
+        const last=rows.length?rows[0].txn_date:"";
+        return <div style={{background:"#f7faf7",border:"1px solid #dde6dd",borderRadius:10,
+          padding:"12px 13px",marginBottom:10}}>
+          <div style={{fontSize:14,fontWeight:800,color:"#1a5a3a"}}>{ledgerSym}</div>
+          <div style={{fontSize:10.5,color:"#8a9a8a",marginBottom:8}}>
+            {rows.length} transaction{rows.length===1?"":"s"}
+            {first?(" · "+first+(last&&last!==first?(" to "+last):"")):""}</div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:11.5}}>
+            <div>Bought <b>{fmtN(bought)}</b> for {cur}{fmtN(boughtVal)}</div>
+            <div>Sold <b>{fmtN(sold)}</b> for {cur}{fmtN(soldVal)}</div>
+            <div>Average cost <b>{cur}{fmtN(avgBuy)}</b></div>
+            <div>Still holding <b>{fmtN(openShares)}</b></div>
+          </div>
+
+          <div style={{marginTop:9,paddingTop:9,borderTop:"1px solid #dde6dd"}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5}}>
+              <span style={{color:"#5a6a5a"}}>Banked so far</span>
+              <b style={{color:realised>=0?"#1a7a3a":"#c0392b"}}>
+                {realised>=0?"+":""}{cur}{fmtN(realised)}</b>
+            </div>
+            {held&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,marginTop:3}}>
+              <span style={{color:"#5a6a5a"}}>Still on paper</span>
+              <b style={{color:unreal>=0?"#1a7a3a":"#c0392b"}}>
+                {unreal>=0?"+":""}{cur}{fmtN(unreal)}</b>
+            </div>}
+            {costs>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginTop:3,color:"#8a8a80"}}>
+              <span>Charges paid</span><span>{cur}{fmtN(costs)}</span>
+            </div>}
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginTop:7,
+              paddingTop:7,borderTop:"1px solid #dde6dd"}}>
+              <b style={{color:"#1a5a3a"}}>All in</b>
+              <b style={{color:(realised+unreal-costs)>=0?"#1a7a3a":"#c0392b",fontSize:15}}>
+                {(realised+unreal-costs)>=0?"+":""}{cur}{fmtN(realised+unreal-costs)}</b>
+            </div>
+          </div>
+
+          {sold===0&&<div style={{fontSize:10.5,color:"#a0661a",marginTop:8}}>
+            AIM has never sold this one. Nothing banked yet — it is being held, not worked.</div>}
+        </div>;
+      })()}
+
       <button onClick={exportLedger} style={{padding:"8px 12px",borderRadius:6,border:"none",
         background:"#eee",color:"#333",fontSize:12,fontWeight:700,cursor:"pointer",width:"100%",marginBottom:8}}>
         ⬇ Export ledger to CSV</button>
       {!ledger.length&&!loading&&<div style={{padding:20,textAlign:"center",color:"#888",fontSize:13}}>No transactions yet.</div>}
-      {ledger.map(t=><div key={t.id} style={card}>
+      {(ledgerSym?ledger.filter(t=>t.symbol===ledgerSym):ledger).map(t=><div key={t.id} style={card}>
         <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
           <div>
             <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:6,color:"#fff",background:sigColor(t.action)}}>{t.action}</span>
