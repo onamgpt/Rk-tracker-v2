@@ -11636,6 +11636,170 @@ function Orders({ onClose }) {
 //  AIM BACKTEST — one stock, your choice of window. Gross of costs by request.
 //  Every decision uses only the prior close, so there is no look-ahead.
 // ─────────────────────────────────────────────────────────────────────────────
+// ------------------------------------------------------------
+// Monthly investing, two ways. The honest comparison is not AIM
+// against zero — it is AIM against simply buying the same amount
+// every month and never selling, which is what most people do.
+// ------------------------------------------------------------
+function SipCompare() {
+  const [sym,setSym]=useState("NIFTYBEES");
+  const [monthly,setMonthly]=useState("50000");
+  const [years,setYears]=useState("2");
+  const [busy,setBusy]=useState(false);
+  const [res,setRes]=useState(null);
+  const [err,setErr]=useState("");
+
+  const money=n=>"₹"+Math.round(Number(n)||0).toLocaleString("en-IN");
+
+  const run=async()=>{
+    const s=sym.trim().toUpperCase();
+    if(!s){ setErr("Enter a symbol"); return; }
+    setBusy(true); setErr(""); setRes(null);
+    try{
+      const range=(Number(years)>=5?"5y":(Number(years)>=2?"2y":"1y"));
+      const r=await fetch("/.netlify/functions/yahoo?action=history&symbol="+
+        encodeURIComponent(s+".NS")+"&range="+range);
+      const d=await r.json();
+      const q=d&&d.chart&&d.chart.result&&d.chart.result[0];
+      const raw=q&&q.indicators&&q.indicators.quote&&q.indicators.quote[0];
+      if(!raw) throw new Error("no history for "+s);
+
+      const stamps=q.timestamp||[];
+      const bars=[];
+      (raw.close||[]).forEach((c,i)=>{
+        if(c!==null&&c!==undefined&&stamps[i])
+          bars.push({ t:new Date(stamps[i]*1000), px:c });
+      });
+      if(bars.length<60) throw new Error("not enough history");
+
+      // one bar per month — the first trading day we have in each month
+      const months=[]; let seen="";
+      bars.forEach(b=>{
+        const k=b.t.getFullYear()+"-"+String(b.t.getMonth()+1).padStart(2,"0");
+        if(k!==seen){ seen=k; months.push({...b,key:k}); }
+      });
+      const want=Math.min(months.length, Math.round(Number(years)*12));
+      const use=months.slice(-want);
+      const amt=Number(monthly)||0;
+      const last=bars[bars.length-1].px;
+
+      // ---- plain monthly buying, never sell
+      let sipUnits=0, invested=0;
+      use.forEach(m=>{ sipUnits+=amt/m.px; invested+=amt; });
+      const sipValue=sipUnits*last;
+
+      // ---- AIM, reviewed monthly, same money arriving
+      let units=0, cash=0, pc=0, trades=0, bought=0, sold=0;
+      const path=[];
+      use.forEach((m,i)=>{
+        cash+=amt;
+        // new capital enlarges the system rather than making it overweight
+        pc+=amt*0.5;
+        if(i===0){
+          const buy=cash*0.7;
+          units=buy/m.px; cash-=buy; pc=buy; trades++;
+        } else {
+          const mv=units*m.px;
+          const safe=0.10*mv;
+          if(pc-mv>safe){
+            const want_=Math.min(pc-mv-safe, cash);
+            if(want_>m.px){ const u=want_/m.px; units+=u; cash-=want_; pc+=want_*0.5; trades++; bought+=want_; }
+          } else if(mv-pc>safe){
+            const give=mv-pc-safe;
+            if(give>m.px){ const u=give/m.px; units-=u; cash+=give; trades++; sold+=give; }
+          }
+        }
+        path.push({ key:m.key, aim:units*m.px+cash, sip:0 });
+      });
+      // fill the SIP path
+      let su=0;
+      use.forEach((m,i)=>{ su+=amt/m.px; path[i].sip=su*m.px; });
+
+      const aimValue=units*last+cash;
+      setRes({ months:use.length, invested, sipValue, aimValue, cash, trades, bought, sold,
+        first:use[0].key, lastKey:use[use.length-1].key, path, price:last });
+    }catch(e){ setErr(String(e.message||e)); }
+    setBusy(false);
+  };
+
+  const inp={width:"100%",padding:"9px",borderRadius:8,border:"1.5px solid #cfd8cf",
+    fontSize:13,marginBottom:8,boxSizing:"border-box"};
+  const lab={fontSize:11,fontWeight:700,color:"#1a5a3a",display:"block",marginBottom:3};
+
+  return <div>
+    <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9,lineHeight:1.5}}>
+      Put the same amount in every month and compare two ways of handling it:
+      AIM reviewed monthly, against simply buying and never selling.
+      The index itself cannot be bought — use NIFTYBEES, the ETF that tracks it.
+    </div>
+    <div style={{display:"flex",gap:6}}>
+      <div style={{flex:1}}><label style={lab}>Symbol</label>
+        <input value={sym} onChange={e=>setSym(e.target.value)} style={inp}/></div>
+      <div style={{width:110}}><label style={lab}>Years</label>
+        <select value={years} onChange={e=>setYears(e.target.value)} style={inp}>
+          <option value="1">1</option><option value="2">2</option><option value="5">5</option>
+        </select></div>
+    </div>
+    <label style={lab}>Every month (₹)</label>
+    <input type="number" value={monthly} onChange={e=>setMonthly(e.target.value)}
+      inputMode="decimal" style={inp}/>
+    <button onClick={run} disabled={busy}
+      style={{width:"100%",padding:"11px",borderRadius:9,border:"none",background:"#1a5a3a",
+      color:"#fff",fontWeight:800,fontSize:13.5,cursor:"pointer"}}>
+      {busy?"Working…":"Compare the two"}</button>
+    {err&&<div style={{fontSize:12,color:"#a33",marginTop:8}}>✗ {err}</div>}
+
+    {res&&<div style={{marginTop:12}}>
+      <div style={{fontSize:11,color:"#8a9a8a",marginBottom:8}}>
+        {res.months} months, {res.first} to {res.lastKey} · put in {money(res.invested)}</div>
+
+      {[["Bought every month, never sold", res.sipValue, "#1a3a6a"],
+        ["AIM, reviewed monthly", res.aimValue, "#1a5a3a"]].map(([label,val,col])=>
+        <div key={label} style={{border:"1px solid #e6ece6",borderRadius:10,
+          padding:"11px 12px",marginBottom:7}}>
+          <div style={{fontSize:11.5,color:"#5a6a5a"}}>{label}</div>
+          <div style={{fontSize:20,fontWeight:800,color:col}}>{money(val)}</div>
+          <div style={{fontSize:11,color:val>=res.invested?"#1a7a3a":"#c0392b"}}>
+            {val>=res.invested?"+":""}{money(val-res.invested)}
+            {" ("+((val-res.invested)/res.invested*100).toFixed(1)+"%)"}</div>
+        </div>)}
+
+      <div style={{background:res.aimValue>res.sipValue?"#e8f5e9":"#fdf4e8",
+        borderRadius:10,padding:"11px 12px",marginBottom:9}}>
+        <b style={{fontSize:13.5,color:res.aimValue>res.sipValue?"#1a5a3a":"#a0661a"}}>
+          {res.aimValue>res.sipValue
+            ? "AIM ahead by "+money(res.aimValue-res.sipValue)
+            : "Simply holding ahead by "+money(res.sipValue-res.aimValue)}</b>
+        <div style={{fontSize:11,color:"#7a7a70",marginTop:4,lineHeight:1.5}}>
+          {res.trades} reviews acted on · {money(res.cash)} still in cash.
+          {res.aimValue<=res.sipValue
+            ? " In a market that mostly rose, AIM keeps selling winners and holding cash — that is the cost of the discipline."
+            : " AIM found enough movement to harvest."}
+        </div>
+      </div>
+
+      {(()=>{
+        const W=320,H=110,PL=4,PR=4,PT=8,PB=14;
+        const vals=res.path.flatMap(p=>[p.aim,p.sip]);
+        const lo=Math.min(...vals), hi=Math.max(...vals), sp=(hi-lo)||1;
+        const x=i=>PL+(i/(res.path.length-1))*(W-PL-PR);
+        const y=v=>PT+(1-(v-lo)/sp)*(H-PT-PB);
+        const line=k=>res.path.map((p,i)=>(i?"L":"M")+x(i).toFixed(1)+" "+y(p[k]).toFixed(1)).join(" ");
+        return <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:"auto"}}>
+          <path d={line("sip")} fill="none" stroke="#1a3a6a" strokeWidth="1.6"/>
+          <path d={line("aim")} fill="none" stroke="#1a7a3a" strokeWidth="1.6"/>
+          <text x={PL} y={H-3} fontSize="8" fill="#a0a898">{res.first}</text>
+          <text x={W-PR} y={H-3} fontSize="8" fill="#a0a898" textAnchor="end">{res.lastKey}</text>
+        </svg>;
+      })()}
+      <div style={{display:"flex",gap:12,fontSize:10,color:"#8a9a8a",marginTop:4}}>
+        <span><span style={{color:"#1a3a6a"}}>—</span> bought and held</span>
+        <span><span style={{color:"#1a7a3a"}}>—</span> AIM</span>
+      </div>
+    </div>}
+  </div>;
+}
+
 function AIMBacktest() {
   const [sym,setSym]=useState("");
   const [range,setRange]=useState("5y");
@@ -12957,7 +13121,15 @@ function AIMTrading({ onClose }) {
 
     {tab==="screener"&&<AIMScreener/>}
 
-    {tab==="backtest"&&<AIMBacktest/>}
+    {tab==="backtest"&&<div>
+      <div style={{background:"#f7faf7",border:"1px solid #dde6dd",borderRadius:10,
+        padding:"12px 13px",marginBottom:14}}>
+        <div style={{fontSize:12.5,fontWeight:800,color:"#1a5a3a",marginBottom:7}}>
+          Monthly investing — AIM against simply holding</div>
+        <SipCompare/>
+      </div>
+      <AIMBacktest/>
+    </div>}
 
     {/* COMPARE */}
     {tab==="compare"&&<div>
