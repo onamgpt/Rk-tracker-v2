@@ -96,6 +96,12 @@ exports.handler = async (event) => {
     }
 
     // Get quote for multiple symbols
+    // The publisher api_key is meant to be visible in the page — it is what
+    // identifies the app on Kite's own order screen. The secret never leaves here.
+    if (action === "apiKey") {
+      return {statusCode:200, headers:h, body: JSON.stringify({ api_key: API_KEY })};
+    }
+
     if (action === "quote") {
       // Symbols are requested one at a time rather than as a single batch.
       // Kite rejects the whole request if any one symbol is unknown to NSE —

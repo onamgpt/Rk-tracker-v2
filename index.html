@@ -12034,6 +12034,45 @@ function AIMTrading({ onClose }) {
   // A stored token that Zerodha has expired still reads as "connected", which
   // hides the Connect button and leaves no way back in. Clear it so the button
   // reappears the moment the session is known to be dead.
+  // Hand an order to Kite's own screen. Nothing is placed automatically — this
+  // opens Zerodha's exchange-approved basket, pre-filled, and the order only
+  // exists once it is confirmed there.
+  const sendToKite = async (orders) => {
+    if(!orders||!orders.length){ setMsg("Nothing to send"); return; }
+    setBusy("basket");
+    try{
+      const r=await fetch("/.netlify/functions/kite",{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"apiKey"})});
+      const d=await r.json();
+      if(!d||!d.api_key) throw new Error("could not read the Kite app key");
+
+      const basket=orders.map(o=>({
+        variety:"regular",
+        exchange:"NSE",
+        tradingsymbol:o.symbol,
+        transaction_type:o.side,
+        order_type:"MARKET",
+        product:"CNC",
+        quantity:Math.max(1,Math.round(o.qty)),
+        readonly:false
+      }));
+
+      const f=document.createElement("form");
+      f.method="POST";
+      f.action="https://kite.zerodha.com/connect/basket";
+      f.target="_blank";
+      const k=document.createElement("input");
+      k.type="hidden"; k.name="api_key"; k.value=d.api_key; f.appendChild(k);
+      const dd=document.createElement("input");
+      dd.type="hidden"; dd.name="data"; dd.value=JSON.stringify(basket); f.appendChild(dd);
+      document.body.appendChild(f);
+      f.submit();
+      setTimeout(()=>{ try{ document.body.removeChild(f); }catch(e){} },2000);
+      setMsg("Opened in Kite — review and confirm there, then record the trade here");
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
   const clearKite=()=>{ setKite(null); try{ localStorage.removeItem("aim_kite_token"); }catch(e){} };
 
   const kiteCall=(payload)=>fetch("/.netlify/functions/kite",{method:"POST",
@@ -12380,6 +12419,24 @@ function AIMTrading({ onClose }) {
           <button onClick={showRaw} disabled={!!busy} style={{...btn,background:"#f4f4f4",
             color:"#666",width:"100%",marginTop:5,fontSize:12}}>
             {busy==="raw"?"…":"🔍 Show what is stored"}</button>
+          {(()=>{
+            // Every actionable signal in one basket. Sells are listed first so
+            // the cash they release is visible before the buys are confirmed.
+            const acts=(data.holdings||[])
+              .map(h=>({h,s:h.signal||{}}))
+              .filter(x=>x.s.action&&x.s.action!=="HOLD"&&Math.round(x.s.qty)>=1)
+              .sort((a,b)=>(a.s.action==="SELL"?0:1)-(b.s.action==="SELL"?0:1));
+            if(!acts.length) return null;
+            const sells=acts.filter(x=>x.s.action==="SELL").length;
+            const buys=acts.length-sells;
+            return <button onClick={()=>sendToKite(acts.map(x=>
+                ({symbol:x.h.symbol,side:x.s.action,qty:x.s.qty})))}
+              disabled={!!busy}
+              style={{...btn,background:"#1a3a6a",color:"#fff",width:"100%",marginTop:5,fontSize:12.5}}>
+              {busy==="basket"?"Opening Kite…"
+                :"🧺 Send all "+acts.length+" signals to Kite"+
+                  (sells&&buys?(" ("+sells+" sell, "+buys+" buy)"):"")}</button>;
+          })()}
   
           {kite&&<button onClick={loadHoldings} disabled={!!busy} style={{...btn,background:"#eee",color:"#333",width:"100%",marginTop:5}}>
             {busy==="zh"?"…":"📥 Import holdings from Zerodha"}</button>}
@@ -12501,6 +12558,13 @@ function AIMTrading({ onClose }) {
             <div style={{fontSize:12,fontWeight:800,color:sigColor(s.action)}}>
               {s.action} {cur}{fmtN(s.amount)} · about {s.qty} shares
             </div>
+            {book==="INDIA"&&kite&&Math.round(s.qty)>=1&&
+              <button onClick={()=>sendToKite([{symbol:h.symbol,side:s.action,qty:s.qty}])}
+                disabled={!!busy}
+                style={{width:"100%",marginTop:6,padding:"9px",borderRadius:7,border:"none",
+                background:s.action==="BUY"?"#1a5a9a":"#1a7a3a",color:"#fff",
+                fontWeight:800,fontSize:12.5,cursor:"pointer"}}>
+                {busy==="basket"?"Opening Kite…":"→ "+s.action+" "+Math.round(s.qty)+" in Kite"}</button>}
           </div>}
 
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:6}}>
