@@ -12823,6 +12823,90 @@ function AIMTrading({ onClose }) {
         </div>;
       })()}
 
+      {ledgerSym&&(()=>{
+        // A share's life drawn out: every trade against the price, and the
+        // running total of what has actually been banked. Built from the
+        // ledger only, so nothing here is estimated.
+        const rows=(ledger||[]).filter(t=>t.symbol===ledgerSym)
+          .slice().sort((a,b)=>String(a.txn_date).localeCompare(String(b.txn_date)));
+        if(rows.length<2) return null;
+
+        const W=320,H=150,PL=6,PR=6,PT=10,PB=18;
+        const prices=rows.map(t=>num(t.price)).filter(p=>p>0);
+        const held=(data&&data.holdings||[]).find(h=>h.symbol===ledgerSym);
+        if(held&&num(held.last_price)>0) prices.push(num(held.last_price));
+        const lo=Math.min(...prices), hi=Math.max(...prices);
+        const span=(hi-lo)||1;
+        const x=i=>PL+(i/(rows.length-1+(held?1:0)))*(W-PL-PR);
+        const y=p=>PT+(1-(p-lo)/span)*(H-PT-PB);
+
+        // running banked, average cost carried forward
+        let bought=0,bv=0,banked=0;
+        const pts=rows.map((t,i)=>{
+          const sh=num(t.shares), amt=num(t.amount);
+          if(String(t.action).toUpperCase()==="SELL"){
+            const avg=bought>0?bv/bought:0;
+            banked+=amt-avg*sh;
+          } else { bought+=sh; bv+=amt; }
+          return {i,x:x(i),y:y(num(t.price)),t,banked};
+        });
+        const lastPt=held&&num(held.last_price)>0
+          ? {x:x(rows.length),y:y(num(held.last_price)),price:num(held.last_price)} : null;
+
+        const path=pts.map((p,i)=>(i?"L":"M")+p.x.toFixed(1)+" "+p.y.toFixed(1)).join(" ")
+          +(lastPt?(" L"+lastPt.x.toFixed(1)+" "+lastPt.y.toFixed(1)):"");
+
+        return <div style={{background:"#fff",border:"1px solid #e6ece6",borderRadius:10,
+          padding:"11px 12px",marginBottom:10}}>
+          <div style={{fontSize:10.5,color:"#8a9a8a",fontWeight:700,letterSpacing:.3,marginBottom:6}}>
+            EVERY TRADE, AGAINST THE PRICE</div>
+          <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:"auto",display:"block"}}>
+            <line x1={PL} y1={y(lo)} x2={W-PR} y2={y(lo)} stroke="#f0f0ea" strokeWidth="1"/>
+            <line x1={PL} y1={y(hi)} x2={W-PR} y2={y(hi)} stroke="#f0f0ea" strokeWidth="1"/>
+            <path d={path} fill="none" stroke="#c8d4c8" strokeWidth="1.5"/>
+            {lastPt&&<circle cx={lastPt.x} cy={lastPt.y} r="3" fill="#8a9a8a"/>}
+            {pts.map((p,i)=>{
+              const sell=String(p.t.action).toUpperCase()==="SELL";
+              return <g key={i}>
+                <circle cx={p.x} cy={p.y} r="4.5" fill={sell?"#1a7a3a":"#1a5a9a"}/>
+                <title>{p.t.action+" "+fmtN(p.t.shares)+" at "+cur+fmtN(p.t.price)+" on "+p.t.txn_date}</title>
+              </g>;
+            })}
+            <text x={PL} y={H-5} fontSize="8" fill="#a0a898">{rows[0].txn_date}</text>
+            <text x={W-PR} y={H-5} fontSize="8" fill="#a0a898" textAnchor="end">
+              {held?"today":rows[rows.length-1].txn_date}</text>
+            <text x={PL} y={y(hi)-2} fontSize="8" fill="#a0a898">{cur}{fmtN(hi)}</text>
+            <text x={PL} y={y(lo)+9} fontSize="8" fill="#a0a898">{cur}{fmtN(lo)}</text>
+          </svg>
+          <div style={{display:"flex",gap:12,fontSize:10,color:"#8a9a8a",marginTop:5}}>
+            <span><span style={{color:"#1a5a9a",fontSize:13}}>●</span> bought</span>
+            <span><span style={{color:"#1a7a3a",fontSize:13}}>●</span> sold</span>
+            {held&&<span><span style={{color:"#8a9a8a",fontSize:13}}>●</span> today</span>}
+          </div>
+
+          {(()=>{
+            const sells=pts.filter(p=>String(p.t.action).toUpperCase()==="SELL");
+            if(!sells.length) return null;
+            const max=Math.max(...sells.map(s=>Math.abs(s.banked)),1);
+            return <div style={{marginTop:11,paddingTop:9,borderTop:"1px solid #f0f0ea"}}>
+              <div style={{fontSize:10.5,color:"#8a9a8a",fontWeight:700,letterSpacing:.3,marginBottom:6}}>
+                BANKED, BUILDING UP</div>
+              {sells.map((s,i)=><div key={i} style={{display:"flex",alignItems:"center",
+                gap:7,marginBottom:4}}>
+                <span style={{fontSize:9.5,color:"#a0a898",width:62}}>{s.t.txn_date}</span>
+                <div style={{flex:1,height:9,background:"#f4f6f2",borderRadius:5,overflow:"hidden"}}>
+                  <div style={{width:Math.max(2,Math.abs(s.banked)/max*100)+"%",height:"100%",
+                    background:s.banked>=0?"#1a7a3a":"#c0392b",borderRadius:5}}/>
+                </div>
+                <b style={{fontSize:10.5,width:74,textAlign:"right",
+                  color:s.banked>=0?"#1a7a3a":"#c0392b"}}>
+                  {s.banked>=0?"+":""}{cur}{fmtN(s.banked)}</b>
+              </div>)}
+            </div>;
+          })()}
+        </div>;
+      })()}
+
       <button onClick={exportLedger} style={{padding:"8px 12px",borderRadius:6,border:"none",
         background:"#eee",color:"#333",fontSize:12,fontWeight:700,cursor:"pointer",width:"100%",marginBottom:8}}>
         ⬇ Export ledger to CSV</button>
