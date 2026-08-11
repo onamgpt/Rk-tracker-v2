@@ -12907,6 +12907,90 @@ function AIMTrading({ onClose }) {
         </div>;
       })()}
 
+      {!ledgerSym&&(()=>{
+        // What the algorithm banked, month by month. Realised only — paper
+        // value is excluded, because a rising market flatters every method.
+        // Average cost is used, so this measures performance, not tax.
+        const rows=(ledger||[]).slice().sort((a,b)=>String(a.txn_date).localeCompare(String(b.txn_date)));
+        if(!rows.length) return null;
+
+        const pos={};              // running shares and cost per symbol
+        const byMonth={}, byYear={};
+        rows.forEach(t=>{
+          const sym=t.symbol, sh=num(t.shares), amt=num(t.amount), cst=num(t.costs);
+          if(!pos[sym]) pos[sym]={sh:0,val:0};
+          const d=String(t.txn_date||"").slice(0,7);
+          const fy=(()=>{ const p=String(t.txn_date||"").split("-");
+            if(p.length<2) return "";
+            const y=+p[0], m=+p[1];
+            return m>=4 ? (y+"-"+String((y+1)%100).padStart(2,"0"))
+                        : ((y-1)+"-"+String(y%100).padStart(2,"0")); })();
+          if(String(t.action).toUpperCase()==="SELL"){
+            const avg=pos[sym].sh>0?pos[sym].val/pos[sym].sh:0;
+            const gain=amt-avg*sh-cst;
+            pos[sym].sh=Math.max(0,pos[sym].sh-sh);
+            pos[sym].val=avg*pos[sym].sh;
+            byMonth[d]=(byMonth[d]||0)+gain;
+            byYear[fy]=(byYear[fy]||0)+gain;
+          } else {
+            pos[sym].sh+=sh; pos[sym].val+=amt+cst;
+          }
+        });
+
+        const months=Object.keys(byMonth).sort().slice(-12);
+        const years=Object.keys(byYear).filter(Boolean).sort();
+        if(!months.length) return null;
+        const max=Math.max(...months.map(m=>Math.abs(byMonth[m])),1);
+        const names=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        const total=Object.values(byMonth).reduce((a,b)=>a+b,0);
+        const wins=months.filter(m=>byMonth[m]>0).length;
+
+        return <div style={{background:"#fff",border:"1px solid #e6ece6",borderRadius:10,
+          padding:"12px 13px",marginBottom:11}}>
+          <div style={{fontSize:10.5,color:"#8a9a8a",fontWeight:700,letterSpacing:.3}}>
+            WHAT AIM HAS BANKED</div>
+          <div style={{fontSize:22,fontWeight:800,marginTop:2,
+            color:total>=0?"#1a7a3a":"#c0392b"}}>
+            {total>=0?"+":""}{cur}{fmtN(total)}</div>
+          <div style={{fontSize:11,color:"#8a9a8a",marginBottom:9}}>
+            realised across {Object.keys(byMonth).length} month(s) · {wins} of {months.length} shown were positive</div>
+
+          {months.map(m=>{
+            const v=byMonth[m], p=m.split("-");
+            return <div key={m} style={{display:"flex",alignItems:"center",gap:7,marginBottom:4}}>
+              <span style={{fontSize:10,color:"#a0a898",width:52}}>
+                {names[+p[1]-1]} {p[0].slice(2)}</span>
+              <div style={{flex:1,height:10,background:"#f4f6f2",borderRadius:5,
+                display:"flex",justifyContent:v>=0?"flex-start":"flex-end"}}>
+                <div style={{width:Math.max(2,Math.abs(v)/max*100)+"%",height:"100%",
+                  background:v>=0?"#1a7a3a":"#c0392b",borderRadius:5}}/>
+              </div>
+              <b style={{fontSize:10.5,width:78,textAlign:"right",
+                color:v>=0?"#1a7a3a":"#c0392b"}}>
+                {v>=0?"+":""}{cur}{fmtN(v)}</b>
+            </div>;
+          })}
+
+          {years.length>0&&<div style={{marginTop:10,paddingTop:9,borderTop:"1px solid #f0f0ea"}}>
+            <div style={{fontSize:10.5,color:"#8a9a8a",fontWeight:700,letterSpacing:.3,marginBottom:5}}>
+              BY FINANCIAL YEAR</div>
+            {years.map(y=><div key={y} style={{display:"flex",justifyContent:"space-between",
+              fontSize:12.5,padding:"3px 0"}}>
+              <span style={{color:"#5a6a5a"}}>FY {y}</span>
+              <b style={{color:byYear[y]>=0?"#1a7a3a":"#c0392b"}}>
+                {byYear[y]>=0?"+":""}{cur}{fmtN(byYear[y])}</b>
+            </div>)}
+          </div>}
+
+          <div style={{fontSize:10,color:"#a0966a",marginTop:9,lineHeight:1.5,
+            background:"#fdfbf4",padding:"7px 9px",borderRadius:7}}>
+            Performance only — computed on average cost. For filing use Zerodha
+            Console → Reports → P&amp;L, which applies proper FIFO and splits
+            short-term from long-term.
+          </div>
+        </div>;
+      })()}
+
       <button onClick={exportLedger} style={{padding:"8px 12px",borderRadius:6,border:"none",
         background:"#eee",color:"#333",fontSize:12,fontWeight:700,cursor:"pointer",width:"100%",marginBottom:8}}>
         ⬇ Export ledger to CSV</button>
