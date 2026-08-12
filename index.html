@@ -9617,7 +9617,221 @@ function Spectrum({ onClose, onSaveEntry }) {
 }
 
 
+// ------------------------------------------------------------
+// Cash Book. The reconciliation panel asks for a bank balance to be
+// retyped every time money moves, which is a chore and easy to forget —
+// a deposit made and not retyped simply never appears. This is the
+// spreadsheet version instead: an opening balance, every movement in
+// and out with a date, and a running balance that does its own sum.
+// ------------------------------------------------------------
+function CashBook() {
+  const [rows,setRows]=useState([]);
+  const [opening,setOpening]=useState("");
+  const [openingDate,setOpeningDate]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState("");
+  const [showCleared,setShowCleared]=useState(false);
+
+  useEffect(()=>{ (async()=>{
+    try{
+      const r=await sheetsAPI("getPortfolio",{key:"cash_book"});
+      if(r&&r.data){
+        setRows(r.data.rows||[]);
+        setOpening(r.data.opening||"");
+        setOpeningDate(r.data.openingDate||"");
+      }
+    }catch(e){}
+  })(); },[]);
+
+  const num=v=>{ const n=parseFloat(String(v).replace(/[^0-9.-]/g,"")); return isNaN(n)?0:n; };
+  const money=n=>"₹"+Math.round(n).toLocaleString("en-IN");
+  const today=()=>new Date().toISOString().slice(0,10);
+
+  const save=async()=>{
+    setBusy(true);
+    try{
+      await sheetsAPI("savePortfolio",{key:"cash_book",
+        data:{opening,openingDate,rows}});
+      setMsg("✓ Saved"); setTimeout(()=>setMsg(""),2500);
+    }catch(e){ setMsg("✗ Could not save"); }
+    setBusy(false);
+  };
+
+  const add=(kind)=>setRows(r=>[...r,{id:"cb_"+Date.now(),date:today(),
+    what:"",who:"",ref:"",amount:"",kind:kind,done:false}]);
+  const upd=(i,f,v)=>setRows(r=>r.map((x,j)=>j===i?{...x,[f]:v}:x));
+  const del=(i)=>setRows(r=>r.filter((_,j)=>j!==i));
+
+  // Sort by date so the running balance reads like a passbook.
+  const ordered=rows.map((r,i)=>({...r,_i:i}))
+    .sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+
+  let run=num(opening);
+  const withBalance=ordered.map(r=>{
+    const amt=num(r.amount);
+    if(r.done) run += (r.kind==="in"? amt : -amt);
+    return {...r, balance:run, amt};
+  });
+
+  const pendingIn=withBalance.filter(r=>!r.done&&r.kind==="in")
+    .reduce((s,r)=>s+r.amt,0);
+  const pendingOut=withBalance.filter(r=>!r.done&&r.kind==="out")
+    .reduce((s,r)=>s+r.amt,0);
+  const cleared=run;
+  const projected=cleared+pendingIn-pendingOut;
+
+  const inp={padding:"6px 7px",borderRadius:5,border:"1px solid #d8dcd8",
+    fontSize:12.5,width:"100%",boxSizing:"border-box",fontFamily:"inherit"};
+  const th={fontSize:9.5,fontWeight:800,color:"#7a8a7a",letterSpacing:.4,
+    textTransform:"uppercase",padding:"0 4px 5px",textAlign:"left"};
+
+  const visible=withBalance.filter(r=>showCleared||!r.done);
+
+  return <div style={{padding:"4px 0"}}>
+    <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:10,lineHeight:1.5}}>
+      Like a passbook. Type the opening balance once, then every cheque, payment
+      and deposit as it happens. Tick it when it hits the account and the balance
+      does its own arithmetic — no retyping the bank figure.
+    </div>
+
+    {msg&&<div style={{fontSize:12.5,color:msg[0]==="✓"?"#1a7a3a":"#a33",
+      background:msg[0]==="✓"?"#e8f5e9":"#fdecea",padding:"7px 10px",
+      borderRadius:7,marginBottom:9}}>{msg}</div>}
+
+    <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+      <div style={{flex:"1 1 150px"}}>
+        <div style={th}>Opening balance</div>
+        <input value={opening} onChange={e=>setOpening(e.target.value)}
+          inputMode="decimal" placeholder="from your statement" style={inp}/>
+      </div>
+      <div style={{flex:"0 1 130px"}}>
+        <div style={th}>As on</div>
+        <input type="date" value={openingDate}
+          onChange={e=>setOpeningDate(e.target.value)} style={inp}/>
+      </div>
+    </div>
+
+    <div style={{display:"flex",gap:7,marginBottom:12,flexWrap:"wrap"}}>
+      <div style={{flex:"1 1 140px",background:"linear-gradient(135deg,#1a5a3a,#0d3a24)",
+        borderRadius:9,padding:"10px 12px",color:"#fff"}}>
+        <div style={{fontSize:9.5,opacity:.85,fontWeight:700,letterSpacing:.4}}>IN THE BANK NOW</div>
+        <div style={{fontSize:20,fontWeight:800}}>{money(cleared)}</div>
+        <div style={{fontSize:10,opacity:.8}}>opening plus everything ticked</div>
+      </div>
+      <div style={{flex:"1 1 140px",background:"#f4f8fc",border:"1px solid #ccd8e4",
+        borderRadius:9,padding:"10px 12px"}}>
+        <div style={{fontSize:9.5,color:"#5a6a7a",fontWeight:700,letterSpacing:.4}}>ONCE EVERYTHING SETTLES</div>
+        <div style={{fontSize:20,fontWeight:800,color:projected>=0?"#1a3a7a":"#c0392b"}}>
+          {money(projected)}</div>
+        <div style={{fontSize:10,color:"#8a9aaa"}}>
+          {pendingIn>0?("+"+money(pendingIn)+" coming"):""}
+          {pendingIn>0&&pendingOut>0?" · ":""}
+          {pendingOut>0?("−"+money(pendingOut)+" going"):""}
+          {!pendingIn&&!pendingOut?"nothing outstanding":""}</div>
+      </div>
+    </div>
+
+    <div style={{display:"flex",gap:6,marginBottom:9,flexWrap:"wrap"}}>
+      <button onClick={()=>add("in")} style={{flex:1,padding:"9px",borderRadius:8,
+        border:"1px solid #a8d0b8",background:"#f2fbf4",color:"#1a5a3a",
+        fontWeight:700,fontSize:12.5,cursor:"pointer"}}>+ Money in</button>
+      <button onClick={()=>add("out")} style={{flex:1,padding:"9px",borderRadius:8,
+        border:"1px solid #e0c0c0",background:"#fdf6f6",color:"#a03030",
+        fontWeight:700,fontSize:12.5,cursor:"pointer"}}>+ Money out</button>
+    </div>
+
+    <div style={{overflowX:"auto",marginBottom:9}}>
+      <table style={{width:"100%",borderCollapse:"collapse",minWidth:520}}>
+        <thead><tr>
+          <th style={{...th,width:96}}>Date</th>
+          <th style={th}>What it is</th>
+          <th style={{...th,width:88}}>Cheque no</th>
+          <th style={{...th,width:96,textAlign:"right"}}>Amount</th>
+          <th style={{...th,width:66,textAlign:"center"}}>Done</th>
+          <th style={{...th,width:104,textAlign:"right"}}>Balance</th>
+          <th style={{...th,width:26}}></th>
+        </tr></thead>
+        <tbody>
+          {visible.map((r)=>{
+            const i=r._i;
+            return <tr key={r.id||i} style={{background:r.done?"#fbfdfb":"#fffdf7"}}>
+              <td style={{padding:"3px 4px"}}>
+                <input type="date" value={r.date||""}
+                  onChange={e=>upd(i,"date",e.target.value)} style={{...inp,fontSize:11.5}}/></td>
+              <td style={{padding:"3px 4px"}}>
+                <input value={r.what||""} placeholder={r.kind==="in"?"who paid you":"who you paid"}
+                  onChange={e=>upd(i,"what",e.target.value)} style={inp}/></td>
+              <td style={{padding:"3px 4px"}}>
+                <input value={r.ref||""} placeholder="—"
+                  onChange={e=>upd(i,"ref",e.target.value)} style={{...inp,fontSize:11.5}}/></td>
+              <td style={{padding:"3px 4px"}}>
+                <input value={r.amount||""} inputMode="decimal" placeholder="0"
+                  onChange={e=>upd(i,"amount",e.target.value)}
+                  style={{...inp,textAlign:"right",
+                  color:r.kind==="in"?"#1a7a3a":"#a03030",fontWeight:700}}/></td>
+              <td style={{padding:"3px 4px",textAlign:"center"}}>
+                <input type="checkbox" checked={!!r.done}
+                  onChange={e=>upd(i,"done",e.target.checked)}
+                  title="tick when it appears on your statement"
+                  style={{width:17,height:17,cursor:"pointer"}}/></td>
+              <td style={{padding:"3px 4px",textAlign:"right",fontSize:12.5,
+                fontWeight:r.done?700:400,color:r.done?"#1a3a2a":"#b0b8b0"}}>
+                {r.done?money(r.balance):"—"}</td>
+              <td style={{padding:"3px 2px",textAlign:"center"}}>
+                <button onClick={()=>del(i)} style={{border:"none",background:"none",
+                  color:"#c33",fontSize:15,cursor:"pointer",padding:0}}>×</button></td>
+            </tr>;
+          })}
+          {!visible.length&&<tr><td colSpan={7} style={{padding:"18px 4px",
+            textAlign:"center",fontSize:12,color:"#999"}}>
+            Nothing outstanding. Add a deposit or a payment above.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+
+    <label style={{fontSize:11.5,color:"#5a7a5a",display:"flex",alignItems:"center",
+      gap:7,cursor:"pointer",marginBottom:11}}>
+      <input type="checkbox" checked={showCleared}
+        onChange={e=>setShowCleared(e.target.checked)}/>
+      Show the {withBalance.filter(r=>r.done).length} settled entries as well
+    </label>
+
+    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+      <button onClick={save} disabled={busy}
+        style={{flex:1,padding:"11px",borderRadius:9,border:"none",background:"#1a5a3a",
+        color:"#fff",fontWeight:800,fontSize:13.5,cursor:"pointer"}}>
+        {busy?"Saving…":"💾 Save"}</button>
+      <button onClick={()=>{
+        let csv="Date,What it is,Cheque no,In,Out,Done,Balance\n";
+        csv+=(openingDate||"")+",Opening balance,,"+num(opening)+",,Yes,"+num(opening)+"\n";
+        withBalance.forEach(r=>{
+          const q=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+          csv+=[q(r.date),q(r.what),q(r.ref),
+            r.kind==="in"?r.amt:"", r.kind==="out"?r.amt:"",
+            r.done?"Yes":"No", r.done?r.balance:""].join(",")+"\n";
+        });
+        csv+=",,,,,In the bank now,"+cleared+"\n";
+        csv+=",,,,,Once everything settles,"+projected+"\n";
+        const b=new Blob([csv],{type:"text/csv"}); const u=URL.createObjectURL(b);
+        const a=document.createElement("a"); a.href=u;
+        a.download="cash-book-"+new Date().toISOString().slice(0,10)+".csv"; a.click();
+        URL.revokeObjectURL(u);
+      }} style={{padding:"11px 14px",borderRadius:9,border:"1px solid #ccc",
+        background:"#fff",color:"#444",fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
+        📥 Excel</button>
+    </div>
+
+    <div style={{fontSize:10.5,color:"#8a9a8a",marginTop:11,lineHeight:1.6,
+      borderLeft:"2px solid #dde4dd",paddingLeft:10}}>
+      Tick an entry the day you see it on the statement. Everything ticked is in
+      the balance; everything unticked is still to come. The opening balance is the
+      only figure you ever type from the bank.
+    </div>
+  </div>;
+}
+
 function AvailableFunds() {
+  const [view,setView]=useState("book");
   const [data, setData] = useState({ bankBalance:"", asOf:"", cheques:[], payments:[], deposits:[] });
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -9675,6 +9889,20 @@ function AvailableFunds() {
 
   return (
     <div style={{ marginBottom:14 }}>
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        <button onClick={()=>setView("book")} style={{flex:1,padding:"10px",borderRadius:9,
+          border:"none",background:view==="book"?"linear-gradient(135deg,#1a5a3a,#0d3a24)":"#eef2ec",
+          color:view==="book"?"#fff":"#5a7a5a",fontWeight:800,fontSize:13,cursor:"pointer"}}>
+          📗 Cash Book</button>
+        <button onClick={()=>setView("recon")} style={{flex:1,padding:"10px",borderRadius:9,
+          border:"none",background:view==="recon"?"linear-gradient(135deg,#1a3a6a,#0d2a4a)":"#eef2f6",
+          color:view==="recon"?"#fff":"#4a6a8a",fontWeight:800,fontSize:13,cursor:"pointer"}}>
+          🧮 Old reconciliation</button>
+      </div>
+
+      {view==="book" && <CashBook/>}
+      {view==="recon" && <div>
+
       {/* The headline number */}
       <div style={{ background: available>=0?"linear-gradient(135deg,#1a7a4a,#0a5a2a)":"linear-gradient(135deg,#a33,#822)", borderRadius:12, padding:"14px 16px", color:"#fff", marginBottom:12 }}>
         <div style={{ fontSize:11, opacity:.9, letterSpacing:".05em" }}>TRUE AVAILABLE FUNDS</div>
@@ -9795,6 +10023,7 @@ function AvailableFunds() {
         Your bank balance already contains everything that has settled, so only unsettled items adjust it. Mark a cheque ✓ cleared or a deposit ✓ landed once you see it on the statement and it drops out of the list. Type the bank figure yourself — the app never changes it.
       </div>
       <div style={{ borderBottom:"1px solid #dde", margin:"14px 0" }}/>
+      </div>}
     </div>
   );
 }
