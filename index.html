@@ -12806,26 +12806,29 @@ function AIMTrading({ onClose }) {
       if(!d||!d.api_key) throw new Error("could not read the Kite app key");
 
       const basket=orders.map(o=>{
-        // Trade-to-trade scrips (the -BE series) and other illiquid counters do
-        // not accept market orders on Kite — they need a limit price. Send a
-        // limit set a little in our favour and let the user adjust it there.
-        const t2t = /-BE$|-BZ$|-IL$/i.test(String(o.symbol));
-        const px  = Number(o.price)||0;
-        const useLimit = t2t && px>0;
-        const limit = useLimit
+        // Zerodha refuses plain market orders placed through the API — they
+        // require market protection, which the basket cannot carry. So every
+        // order goes as a limit, priced 1% in our favour so it still fills.
+        const px = Number(o.price)||0;
+        const limit = px>0
           ? Math.round((o.side==="BUY" ? px*1.01 : px*0.99)*20)/20   // nearest 5 paise
           : 0;
-        return {
+        const row = {
           variety:"regular",
           exchange:"NSE",
           tradingsymbol:o.symbol,
           transaction_type:o.side,
-          order_type: useLimit ? "LIMIT" : "MARKET",
           product:"CNC",
           quantity:Math.max(1,Math.round(o.qty)),
-          ...(useLimit?{price:limit}:{}),
           readonly:false
         };
+        if (limit>0) { row.order_type="LIMIT"; row.price=limit; }
+        else {
+          // No price known, so a limit cannot be set. Send it as market and let
+          // Kite refuse it rather than guessing a price on the user's behalf.
+          row.order_type="MARKET";
+        }
+        return row;
       });
 
       const f=document.createElement("form");
@@ -12839,9 +12842,11 @@ function AIMTrading({ onClose }) {
       document.body.appendChild(f);
       f.submit();
       setTimeout(()=>{ try{ document.body.removeChild(f); }catch(e){} },2000);
-      const t2tCount=basket.filter(b=>b.order_type==="LIMIT").length;
+      const noPrice=basket.filter(b=>b.order_type!=="LIMIT").length;
       setMsg("Opened in Kite — review and confirm there, then record the trade here"+
-        (t2tCount?(" · "+t2tCount+" sent as a limit order (trade-to-trade scrip, market orders are refused)"):""));
+        " · sent as limit orders 1% either side of the last price, because Zerodha"+
+        " refuses plain market orders through the API"+
+        (noPrice?(" · "+noPrice+" had no price and may be rejected — refresh prices first"):""));
     }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
