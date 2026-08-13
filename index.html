@@ -12369,9 +12369,11 @@ function AIMScreener({ book }) {
   const [note,setNote]=useState("");
   const cancelRef=useRef(false);
   const [fund,setFund]=useState(null);        // fundamentals-gated universe
+  const [usFund,setUsFund]=useState(null);    // the uploaded US instrument list
 
   useEffect(()=>{
     fetch("/aim-universe.json").then(r=>r.json()).then(setFund).catch(()=>setFund(null));
+    fetch("/us-universe.json").then(r=>r.json()).then(setUsFund).catch(()=>setUsFund(null));
   },[]);
 
   const NIFTY=["RELIANCE","TCS","HDFCBANK","ICICIBANK","INFY","ITC","SBIN","BHARTIARTL","LT","HCLTECH",
@@ -12535,6 +12537,11 @@ function AIMScreener({ book }) {
 
   // Indian tickers need the .NS suffix on Yahoo; American ones must not have it.
   const yahooSym=(s)=>isUS ? s : (s+".NS");
+  const nameOf=(s)=>{
+    if(isUS && usFund && usFund.stocks[s]) return usFund.stocks[s].name;
+    if(!isUS && fund && fund.stocks && fund.stocks[s] && fund.stocks[s].name) return fund.stocks[s].name;
+    return "";
+  };
   const fetchHist=(sym)=>fetch("/.netlify/functions/yahoo?action=history&symbol="+encodeURIComponent(yahooSym(sym))+"&range="+lookback)
     .then(r=>r.json())
     .then(d=>{
@@ -12562,6 +12569,10 @@ function AIMScreener({ book }) {
     let syms = isUS ? SP100 : NIFTY;
     if(universe==="sp100"){ syms=SP100; }
     else if(universe==="uswide"){ syms=Array.from(new Set(SP100.concat(US_WIDE))); }
+    else if(universe==="usfile"){
+      if(!usFund){ setNote("❌ Instrument list not loaded yet — wait a moment and try again."); return; }
+      syms=Object.keys(usFund.stocks);
+    }
     else if(universe==="usnew"||universe==="innew"){
       if(!watch.length){ setNote("❌ Nothing on the watchlist yet. Add tickers below."); return; }
       syms=watch;
@@ -12641,6 +12652,7 @@ function AIMScreener({ book }) {
           ? <>
               <option value="sp100">Large US names — 110 stocks, quick</option>
               <option value="uswide">Wide US scan — 400 stocks, several minutes</option>
+              <option value="usfile">Your instrument list {usFund?("— "+usFund.meta.count+" stocks"):"— loading…"}</option>
               <option value="usnew">Newly listed and watchlist additions</option>
             </>
           : <>
