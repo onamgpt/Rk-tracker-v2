@@ -12297,8 +12297,10 @@ function AIMBacktest() {
   </div>;
 }
 
-function AIMScreener() {
-  const [universe,setUniverse]=useState("nifty");
+function AIMScreener({ book }) {
+  const isUS = book==="USA";
+  const [universe,setUniverse]=useState(isUS?"sp100":"nifty");
+  const cur = isUS ? "$" : "₹";
   const [lookback,setLookback]=useState("2y");
   const [token,setToken]=useState(()=>{ try{ return localStorage.getItem("aim_kite_token")||""; }catch(e){ return ""; } });
   const [running,setRunning]=useState(false);
@@ -12318,6 +12320,20 @@ function AIMScreener() {
     "HINDALCO","CIPLA","DRREDDY","EICHERMOT","BAJAJ-AUTO","HEROMOTOCO","BRITANNIA","DIVISLAB","APOLLOHOSP",
     "TECHM","INDUSINDBK","BPCL","IOC","SHREECEM","UPL","TATACONSUM","SBILIFE","HDFCLIFE","BAJAJFINSV",
     "ADANIPORTS","M&M"];
+
+  // The large US names, plus the mid-caps that actually move — a screener
+  // looking for volatility to harvest is wasted on the steadiest megacaps alone.
+  const SP100=["AAPL","MSFT","NVDA","AMZN","GOOGL","META","TSLA","BRK-B","AVGO","LLY",
+    "JPM","V","XOM","UNH","MA","JNJ","PG","HD","COST","ABBV",
+    "MRK","CVX","ADBE","CRM","AMD","PEP","KO","WMT","BAC","TMO",
+    "NFLX","ACN","MCD","CSCO","LIN","ABT","INTC","DHR","VZ","TXN",
+    "WFC","PM","DIS","INTU","COP","AMGN","CAT","NOW","UNP","IBM",
+    "GE","NEE","SPGI","RTX","LOW","HON","BA","QCOM","UPS","BKNG",
+    "SBUX","GS","DE","MS","BLK","PLD","ELV","MDT","GILD","ADI",
+    "LMT","MMC","CVS","AMT","SYK","TJX","REGN","CI","MDLZ","VRTX",
+    "ZTS","SCHW","MO","SO","BSX","EOG","DUK","SLB","PGR","CB",
+    "PYPL","MU","SHOP","SQ","UBER","ABNB","SNOW","CRWD","PLTR","COIN",
+    "RIVN","LCID","SOFI","HOOD","DKNG","RBLX","NET","DDOG","ZS","MDB"];
 
   // ── metrics from a daily close series ──────────────────────────────────────
   const metrics=(closes,vols)=>{
@@ -12416,7 +12432,9 @@ function AIMScreener() {
     return v*0.30+b*0.25+t*0.20+bandScore(m.drawdown)*0.25;
   };
 
-  const fetchHist=(sym)=>fetch("/.netlify/functions/yahoo?action=history&symbol="+encodeURIComponent(sym+".NS")+"&range="+lookback)
+  // Indian tickers need the .NS suffix on Yahoo; American ones must not have it.
+  const yahooSym=(s)=>isUS ? s : (s+".NS");
+  const fetchHist=(sym)=>fetch("/.netlify/functions/yahoo?action=history&symbol="+encodeURIComponent(yahooSym(sym))+"&range="+lookback)
     .then(r=>r.json())
     .then(d=>{
       const res=d&&d.chart&&d.chart.result&&d.chart.result[0];
@@ -12440,8 +12458,9 @@ function AIMScreener() {
 
   const run=async()=>{
     cancelRef.current=false; setRows(null); setNote("");
-    let syms=NIFTY;
-    if(universe==="gated"){
+    let syms = isUS ? SP100 : NIFTY;
+    if(universe==="sp100"){ syms=SP100; }
+    else if(universe==="gated"){
       if(!fund){ setNote("❌ Universe file not loaded yet — wait a moment and try again."); return; }
       syms=Object.keys(fund.stocks);
     }
@@ -12512,9 +12531,13 @@ function AIMScreener() {
     <div style={card}>
       <div style={{fontSize:10.5,color:"#888",marginBottom:3}}>Universe</div>
       <select value={universe} onChange={e=>setUniverse(e.target.value)} style={inp}>
-        <option value="gated">Quality-gated universe {fund?"— "+fund.meta.count+" companies":"— loading…"}</option>
-        <option value="nifty">Nifty 50 — quick, about a minute</option>
-        <option value="full">Full NSE — every listed stock, needs Zerodha</option>
+        {isUS
+          ? <option value="sp100">Large US names — about 110 stocks</option>
+          : <>
+              <option value="gated">Quality-gated universe {fund?"— "+fund.meta.count+" companies":"— loading…"}</option>
+              <option value="nifty">Nifty 50 — quick, about a minute</option>
+              <option value="full">Full NSE — every listed stock, needs Zerodha</option>
+            </>}
       </select>
 
       <div style={{fontSize:10.5,color:"#888",marginBottom:3}}>History window</div>
@@ -13574,7 +13597,10 @@ function AIMTrading({ onClose }) {
       </div>}
     </div>}
 
-    {tab==="screener"&&<AIMScreener/>}
+    {tab==="screener"&&(book==="CRYPTO"
+      ? <div style={{padding:"24px 14px",textAlign:"center",fontSize:12.5,color:"#8a8a80",lineHeight:1.6}}>
+          The screener works on shares, not crypto. Switch to the India or USA book.</div>
+      : <AIMScreener book={book}/>)}
 
     {tab==="backtest"&&<div>
       <div style={{background:"#f7faf7",border:"1px solid #dde6dd",borderRadius:10,
