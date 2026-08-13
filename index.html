@@ -12851,6 +12851,107 @@ function AIMTrading({ onClose }) {
     setBusy("");
   };
 
+  // A printable order sheet. Sells first, so the cash they release is in hand
+  // before the buys are placed — the same ordering the signals use. Opens in a
+  // print window; choose "Save as PDF" to keep it.
+  const orderSheetPDF = () => {
+    const acts=(data.holdings||[])
+      .map(h=>({h,s:h.signal||{}}))
+      .filter(x=>x.s.action&&x.s.action!=="HOLD"&&Math.round(x.s.qty)>=1);
+    if(!acts.length){ setMsg("No signals to act on"); return; }
+
+    const sells=acts.filter(x=>x.s.action==="SELL")
+      .sort((a,b)=>num(b.s.amount)-num(a.s.amount));
+    const buys=acts.filter(x=>x.s.action==="BUY")
+      .sort((a,b)=>num(b.s.amount)-num(a.s.amount));
+
+    const lim=(x)=>{ const px=num(x.h.last_price);
+      return px>0 ? (Math.round((x.s.action==="BUY"?px*1.01:px*0.99)*20)/20) : 0; };
+    const money=(n)=>cur+Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:2});
+
+    const raised=sells.reduce((s,x)=>s+num(x.s.amount),0);
+    const needed=buys.reduce((s,x)=>s+num(x.s.amount),0);
+
+    const rows=(list,kind)=>list.map((x,i)=>
+      "<tr>"+
+      "<td>"+(i+1)+"</td>"+
+      "<td><b>"+x.h.symbol+"</b></td>"+
+      "<td class='q'>"+Math.round(x.s.qty)+"</td>"+
+      "<td class='q'>"+money(x.h.last_price)+"</td>"+
+      "<td class='q lim'>"+(lim(x)>0?money(lim(x)):"—")+"</td>"+
+      "<td class='q'>"+money(x.s.amount)+"</td>"+
+      "<td class='box'></td>"+
+      "</tr>").join("");
+
+    const w=window.open("","_blank");
+    if(!w){ setMsg("✗ Allow pop-ups to open the order sheet"); return; }
+    w.document.write(
+      "<html><head><title>RK order sheet "+new Date().toISOString().slice(0,10)+"</title>"+
+      "<style>"+
+      "body{font-family:Georgia,serif;color:#1a2a1a;max-width:760px;margin:24px auto;padding:0 18px}"+
+      "h1{font-size:20px;margin:0 0 2px}"+
+      ".sub{font-size:12px;color:#7a8a7a;margin-bottom:18px}"+
+      "h2{font-size:14px;margin:22px 0 6px;padding-bottom:4px;border-bottom:2px solid #1a5a3a}"+
+      "h2.buy{border-color:#1a3a7a}"+
+      "table{width:100%;border-collapse:collapse;font-size:12.5px}"+
+      "th{text-align:left;font-size:9.5px;letter-spacing:.4px;text-transform:uppercase;"+
+      "color:#8a9a8a;padding:0 6px 5px;font-weight:600}"+
+      "th.q,td.q{text-align:right}"+
+      "td{padding:6px;border-bottom:1px solid #eee}"+
+      "td.lim{font-weight:700}"+
+      "td.box,th.box{width:34px;text-align:center}"+
+      "td.box:after{content:'';display:inline-block;width:13px;height:13px;border:1.5px solid #aab}"+
+      ".note{font-size:11px;color:#7a8a7a;margin-top:6px;font-style:italic}"+
+      ".sum{margin-top:22px;padding:11px 13px;background:#f4f8f4;border:1px solid #dde6dd;font-size:12.5px}"+
+      ".sum div{margin-bottom:3px}"+
+      ".foot{margin-top:26px;padding-top:10px;border-top:1px solid #ddd;font-size:10.5px;color:#8a9a8a;line-height:1.6}"+
+      "@media print{body{margin:0}}"+
+      "</style></head><body>"+
+
+      "<h1>Order sheet — "+book+" book</h1>"+
+      "<div class='sub'>"+new Date().toLocaleString("en-IN")+
+      " · prices as last refreshed · limits set 1% either side</div>"+
+
+      (sells.length?
+        "<h2>Sell first — "+sells.length+" order"+(sells.length===1?"":"s")+"</h2>"+
+        "<table><tr><th>#</th><th>Symbol</th><th class='q'>Qty</th>"+
+        "<th class='q'>Last</th><th class='q'>Limit</th><th class='q'>Value</th><th class='box'>Done</th></tr>"+
+        rows(sells,"SELL")+"</table>"+
+        "<div class='note'>Place these before the buys — the cash they release funds what follows.</div>"
+        :"")+
+
+      (buys.length?
+        "<h2 class='buy'>Then buy — "+buys.length+" order"+(buys.length===1?"":"s")+"</h2>"+
+        "<table><tr><th>#</th><th>Symbol</th><th class='q'>Qty</th>"+
+        "<th class='q'>Last</th><th class='q'>Limit</th><th class='q'>Value</th><th class='box'>Done</th></tr>"+
+        rows(buys,"BUY")+"</table>"
+        :"")+
+
+      "<div class='sum'>"+
+      "<div>Cash in the book now: <b>"+money(data.cash)+"</b></div>"+
+      (sells.length?"<div>Selling raises: <b>"+money(raised)+"</b></div>":"")+
+      (buys.length?"<div>Buying needs: <b>"+money(needed)+"</b></div>":"")+
+      "<div style='margin-top:6px;padding-top:6px;border-top:1px solid #dde6dd'>"+
+      "Cash after everything: <b>"+money(num(data.cash)+raised-needed)+"</b></div>"+
+      ((num(data.cash)+raised-needed)<0
+        ? "<div style='color:#a03030;font-weight:700;margin-top:4px'>"+
+          "Short by "+money(Math.abs(num(data.cash)+raised-needed))+
+          " — the sells must fill before the buys, or trim the buy list.</div>":"")+
+      "</div>"+
+
+      "<div class='foot'>"+
+      "Limits are 1% either side of the last price because Zerodha refuses plain "+
+      "market orders through the API. Adjust them in Kite if the market has moved. "+
+      "Tick each line as you place it, and record the fills in the tracker afterwards "+
+      "so Portfolio Control stays honest."+
+      "</div>"+
+
+      "</body></html>");
+    w.document.close();
+    setTimeout(()=>{ try{ w.print(); }catch(e){} }, 400);
+    setMsg("Order sheet opened — choose Save as PDF in the print dialogue");
+  };
+
   const clearKite=()=>{ setKite(null); try{ localStorage.removeItem("aim_kite_token"); }catch(e){} };
 
   const kiteCall=(payload)=>fetch("/.netlify/functions/kite",{method:"POST",
@@ -13226,13 +13327,19 @@ function AIMTrading({ onClose }) {
             if(!acts.length) return null;
             const sells=acts.filter(x=>x.s.action==="SELL").length;
             const buys=acts.length-sells;
-            return <button onClick={()=>sendToKite(acts.map(x=>
-                ({symbol:x.h.symbol,side:x.s.action,qty:x.s.qty,price:x.h.last_price})))}
-              disabled={!!busy}
-              style={{...btn,background:"#1a3a6a",color:"#fff",width:"100%",marginTop:5,fontSize:12.5}}>
-              {busy==="basket"?"Opening Kite…"
-                :"🧺 Send all "+acts.length+" signals to Kite"+
-                  (sells&&buys?(" ("+sells+" sell, "+buys+" buy)"):"")}</button>;
+            return <div>
+              <button onClick={()=>sendToKite(acts.map(x=>
+                  ({symbol:x.h.symbol,side:x.s.action,qty:x.s.qty,price:x.h.last_price})))}
+                disabled={!!busy}
+                style={{...btn,background:"#1a3a6a",color:"#fff",width:"100%",marginTop:5,fontSize:12.5}}>
+                {busy==="basket"?"Opening Kite…"
+                  :"🧺 Send all "+acts.length+" signals to Kite"+
+                    (sells&&buys?(" ("+sells+" sell, "+buys+" buy)"):"")}</button>
+              <button onClick={orderSheetPDF}
+                style={{...btn,background:"#fff",color:"#5a6a5a",border:"1px solid #d8d8c8",
+                width:"100%",marginTop:5,fontSize:12.5}}>
+                📄 Order sheet to print or save as PDF</button>
+            </div>;
           })()}
   
           {kite&&<button onClick={loadHoldings} disabled={!!busy} style={{...btn,background:"#eee",color:"#333",width:"100%",marginTop:5}}>
