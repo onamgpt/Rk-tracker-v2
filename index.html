@@ -12809,9 +12809,12 @@ function AIMTrading({ onClose }) {
         // Zerodha refuses plain market orders placed through the API — they
         // require market protection, which the basket cannot carry. So every
         // order goes as a limit, priced 1% in our favour so it still fills.
+        // A quarter of a percent is enough to fill in normal trading. Wider
+        // than that is money given away, and the limit can be nudged in Kite's
+        // own basket screen before placing if the market has moved.
         const px = Number(o.price)||0;
         const limit = px>0
-          ? Math.round((o.side==="BUY" ? px*1.01 : px*0.99)*20)/20   // nearest 5 paise
+          ? Math.round((o.side==="BUY" ? px*1.0025 : px*0.9975)*20)/20   // nearest 5 paise
           : 0;
         const row = {
           variety:"regular",
@@ -12844,7 +12847,7 @@ function AIMTrading({ onClose }) {
       setTimeout(()=>{ try{ document.body.removeChild(f); }catch(e){} },2000);
       const noPrice=basket.filter(b=>b.order_type!=="LIMIT").length;
       setMsg("Opened in Kite — review and confirm there, then record the trade here"+
-        " · sent as limit orders 1% either side of the last price, because Zerodha"+
+        " · sent as limit orders a quarter percent either side, because Zerodha"+
         " refuses plain market orders through the API"+
         (noPrice?(" · "+noPrice+" had no price and may be rejected — refresh prices first"):""));
     }catch(e){ setMsg("✗ "+String(e.message||e)); }
@@ -12866,7 +12869,7 @@ function AIMTrading({ onClose }) {
       .sort((a,b)=>num(b.s.amount)-num(a.s.amount));
 
     const lim=(x)=>{ const px=num(x.h.last_price);
-      return px>0 ? (Math.round((x.s.action==="BUY"?px*1.01:px*0.99)*20)/20) : 0; };
+      return px>0 ? (Math.round((x.s.action==="BUY"?px*1.0025:px*0.9975)*20)/20) : 0; };
     const money=(n)=>cur+Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:2});
 
     const raised=sells.reduce((s,x)=>s+num(x.s.amount),0);
@@ -12910,7 +12913,7 @@ function AIMTrading({ onClose }) {
 
       "<h1>Order sheet — "+book+" book</h1>"+
       "<div class='sub'>"+new Date().toLocaleString("en-IN")+
-      " · prices as last refreshed · limits set 1% either side</div>"+
+      " · prices as last refreshed · limits set 0.25% either side</div>"+
 
       (sells.length?
         "<h2>Sell first — "+sells.length+" order"+(sells.length===1?"":"s")+"</h2>"+
@@ -12940,8 +12943,8 @@ function AIMTrading({ onClose }) {
       "</div>"+
 
       "<div class='foot'>"+
-      "Limits are 1% either side of the last price because Zerodha refuses plain "+
-      "market orders through the API. Adjust them in Kite if the market has moved. "+
+      "Limits are 0.25% either side of the last price because Zerodha refuses plain "+
+      "market orders through the API. Tap the limit in Kite's basket to nudge it if the market has moved. "+
       "Tick each line as you place it, and record the fills in the tracker afterwards "+
       "so Portfolio Control stays honest."+
       "</div>"+
