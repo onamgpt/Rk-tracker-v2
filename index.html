@@ -2939,7 +2939,7 @@ function ForwardTest({ onClose }) {
 
   const fetchPrices=async(symbols)=>{
     const tok=kiteToken();
-    if(!tok) throw new Error("connect Zerodha in AIM Trading first");
+    if(!tok) throw new Error("connect Zerodha in RK Trading first");
     const r=await fetch("/.netlify/functions/kite",{method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({action:"quote",symbols,access_token:tok})});
@@ -11842,7 +11842,7 @@ function Orders({ onClose }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  AIM SCREENER  —  full NSE scan with the Stage 1 gate applied BEFORE scoring
+//  RK SCREENER  —  full NSE scan with the Stage 1 gate applied BEFORE scoring
 //
 //  The old screener scored everything and filtered afterwards, which is how a
 //  Rs.9 stock reached rank 9. Here the gate runs first: anything that fails is
@@ -11852,7 +11852,7 @@ function Orders({ onClose }) {
 //  fundamentals feed and are left to the Gate check tab, by hand.
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-//  AIM SCREENER  —  full NSE scan with the Stage 1 gate applied BEFORE scoring
+//  RK SCREENER  —  full NSE scan with the Stage 1 gate applied BEFORE scoring
 //
 //  The old screener scored everything and filtered afterwards, which is how a
 //  Rs.9 stock reached rank 9. Here the gate runs first: anything that fails is
@@ -11862,12 +11862,12 @@ function Orders({ onClose }) {
 //  fundamentals feed and are left to the Gate check tab, by hand.
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-//  AIM BACKTEST — one stock, your choice of window. Gross of costs by request.
+//  RK BACKTEST — one stock, your choice of window. Gross of costs by request.
 //  Every decision uses only the prior close, so there is no look-ahead.
 // ─────────────────────────────────────────────────────────────────────────────
 // ------------------------------------------------------------
-// Monthly investing, two ways. The honest comparison is not AIM
-// against zero — it is AIM against simply buying the same amount
+// Monthly investing, two ways. The honest comparison is not RK
+// against zero — it is RK against simply buying the same amount
 // every month and never selling, which is what most people do.
 // ------------------------------------------------------------
 function SipCompare() {
@@ -11917,7 +11917,7 @@ function SipCompare() {
       use.forEach(m=>{ sipUnits+=amt/m.px; invested+=amt; });
       const sipValue=sipUnits*last;
 
-      // ---- AIM, reviewed monthly, same money arriving
+      // ---- RK, reviewed monthly, same money arriving
       let units=0, cash=0, pc=0, trades=0, bought=0, sold=0;
       const path=[];
       use.forEach((m,i)=>{
@@ -11958,7 +11958,7 @@ function SipCompare() {
   return <div>
     <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9,lineHeight:1.5}}>
       Put the same amount in every month and compare two ways of handling it:
-      AIM reviewed monthly, against simply buying and never selling.
+      RK reviewed monthly, against simply buying and never selling.
       The index itself cannot be bought — use NIFTYBEES, the ETF that tracks it.
     </div>
     <div style={{display:"flex",gap:6}}>
@@ -11983,7 +11983,7 @@ function SipCompare() {
         {res.months} months, {res.first} to {res.lastKey} · put in {money(res.invested)}</div>
 
       {[["Bought every month, never sold", res.sipValue, "#1a3a6a"],
-        ["AIM, reviewed monthly", res.aimValue, "#1a5a3a"]].map(([label,val,col])=>
+        ["RK, reviewed monthly", res.aimValue, "#1a5a3a"]].map(([label,val,col])=>
         <div key={label} style={{border:"1px solid #e6ece6",borderRadius:10,
           padding:"11px 12px",marginBottom:7}}>
           <div style={{fontSize:11.5,color:"#5a6a5a"}}>{label}</div>
@@ -11997,13 +11997,13 @@ function SipCompare() {
         borderRadius:10,padding:"11px 12px",marginBottom:9}}>
         <b style={{fontSize:13.5,color:res.aimValue>res.sipValue?"#1a5a3a":"#a0661a"}}>
           {res.aimValue>res.sipValue
-            ? "AIM ahead by "+money(res.aimValue-res.sipValue)
+            ? "RK ahead by "+money(res.aimValue-res.sipValue)
             : "Simply holding ahead by "+money(res.sipValue-res.aimValue)}</b>
         <div style={{fontSize:11,color:"#7a7a70",marginTop:4,lineHeight:1.5}}>
           {res.trades} reviews acted on · {money(res.cash)} still in cash.
           {res.aimValue<=res.sipValue
-            ? " In a market that mostly rose, AIM keeps selling winners and holding cash — that is the cost of the discipline."
-            : " AIM found enough movement to harvest."}
+            ? " In a market that mostly rose, RK keeps selling winners and holding cash — that is the cost of the discipline."
+            : " RK found enough movement to harvest."}
         </div>
       </div>
 
@@ -12023,7 +12023,7 @@ function SipCompare() {
       })()}
       <div style={{display:"flex",gap:12,fontSize:10,color:"#8a9a8a",marginTop:4}}>
         <span><span style={{color:"#1a3a6a"}}>—</span> bought and held</span>
-        <span><span style={{color:"#1a7a3a"}}>—</span> AIM</span>
+        <span><span style={{color:"#1a7a3a"}}>—</span> RK</span>
       </div>
     </div>}
   </div>;
@@ -12120,7 +12120,7 @@ function AIMBacktest() {
 
   return <div>
     <div style={{fontSize:11,color:"#888",marginBottom:8,lineHeight:1.5}}>
-      Runs the real AIM rules over history — Portfolio Control rising by half of every buy, never
+      Runs the real RK rules over history — Portfolio Control rising by half of every buy, never
       falling on a sale. Each decision uses only the prior close.
     </div>
 
@@ -12151,7 +12151,7 @@ function AIMBacktest() {
       <div style={{...card,background:res.final>=res.bh?"#e8f5e9":"#fff4f4",
         borderColor:res.final>=res.bh?"#a0d0a0":"#e0a0a0"}}>
         <div style={{fontSize:15,fontWeight:800,color:res.final>=res.bh?"#2e7d32":"#c62828"}}>
-          {res.final>=res.bh?"AIM beat buy-and-hold":"Buy-and-hold beat AIM"}
+          {res.final>=res.bh?"RK beat buy-and-hold":"Buy-and-hold beat RK"}
         </div>
         <div style={{fontSize:11.5,color:"#666",marginTop:3}}>
           {res.sym} · {res.years.toFixed(1)} years · {res.days} trading days
@@ -12171,7 +12171,7 @@ function AIMBacktest() {
       {res.starved>0&&<div style={{...card,background:"#fff8e1",borderColor:"#e0c080"}}>
         <div style={{fontSize:12,fontWeight:700,color:"#8a6a1a"}}>Cash ran out {res.starved} time(s)</div>
         <div style={{fontSize:11,color:"#7a6a4a",marginTop:3,lineHeight:1.45}}>
-          AIM called for a bigger buy than the reserve could fund, so the trade was truncated. This is
+          RK called for a bigger buy than the reserve could fund, so the trade was truncated. This is
           the exact risk of starting at {stockPct}% in stock rather than 50%.
         </div>
       </div>}
@@ -12179,7 +12179,7 @@ function AIMBacktest() {
       <div style={{...card,background:"#f8f8f4"}}>
         <div style={{fontSize:11,color:"#666",lineHeight:1.6}}>
           <b>Gross of costs, as you asked.</b> Real brokerage, STT, stamp duty and slippage would reduce
-          the AIM figure but not buy-and-hold, because AIM trades {res.buys+res.sells} times and holding
+          the RK figure but not buy-and-hold, because RK trades {res.buys+res.sells} times and holding
           trades once. Treat the gap as narrower than shown. Dividends are excluded from both.
           One stock over one period is also a single sample — run several before drawing conclusions.
         </div>
@@ -12290,9 +12290,9 @@ function AIMScreener() {
 
   // ── STAGE 2 SCORE — survivors only. Price factors, renormalised to 100. ────
   // The manual's drawdown bands, as a preference rather than a pass/fail.
-  // 8-25% below the high is where AIM does its best work; at the high it just waits.
+  // 8-25% below the high is where RK does its best work; at the high it just waits.
   const bandScore=(dd)=>{
-    if(dd<8) return 35;                      // little discount — AIM sits idle
+    if(dd<8) return 35;                      // little discount — RK sits idle
     if(dd<=25) return 100;                   // PREFERRED
     if(dd<=40) return 100-(dd-25)*3.5;       // allowed but flagged
     return 0;
@@ -12393,7 +12393,7 @@ function AIMScreener() {
     });
     const a=document.createElement("a");
     a.href=URL.createObjectURL(new Blob([s],{type:"text/csv"}));
-    a.download="AIM-Gated-Screener-"+new Date().toISOString().slice(0,10)+".csv";
+    a.download="RK-Gated-Screener-"+new Date().toISOString().slice(0,10)+".csv";
     a.click();
   };
 
@@ -12598,11 +12598,11 @@ function AIMTrading({ onClose }) {
     });
     const a=document.createElement("a");
     a.href=URL.createObjectURL(new Blob([s],{type:"text/csv"}));
-    a.download="AIM-ledger-"+book+"-"+new Date().toISOString().slice(0,10)+".csv";
+    a.download="RK-ledger-"+book+"-"+new Date().toISOString().slice(0,10)+".csv";
     a.click();
   };
 
-  // Removing a share stops AIM managing it. The ledger is untouched — history
+  // Removing a share stops RK managing it. The ledger is untouched — history
   // is never deleted, only the position is marked closed.
   const showRaw=async()=>{
     setBusy("raw"); setMsg("");
@@ -12619,7 +12619,7 @@ function AIMTrading({ onClose }) {
   };
 
   const removeShare=async(sym)=>{
-    if(!window.confirm("Remove "+sym+" from the "+book+" book?\n\nAIM stops managing it. Ledger history is kept.")) return;
+    if(!window.confirm("Remove "+sym+" from the "+book+" book?\n\nRK stops managing it. Ledger history is kept.")) return;
     // Opening a position took its cost out of cash. Whether that money should
     // come back depends entirely on why it is being removed, and only the
     // person removing it knows which case this is.
@@ -12798,7 +12798,7 @@ function AIMTrading({ onClose }) {
     setBusy("");
   };
 
-  // Live prices -> every AIM signal recomputes without any typing
+  // Live prices -> every RK signal recomputes without any typing
   const refreshPrices=async()=>{
     if(!data||!data.holdings.length){ setMsg("✗ No holdings to price"); return; }
     // The USA book has its own source — Zerodha covers India only.
@@ -12859,7 +12859,7 @@ function AIMTrading({ onClose }) {
     setBusy("");
   };
 
-  // Your real Zerodha holdings, offered for adoption into the AIM book.
+  // Your real Zerodha holdings, offered for adoption into the RK book.
   const loadHoldings=async()=>{
     if(!kite){ setMsg("✗ Connect Zerodha first"); return; }
     setBusy("zh"); setMsg(""); setZh(null);
@@ -12898,7 +12898,7 @@ function AIMTrading({ onClose }) {
   };
 
   // Today's Zerodha fills, shown for review. Nothing enters the ledger unticked:
-  // Portfolio Control is cumulative, so a stray non-AIM trade corrupts it permanently.
+  // Portfolio Control is cumulative, so a stray non-RK trade corrupts it permanently.
   const loadFills=async()=>{
     if(!kite){ setMsg("✗ Connect Zerodha first"); return; }
     setBusy("fills"); setMsg(""); setFills(null);
@@ -13032,7 +13032,7 @@ function AIMTrading({ onClose }) {
         <div style={{fontSize:12,fontWeight:800,color:"#c62828"}}>Tax before you act on a sell signal</div>
         <div style={{fontSize:11,color:"#8a4a4a",marginTop:4,lineHeight:1.5}}>
           Flat 31.2% on every gain, 1% TDS on every sale, and losses give <b>no</b> relief — not against
-          other income, not against gains on the other coin, not carried forward. AIM trades often,
+          other income, not against gains on the other coin, not carried forward. RK trades often,
           so model each sell first.
         </div>
         <div style={{display:"flex",gap:5,marginTop:8}}>
@@ -13137,8 +13137,8 @@ function AIMTrading({ onClose }) {
             {Object.values(zhPick).every(Boolean)?"Clear all":"Select all"}</span>
         </div>
         <div style={{fontSize:10.5,color:"#8a6a1a",marginBottom:6,lineHeight:1.45}}>
-          Tick only the ones you want AIM to manage. Portfolio Control is set to today's market
-          value, so AIM starts from here rather than acting on gains it never took part in.
+          Tick only the ones you want RK to manage. Portfolio Control is set to today's market
+          value, so RK starts from here rather than acting on gains it never took part in.
         </div>
         {zh.map((h,i)=><label key={i} style={{display:"flex",gap:7,alignItems:"flex-start",padding:"5px 0",borderBottom:i<zh.length-1?"1px solid #f0e8d8":"none",cursor:"pointer"}}>
           <input type="checkbox" checked={!!zhPick[i]} onChange={e=>setZhPick({...zhPick,[i]:e.target.checked})} style={{marginTop:2}}/>
@@ -13156,9 +13156,9 @@ function AIMTrading({ onClose }) {
       </div>}
 
       {fills&&fills.length>0&&<div style={{...card,background:"#fffdf5",borderColor:"#e0c080"}}>
-        <div style={{fontSize:12,fontWeight:800,marginBottom:4}}>Zerodha fills — tick the AIM ones</div>
+        <div style={{fontSize:12,fontWeight:800,marginBottom:4}}>Zerodha fills — tick the RK ones</div>
         <div style={{fontSize:10.5,color:"#8a6a1a",marginBottom:6,lineHeight:1.45}}>
-          Only tick trades that belong to this AIM book. Portfolio Control is cumulative, so an
+          Only tick trades that belong to this RK book. Portfolio Control is cumulative, so an
           unrelated trade imported here would distort every later signal.
         </div>
         {fills.map((o,i)=><label key={i} style={{display:"flex",gap:7,alignItems:"flex-start",padding:"5px 0",borderBottom:i<fills.length-1?"1px solid #f0e8d8":"none",cursor:"pointer"}}>
@@ -13195,7 +13195,7 @@ function AIMTrading({ onClose }) {
         return d!==0?d:Math.abs(((b.signal||{}).advice)||0)-Math.abs(((a.signal||{}).advice)||0);
       }).map(h=>{
         const s=h.signal||{};
-        // AIM triggers, solved for price:
+        // RK triggers, solved for price:
         //   SELL when MV - PC - 0.1MV > 0  ->  price > PC / (0.9 x shares)
         //   BUY  when PC - MV - 0.1MV > 0  ->  price < PC / (1.1 x shares)
         const pc=Number(h.portfolio_control)||0, sh=Number(h.shares)||0;
@@ -13354,7 +13354,7 @@ function AIMTrading({ onClose }) {
       <div style={{background:"#f7faf7",border:"1px solid #dde6dd",borderRadius:10,
         padding:"12px 13px",marginBottom:14}}>
         <div style={{fontSize:12.5,fontWeight:800,color:"#1a5a3a",marginBottom:7}}>
-          Monthly investing — AIM against simply holding</div>
+          Monthly investing — RK against simply holding</div>
         <SipCompare/>
       </div>
       <AIMBacktest/>
@@ -13481,7 +13481,7 @@ function AIMTrading({ onClose }) {
           </div>
 
           {sold===0&&<div style={{fontSize:10.5,color:"#a0661a",marginTop:8}}>
-            AIM has never sold this one. Nothing banked yet — it is being held, not worked.</div>}
+            RK has never sold this one. Nothing banked yet — it is being held, not worked.</div>}
         </div>;
       })()}
 
@@ -13674,7 +13674,7 @@ function AIMTrading({ onClose }) {
         return <div style={{background:"#fff",border:"1px solid #e6ece6",borderRadius:10,
           padding:"12px 13px",marginBottom:11}}>
           <div style={{fontSize:10.5,color:"#8a9a8a",fontWeight:700,letterSpacing:.3}}>
-            WHAT AIM HAS BANKED</div>
+            WHAT RK HAS BANKED</div>
           <div style={{fontSize:22,fontWeight:800,marginTop:2,
             color:total>=0?"#1a7a3a":"#c0392b"}}>
             {total>=0?"+":""}{cur}{fmtN(total)}</div>
@@ -13877,7 +13877,7 @@ function App(){
   if(IS_VIEW_MODE) return<ShareableView/>;
 
   // Zerodha redirects to the site root after login, carrying a single-use
-  // request_token that expires within minutes. The AIM window is closed at that
+  // request_token that expires within minutes. The RK window is closed at that
   // moment, so anything waiting inside it never sees the token. Capture and
   // exchange it here, the instant the page loads, whatever screen is showing.
   useEffect(()=>{
@@ -13897,7 +13897,7 @@ function App(){
         const t=d&&d.data&&d.data.access_token;
         if(t){
           try{ localStorage.setItem("aim_kite_token",t); }catch(e){}
-          window.alert("✓ Zerodha connected for today.\n\nOpen AIM Trading and tap Live prices.");
+          window.alert("✓ Zerodha connected for today.\n\nOpen RK Trading and tap Live prices.");
         } else {
           window.alert("Zerodha login came back but the token could not be exchanged"+
             ((d&&d.message)?(":\n\n"+d.message):"."));
@@ -14373,7 +14373,7 @@ function App(){
                 {l:"🏦 Bank Archive",fn:()=>setShowBank(true), ownerOnly:true},
                 {l:"💰 Receivables",fn:()=>setShowRecv(true), ownerOnly:true},
                 {l:"📦 Orders",fn:()=>setShowOrders(true), ordersOnly:true},
-                {l:"📈 AIM Trading",fn:()=>setShowAIM(true), ownerOnly:true},
+                {l:"📈 RK Trading",fn:()=>setShowAIM(true), ownerOnly:true},
                 {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true), ownerOnly:true},
                 {l:"🛡️ CSD",fn:()=>setShowCSD(true), ownerOnly:true},
                 {l:"🪔 Kerala",fn:()=>setShowKerala(true), ownerOnly:true},

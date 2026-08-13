@@ -1,14 +1,15 @@
-// Live prices for the USA book. Zerodha covers India only, so US holdings were
-// valued at whatever price was last typed in — sometimes weeks stale, which
-// makes every signal on that book wrong regardless of how good the arithmetic is.
+// Live prices for the USA book.
 //
-// Uses Stooq, which needs no key and no account. Daily closing marks, which is
-// the right resolution for AIM: it reviews positions, it does not day-trade.
+// Originally used Stooq, which stopped returning data. Yahoo is already proven
+// in this codebase — the backtest has used it throughout — so this now goes
+// through the same source rather than maintaining a second one.
 const https = require("https");
 
-function fetchCsv(path) {
+function get(url) {
   return new Promise((resolve) => {
-    https.get({ hostname: "stooq.com", path, headers: { "User-Agent": "rk-tracker" } }, (res) => {
+    https.get(url, {
+      headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" }
+    }, (res) => {
       let d = "";
       res.on("data", c => d += c);
       res.on("end", () => resolve({ status: res.statusCode, body: d }));
@@ -29,34 +30,59 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body || "{}"); } catch (e) {}
   const symbols = (body.symbols || []).filter(Boolean);
   if (!symbols.length) {
-    return { statusCode: 400, headers: h, body: JSON.stringify({ ok: false, error: "symbols required" }) };
+    return { statusCode: 400, headers: h,
+      body: JSON.stringify({ ok: false, error: "symbols required" }) };
   }
 
   const out = {};
   const failed = [];
+  let lastError = null;
 
-  for (let i = 0; i < symbols.length; i++) {
-    const raw = String(symbols[i]).trim().toUpperCase();
-    // Stooq wants US tickers suffixed .us
-    const q = raw.toLowerCase().replace(/\.US$/i, "") + ".us";
-    const r = await fetchCsv("/q/l/?s=" + encodeURIComponent(q) + "&f=sd2t2ohlcv&h&e=csv");
+  // All at once. Yahoo tolerates this and the whole call has to finish inside
+  // the function time limit.
+  const results = await Promise.all(symbols.map(async (raw) => {
+    const sym = String(raw).trim().toUpperCase();
+    const url = "https://query1.finance.yahoo.com/v8/finance/chart/" +
+      encodeURIComponent(sym) + "?interval=1d&range=5d";
+    const r = await get(url);
+    return { sym, r };
+  }));
 
-    if (r.status !== 200 || !r.body) { failed.push(raw); continue; }
-
-    // Symbol,Date,Time,Open,High,Low,Close,Volume
-    const lines = r.body.trim().split("\n");
-    if (lines.length < 2) { failed.push(raw); continue; }
-    const cols = lines[1].split(",");
-    const close = parseFloat(cols[6]);
-    const date = cols[1];
-
-    if (!isFinite(close) || close <= 0) { failed.push(raw); continue; }
-    out[raw] = { price: close, asOf: date };
-  }
+  results.forEach(({ sym, r }) => {
+    if (r.status !== 200 || !r.body) {
+      failed.push(sym);
+      if (r.error) lastError = r.error;
+      return;
+    }
+    try {
+      const j = JSON.parse(r.body);
+      const res = j && j.chart && j.chart.result && j.chart.result[0];
+      const meta = res && res.meta;
+      const price = meta && (meta.regularMarketPrice || meta.previousClose);
+      if (price > 0) {
+        out[sym] = {
+          price: price,
+          asOf: meta.regularMarketTime
+            ? new Date(meta.regularMarketTime * 1000).toISOString().slice(0, 10)
+            : ""
+        };
+      } else {
+        failed.push(sym);
+      }
+    } catch (e) {
+      failed.push(sym);
+    }
+  });
 
   return {
     statusCode: 200,
     headers: h,
-    body: JSON.stringify({ ok: true, prices: out, failed })
+    body: JSON.stringify({
+      ok: Object.keys(out).length > 0,
+      prices: out,
+      failed,
+      note: Object.keys(out).length ? null
+        : ("no prices came back" + (lastError ? (" — " + lastError) : ""))
+    })
   };
 };
