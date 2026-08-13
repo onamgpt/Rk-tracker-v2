@@ -12301,6 +12301,66 @@ function AIMScreener({ book }) {
   const isUS = book==="USA";
   const [universe,setUniverse]=useState(isUS?"sp100":"nifty");
   const cur = isUS ? "$" : "₹";
+  const [watch,setWatch]=useState([]);
+  const [watchPaste,setWatchPaste]=useState("");
+  const [newFound,setNewFound]=useState(null);
+  const [checking,setChecking]=useState(false);
+
+  const watchKey = ()=>"screener_watch_"+(isUS?"USA":"INDIA");
+  const snapKey  = ()=>"screener_listed_"+(isUS?"USA":"INDIA");
+
+  useEffect(()=>{ (async()=>{
+    try{
+      const r=await sheetsAPI("getPortfolio",{key:watchKey(),user:"main"});
+      if(r&&r.data&&Array.isArray(r.data)) setWatch(r.data);
+    }catch(e){}
+  })(); },[isUS]);
+
+  const saveWatch=async(list)=>{
+    setWatch(list);
+    try{ await sheetsAPI("savePortfolio",{key:watchKey(),user:"main",data:list}); }catch(e){}
+  };
+
+  const addWatch=async()=>{
+    const add=watchPaste.split(/[^A-Za-z0-9&.\-]+/).map(s=>s.trim().toUpperCase()
+      .replace(/\.NS$/,"")).filter(s=>s&&/^[A-Z0-9&\-.]{1,20}$/.test(s));
+    if(!add.length){ setNote("Paste at least one ticker"); return; }
+    const merged=Array.from(new Set(watch.concat(add)));
+    await saveWatch(merged);
+    setWatchPaste("");
+    setNote("✓ "+add.length+" added — "+merged.length+" on the watchlist. Choose that universe and scan.");
+  };
+
+  // What is listed today, against what was listed when this was last run.
+  // Only the India book can do this automatically — Zerodha publishes the full
+  // instrument list. For the US there is no free equivalent, so tickers are
+  // added by hand instead of pretending otherwise.
+  const checkNewListings=async()=>{
+    if(isUS){ setNote("Automatic listing checks work on the India book only. Paste new US tickers below."); return; }
+    setChecking(true); setNewFound(null); setNote("Reading the current NSE list from Zerodha…");
+    try{
+      const full=await getFullList();
+      if(!full){ setNote("❌ Needs a Zerodha token — connect below."); setChecking(false); return; }
+      const r=await sheetsAPI("getPortfolio",{key:snapKey(),user:"main"});
+      const prev=(r&&r.data&&r.data.symbols)||null;
+      if(!prev){
+        await sheetsAPI("savePortfolio",{key:snapKey(),user:"main",
+          data:{symbols:full,at:new Date().toISOString().slice(0,10)}});
+        setNote("✓ Baseline saved — "+full.length.toLocaleString("en-IN")+
+          " symbols recorded today. Run this again next month and anything new will be listed.");
+        setChecking(false); return;
+      }
+      const before=new Set(prev);
+      const fresh=full.filter(s=>!before.has(s));
+      await sheetsAPI("savePortfolio",{key:snapKey(),user:"main",
+        data:{symbols:full,at:new Date().toISOString().slice(0,10)}});
+      setNewFound({list:fresh,since:(r.data.at||"the last check")});
+      setNote(fresh.length
+        ? ("Found "+fresh.length+" symbol(s) not present on "+(r.data.at||"the last check"))
+        : "Nothing new since "+(r.data.at||"the last check"));
+    }catch(e){ setNote("✗ "+String(e.message||e)); }
+    setChecking(false);
+  };
   const [lookback,setLookback]=useState("2y");
   const [token,setToken]=useState(()=>{ try{ return localStorage.getItem("aim_kite_token")||""; }catch(e){ return ""; } });
   const [running,setRunning]=useState(false);
@@ -12334,6 +12394,40 @@ function AIMScreener({ book }) {
     "ZTS","SCHW","MO","SO","BSX","EOG","DUK","SLB","PGR","CB",
     "PYPL","MU","SHOP","SQ","UBER","ABNB","SNOW","CRWD","PLTR","COIN",
     "RIVN","LCID","SOFI","HOOD","DKNG","RBLX","NET","DDOG","ZS","MDB"];
+
+  // The wider list. A gate that rejects most of what it sees is only useful if
+  // it has enough to look at, so this adds the mid-caps, the recent listings and
+  // the movers that never appear in a megacap index.
+  const US_WIDE=[
+    "SMCI","ARM","VRT","CRWV","APP","ANET","LRCX","KLAC","AMAT","ASML",
+    "TSM","QRVO","SWKS","ON","MRVL","NXPI","MCHP","TER","ENTG","WOLF",
+    "CIEN","JNPR","FFIV","AKAM","FSLY","ESTC","CFLT","GTLB","S","OKTA",
+    "PANW","FTNT","CYBR","TENB","QLYS","RPD","VRNS","SAIL","BOX","DBX",
+    "TWLO","ZM","DOCU","ASAN","MNDY","SMAR","PCTY","PAYC","WDAY","NOW",
+    "TEAM","HUBS","VEEV","TYL","SSNC","BR","JKHY","FIS","FISV","GPN",
+    "AFRM","UPST","LC","OPRT","ENVA","NAVI","SLM","ALLY","COF","DFS",
+    "SYF","AXP","TROW","BEN","IVZ","AMG","APO","KKR","BX","ARES",
+    "CG","OWL","STEP","HLNE","PJT","EVR","LAZ","MC","HLI","PIPR",
+    "RCL","CCL","NCLH","MAR","HLT","H","WH","CHH","IHG","EXPE",
+    "DAL","UAL","AAL","LUV","ALK","JBLU","SAVE","ALGT","SKYW","MESA",
+    "F","GM","STLA","HMC","TM","NIO","XPEV","LI","FSR","GOEV",
+    "CHPT","BLNK","EVGO","PLUG","BE","FCEL","BLDP","ENPH","SEDG","RUN",
+    "FSLR","ARRY","NOVA","SPWR","MAXN","CSIQ","JKS","DQ","SOL","TPIC",
+    "OXY","DVN","FANG","PXD","HES","APA","MRO","CTRA","EQT","AR",
+    "HAL","BKR","NOV","CHX","WHD","LBRT","PTEN","HP","RIG","VAL",
+    "X","CLF","NUE","STLD","RS","CMC","ATI","CRS","HAYN","SXC",
+    "FCX","SCCO","TECK","AA","CENX","KALU","MP","UEC","CCJ","DNN",
+    "GOLD","NEM","AEM","KGC","AU","HMY","GFI","PAAS","AG","EXK",
+    "MRNA","BNTX","NVAX","VIR","SRPT","ALNY","IONS","BMRN","RARE","FOLD",
+    "EXAS","NTRA","ILMN","PACB","TXG","NVTA","CDNA","GH","TMDX","DXCM",
+    "ISRG","PODD","TNDM","INSP","IRTC","NVRO","AXNX","SILK","SWAV","PEN",
+    "TDOC","HIMS","DOCS","OSCR","CLOV","ALHC","PRVA","AMWL","ACCD","LFST",
+    "W","CHWY","ETSY","EBAY","RVLV","REAL","POSH","FTCH","BABA","JD",
+    "PDD","SE","MELI","GRAB","CPNG","DASH","LYFT","INSTA","TOST","OLO",
+    "WING","CMG","SHAK","CAVA","SG","PTLO","DNUT","KRUS","FWRG","BROS",
+    "LULU","NKE","DECK","CROX","ONON","BIRD","SKX","WWW","VFC","PVH",
+    "RH","WSM","TPX","LEG","MHK","FND","LL","ARHS","LOVE","PRPL",
+    "IOT","PATH","AI","BBAI","SOUN","INOD","VERI","DUOL","COUR","CHGG"];
 
   // ── metrics from a daily close series ──────────────────────────────────────
   const metrics=(closes,vols)=>{
@@ -12397,8 +12491,15 @@ function AIMScreener({ book }) {
   // ── STAGE 1 GATE — runs before any score is computed ───────────────────────
   const gate=(m)=>{
     if(m.bars<200) return "too little history";
-    if(m.ltp<50) return "price below Rs.50";
-    if(m.turn!==null&&m.turn<5) return "turnover below Rs.5cr";
+    // Floors differ by market: Rs.50 keeps out the penny counters on NSE,
+    // $10 does the same job on a dollar book.
+    if(isUS){
+      if(m.ltp<10) return "price below $10";
+      if(m.turn!==null&&m.turn<5) return "turnover too thin";
+    } else {
+      if(m.ltp<50) return "price below Rs.50";
+      if(m.turn!==null&&m.turn<5) return "turnover below Rs.5cr";
+    }
     if(m.drawdown>40) return "more than 40% below high";
     if(m.volAnn<10) return "too little volatility";
     if(m.volAnn>90) return "volatility beyond sane range";
@@ -12460,6 +12561,11 @@ function AIMScreener({ book }) {
     cancelRef.current=false; setRows(null); setNote("");
     let syms = isUS ? SP100 : NIFTY;
     if(universe==="sp100"){ syms=SP100; }
+    else if(universe==="uswide"){ syms=Array.from(new Set(SP100.concat(US_WIDE))); }
+    else if(universe==="usnew"||universe==="innew"){
+      if(!watch.length){ setNote("❌ Nothing on the watchlist yet. Add tickers below."); return; }
+      syms=watch;
+    }
     else if(universe==="gated"){
       if(!fund){ setNote("❌ Universe file not loaded yet — wait a moment and try again."); return; }
       syms=Object.keys(fund.stocks);
@@ -12532,11 +12638,16 @@ function AIMScreener({ book }) {
       <div style={{fontSize:10.5,color:"#888",marginBottom:3}}>Universe</div>
       <select value={universe} onChange={e=>setUniverse(e.target.value)} style={inp}>
         {isUS
-          ? <option value="sp100">Large US names — about 110 stocks</option>
+          ? <>
+              <option value="sp100">Large US names — 110 stocks, quick</option>
+              <option value="uswide">Wide US scan — 400 stocks, several minutes</option>
+              <option value="usnew">Newly listed and watchlist additions</option>
+            </>
           : <>
               <option value="gated">Quality-gated universe {fund?"— "+fund.meta.count+" companies":"— loading…"}</option>
               <option value="nifty">Nifty 50 — quick, about a minute</option>
               <option value="full">Full NSE — every listed stock, needs Zerodha</option>
+              <option value="innew">Newly listed and watchlist additions</option>
             </>}
       </select>
 
@@ -12549,6 +12660,62 @@ function AIMScreener({ book }) {
       <div style={{fontSize:10.5,color:"#8a6a1a",marginBottom:6}}>
         Bounce-back needs several cycles to mean anything. Over 1 year most stocks show one drawdown or none.
       </div>
+
+      <details style={{marginBottom:10,background:"#fbfdfb",border:"1px solid #e6ece6",
+        borderRadius:9,padding:"9px 11px"}}>
+        <summary style={{fontSize:11.5,fontWeight:700,color:"#5a7a5a",cursor:"pointer"}}>
+          New listings and watchlist{watch.length?(" — "+watch.length+" on the list"):""}</summary>
+
+        <div style={{marginTop:9}}>
+          <div style={{fontSize:10.5,color:"#8a8a80",lineHeight:1.5,marginBottom:8}}>
+            Newly listed shares fail the gate at first — they have no history to
+            judge. Keep them here, and they will pass once about 200 trading days
+            have built up. Worth running once a month.
+          </div>
+
+          {!isUS&&<button onClick={checkNewListings} disabled={checking}
+            style={{width:"100%",padding:"9px",borderRadius:8,border:"1px solid #c8d8e8",
+            background:"#f4f8fc",color:"#1a3a7a",fontWeight:700,fontSize:12,
+            cursor:"pointer",marginBottom:8}}>
+            {checking?"Checking…":"🔎 What is new on NSE since last time?"}</button>}
+
+          {newFound&&<div style={{marginBottom:8}}>
+            {newFound.list.length
+              ? <div>
+                  <div style={{fontSize:11,color:"#1a5a3a",fontWeight:700,marginBottom:4}}>
+                    {newFound.list.length} not seen on {newFound.since}</div>
+                  <div style={{maxHeight:120,overflowY:"auto",fontSize:11,
+                    background:"#fff",border:"1px solid #eee",borderRadius:7,padding:"6px 8px"}}>
+                    {newFound.list.join(", ")}</div>
+                  <button onClick={()=>{ saveWatch(Array.from(new Set(watch.concat(newFound.list))));
+                      setNote("✓ Added to the watchlist"); }}
+                    style={{marginTop:6,padding:"7px 11px",borderRadius:7,border:"none",
+                    background:"#1a5a3a",color:"#fff",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>
+                    Add all to the watchlist</button>
+                </div>
+              : <div style={{fontSize:11,color:"#8a8a80"}}>Nothing new since {newFound.since}.</div>}
+          </div>}
+
+          <textarea value={watchPaste} onChange={e=>setWatchPaste(e.target.value)} rows={2}
+            placeholder={isUS?"paste new US tickers — ARM CRWV RDDT …":"paste new NSE symbols"}
+            style={{...inp,fontFamily:"monospace",fontSize:11.5,resize:"vertical"}}/>
+          <button onClick={addWatch}
+            style={{width:"100%",padding:"8px",borderRadius:8,border:"1px solid #c8d8c8",
+            background:"#fff",color:"#5a7a5a",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>
+            + Add to watchlist</button>
+
+          {watch.length>0&&<div style={{marginTop:8}}>
+            <div style={{fontSize:10.5,color:"#8a8a80",marginBottom:4}}>
+              On the watchlist — choose that universe above to scan only these</div>
+            <div style={{fontSize:11,color:"#5a6a5a",background:"#fff",border:"1px solid #eee",
+              borderRadius:7,padding:"6px 8px",maxHeight:90,overflowY:"auto"}}>
+              {watch.join(", ")}</div>
+            <button onClick={()=>{ if(window.confirm("Clear the whole watchlist?")) saveWatch([]); }}
+              style={{marginTop:5,border:"none",background:"none",color:"#c33",
+              fontSize:10.5,cursor:"pointer",padding:0}}>clear the list</button>
+          </div>}
+        </div>
+      </details>
 
       {universe==="full"&&<div>
         <div style={{fontSize:10.5,color:"#888",marginBottom:3}}>Zerodha access token (expires daily)</div>
