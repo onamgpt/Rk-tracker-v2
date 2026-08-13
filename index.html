@@ -2919,8 +2919,10 @@ function ForwardTest({ onClose }) {
   const [msg,setMsg]=useState("");
   const [paste,setPaste]=useState("");
   const [label,setLabel]=useState("");
+  const [market,setMarket]=useState("INDIA");
 
-  const BENCH="NIFTY 50";
+  const benchFor=(m)=>m==="USA" ? "^GSPC" : "NIFTY 50";
+  const benchName=(m)=>m==="USA" ? "S&P 500" : "Nifty 50";
 
   useEffect(()=>{ (async()=>{
     try{
@@ -2937,15 +2939,30 @@ function ForwardTest({ onClose }) {
 
   const kiteToken=()=>{ try{ return localStorage.getItem("aim_kite_token")||""; }catch(e){ return ""; } };
 
-  const fetchPrices=async(symbols)=>{
+  // Indian tickers come from Zerodha, American ones from Yahoo. Sending a US
+  // symbol to Kite fails with a token error, which reads as a login problem
+  // when in fact the broker simply has never heard of the stock.
+  const fetchPrices=async(symbols,market)=>{
+    const out={};
+    if(market==="USA"){
+      const r=await fetch("/.netlify/functions/usquote",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({symbols})});
+      const j=await r.json();
+      if(!j||!j.ok){
+        throw new Error((j&&j.note)||"no US prices came back"+
+          (j&&j.failed&&j.failed.length?(" for "+j.failed.join(", ")):""));
+      }
+      Object.keys(j.prices||{}).forEach(k=>{ out[k]=Number(j.prices[k].price)||0; });
+      return out;
+    }
     const tok=kiteToken();
-    if(!tok) throw new Error("connect Zerodha in RK Trading first");
+    if(!tok) throw new Error("connect Zerodha in RK Trading first, or choose the US market above");
     const r=await fetch("/.netlify/functions/kite",{method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({action:"quote",symbols,access_token:tok})});
     const j=await r.json();
     if(j&&j.authError) throw new Error(j.authError);
-    const out={};
     Object.keys((j&&j.data)||{}).forEach(k=>{
       out[k.replace(/^NSE:/,"")]=Number(j.data[k].last_price)||0;
     });
@@ -2954,13 +2971,13 @@ function ForwardTest({ onClose }) {
 
   // Paste the tickers straight from a screener report.
   const startRun=async()=>{
-    const syms=Array.from(new Set(paste.split(/[\s,\n]+/)
+    const syms=Array.from(new Set(paste.split(/[^A-Za-z0-9&.\-]+/)
       .map(s=>s.trim().toUpperCase().replace(/\.NS$/,""))
-      .filter(s=>s&&/^[A-Z0-9&\-]{2,20}$/.test(s)))).slice(0,25);
+      .filter(s=>s&&/^[A-Z0-9&.\-]{1,20}$/.test(s)))).slice(0,25);
     if(syms.length<3){ setMsg("✗ Paste at least three tickers"); return; }
     setBusy("start"); setMsg("");
     try{
-      const px=await fetchPrices(syms.concat([BENCH]));
+      const px=await fetchPrices(syms.concat([benchFor(market)]),market);
       const picks=syms.map(s=>({sym:s, entry:px[s]||0}))
                       .filter(p=>p.entry>0);
       const missing=syms.filter(s=>!px[s]);
@@ -2968,7 +2985,7 @@ function ForwardTest({ onClose }) {
       const run={ id:"fw_"+Date.now(),
         label: label.trim() || ("Run of "+new Date().toISOString().slice(0,10)),
         started:new Date().toISOString().slice(0,10),
-        benchEntry: px[BENCH]||0,
+        benchEntry: px[benchFor(market)]||0, market:market,
         picks, missing };
       await persist([run,...runs]);
       setPaste(""); setLabel("");
@@ -2982,9 +2999,9 @@ function ForwardTest({ onClose }) {
   const refresh=async(run)=>{
     setBusy("r"+run.id); setMsg("");
     try{
-      const px=await fetchPrices(run.picks.map(p=>p.sym).concat([BENCH]));
+      const px=await fetchPrices(run.picks.map(p=>p.sym).concat([benchFor(run.market||"INDIA")]),run.market||"INDIA");
       const picks=run.picks.map(p=>({...p, now: px[p.sym]||p.now||0}));
-      const updated={...run, picks, benchNow: px[BENCH]||run.benchNow||0,
+      const updated={...run, picks, benchNow: px[benchFor(run.market||"INDIA")]||run.benchNow||0,
         checked:new Date().toISOString().slice(0,10)};
       await persist(runs.map(x=>x.id===run.id?updated:x));
       setMsg("✓ Updated");
@@ -3030,6 +3047,13 @@ function ForwardTest({ onClose }) {
           never touched again. No money is involved — this only measures whether the
           picks were any good.
         </div>
+        <div style={{display:"flex",gap:6,marginBottom:8}}>
+          {[["INDIA","🇮🇳 India"],["USA","🇺🇸 USA"]].map(([k,l])=>
+            <button key={k} onClick={()=>setMarket(k)}
+              style={{flex:1,padding:"8px",borderRadius:8,border:"none",
+              background:market===k?"#1a5a3a":"#eef2ec",
+              color:market===k?"#fff":"#5a7a5a",fontWeight:700,fontSize:12.5,cursor:"pointer"}}>{l}</button>)}
+        </div>
         <input value={label} onChange={e=>setLabel(e.target.value)}
           placeholder="name it, e.g. Nifty 100 top 20" style={inp}/>
         <textarea value={paste} onChange={e=>setPaste(e.target.value)} rows={4}
@@ -3054,7 +3078,7 @@ function ForwardTest({ onClose }) {
             <span style={{fontSize:10.5,color:"#999"}}>frozen {run.started}</span>
           </div>
           <div style={{fontSize:11,color:"#8a9a8a",marginBottom:9}}>
-            {run.picks.length} picks{st?(" · "+st.days+" days elapsed"):""}</div>
+            {run.picks.length} picks · {(run.market||"INDIA")==="USA"?"USA":"India"}{st?(" · "+st.days+" days elapsed"):""}</div>
 
           {!st||!st.rets.some(r=>r.pct!==0)
             ? <div style={{fontSize:11.5,color:"#8a8a80",marginBottom:8}}>
@@ -3069,7 +3093,7 @@ function ForwardTest({ onClose }) {
                   </div>
                   {st.bench!==null&&<div style={{display:"flex",justifyContent:"space-between",
                     fontSize:12.5,marginTop:3}}>
-                    <span style={{color:"#5a6a5a"}}>Nifty 50 over the same days</span>
+                    <span style={{color:"#5a6a5a"}}>{benchName(run.market||"INDIA")} over the same days</span>
                     <b style={{color:st.bench>=0?"#1a7a3a":"#c0392b"}}>
                       {st.bench>=0?"+":""}{st.bench.toFixed(1)}%</b>
                   </div>}
