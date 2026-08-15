@@ -12631,7 +12631,7 @@ function AIMScreener({ book }) {
     "IOT","PATH","AI","BBAI","SOUN","INOD","VERI","DUOL","COUR","CHGG"];
 
   // ── metrics from a daily close series ──────────────────────────────────────
-  const metrics=(closes,vols)=>{
+  const metrics=(closes,vols,sym)=>{
     const n=closes.length;
     const ltp=closes[n-1];
     const win=closes.slice(Math.max(0,n-250));
@@ -12757,9 +12757,52 @@ function AIMScreener({ book }) {
     const ret1y=n>=250&&closes[n-250]>0?(ltp-closes[n-250])/closes[n-250]*100:null;
     const ret3m=n>=63&&closes[n-63]>0?(ltp-closes[n-63])/closes[n-63]*100:null;
 
+    // ── would RK actually have beaten simply holding? ───────────────────────
+    // Every other measure here describes the stock. This one runs the method
+    // over its own history and compares the result against doing nothing —
+    // which is the only question that decides whether the stock belongs in
+    // this book at all. Union Bank scored four out of four on description and
+    // still lost heavily to holding, because it trended rather than oscillated.
+    const simulateEdge=()=>{
+      if(n<250) return null;
+      const start=Math.max(0,n-500);          // about two years
+      const px0=closes[start];
+      if(!(px0>0)) return null;
+      const CAPITAL=100000;
+      // The method as it is actually run: 70% deployed, 30% held back,
+      // reviewed monthly, 10% safe zone either side of Portfolio Control.
+      let units=CAPITAL*0.7/px0;
+      let cash=CAPITAL*0.3;
+      let pc=CAPITAL*0.7;
+      let trades=0;
+      for(let i=start+21;i<n;i+=21){
+        const p=closes[i];
+        if(!(p>0)) continue;
+        const mv=units*p, safe=0.10*mv;
+        if(pc-mv>safe){
+          const want=Math.min(pc-mv-safe,cash);
+          if(want>p){ units+=want/p; cash-=want; pc+=want*0.5; trades++; }
+        } else if(mv-pc>safe){
+          const give=mv-pc-safe;
+          if(give>p){ units-=give/p; cash+=give; trades++; }
+        }
+      }
+      const last=closes[n-1];
+      const rk=units*last+cash;
+      const hold=CAPITAL/px0*last;
+      if(!(hold>0)) return null;
+      return { edgePct:(rk-hold)/hold*100, rkRet:(rk-CAPITAL)/CAPITAL*100,
+               holdRet:(hold-CAPITAL)/CAPITAL*100, trades };
+    };
+    const edge=simulateEdge();
+
+    // Series that the exchange has put under surveillance. Market orders are
+    // refused on these and settlement is trade-to-trade.
+    const t2t=/-BE$|-BZ$|-IL$|-SM$|-ST$/i.test(String(sym||""));
+
     return {ltp,hi,lo,drawdown,posPct,volAnn,ma200,maRising,bouncePct,ddCount:total,turn,bars:n,
             vol60,volRatio,oscPerYear,avgMove,upDays,worstDay,bestDay,maxDD,sinceHigh,
-            turnCV,ret1y,ret3m};
+            turnCV,ret1y,ret3m,edge,t2t};
   };
 
   // ── STAGE 1 GATE — runs before any score is computed ───────────────────────
@@ -12777,6 +12820,25 @@ function AIMScreener({ book }) {
     if(m.drawdown>40) return "more than 40% below high";
     if(m.volAnn<10) return "too little volatility";
     if(m.volAnn>90) return "volatility beyond sane range";
+
+    // A bounce-back rate computed from one or two falls is an anecdote, not a
+    // statistic — and it carries a quarter of the score. SHK showed "0%
+    // recovered (1)", which says nothing at all.
+    if(m.ddCount<3) return "only "+m.ddCount+" drawdown"+(m.ddCount===1?"":"s")+" seen — too few to judge recovery";
+
+    // Trade-to-trade and surveillance series refuse market orders and settle
+    // differently. Better to know before an order sheet is printed.
+    if(m.t2t) return "trade-to-trade series — market orders refused";
+
+    // A stock whose worst day is a chasm is jumping, not oscillating. A limit
+    // order does not fill in a gap; the price is simply elsewhere next morning.
+    if(m.worstDay>15) return "gapped "+m.worstDay.toFixed(0)+"% in a single day";
+
+    // And the question that matters: over its own history, did the method beat
+    // doing nothing? A stock that only trends is one RK sells all the way up.
+    if(m.edge&&m.edge.edgePct<-25)
+      return "holding beat RK by "+Math.abs(m.edge.edgePct).toFixed(0)+"% here — it trends rather than oscillates";
+
     return null;                            // null means it passed
   };
 
@@ -12868,11 +12930,24 @@ function AIMScreener({ book }) {
     return clamp(s);
   };
 
+  // 5. EDGE — the only scorer that runs the method rather than describing the
+  // stock. Everything else says what the price has done; this says what RK
+  // would have made of it against simply holding.
+  const scoreEdge=(m)=>{
+    if(!m.edge) return 50;                        // not enough history to judge
+    const e=m.edge.edgePct;
+    if(e<=-30) return 0;
+    if(e<0)    return (e+30)/30*45;               // behind holding
+    if(e<=25)  return 45+e/25*45;                 // ahead, comfortably
+    return Math.min(100,90+(e-25)/25*10);
+  };
+
   const SCORERS=[
     {key:"move", label:"Movement",     fn:scoreMovement},
     {key:"osc",  label:"Oscillation",  fn:scoreOscillation},
     {key:"rec",  label:"Recovery",     fn:scoreRecovery},
-    {key:"trade",label:"Tradeable",    fn:scoreTradeable}
+    {key:"trade",label:"Tradeable",    fn:scoreTradeable},
+    {key:"edge", label:"Beats holding",fn:scoreEdge}
   ];
 
   // Convert each scorer's raw numbers into a rank percentile across the whole
@@ -12896,7 +12971,7 @@ function AIMScreener({ book }) {
       const varr=arr.reduce((a,b)=>a+(b-mean)*(b-mean),0)/arr.length;
       const spread=Math.sqrt(varr);
       // how many scorers put it in the top third
-      const votes=arr.filter(x=>x>=66.7).length;
+      const votes=arr.filter(x=>x>=66.7).length;   // out of SCORERS.length
       // agreement: high mean, low disagreement
       const agree=clamp(mean-spread*0.9);
       return {...r, ens:{parts:p, mean:Math.round(mean*10)/10,
@@ -12970,7 +13045,7 @@ function AIMScreener({ book }) {
       out.forEach(({s,d})=>{
         done++;
         if(!d||d.closes.length<60) return;
-        const m=metrics(d.closes,d.vols);
+        const m=metrics(d.closes,d.vols,s);
         const fail=gate(m);
         if(fail){ gated++; reasons[fail]=(reasons[fail]||0)+1; return; }
         const f=(fund&&fund.stocks[s])||null;
@@ -12987,6 +13062,13 @@ function AIMScreener({ book }) {
     const ranked=ensembleRank(keep);
     const single={}; keep.forEach((r,i)=>single[r.sym]=i+1);
     ranked.forEach((r,i)=>{ r.ens.rank=i+1; r.ens.singleRank=single[r.sym]; });
+    if(mode==="edge"){
+      const withEns=keep.map(r=>{
+        const e=ranked.find(x=>x.sym===r.sym); return e?{...r,ens:e.ens}:r; });
+      withEns.sort((a,b)=>((b.m&&b.m.edge?b.m.edge.edgePct:-999))-((a.m&&a.m.edge?a.m.edge.edgePct:-999)));
+      setRows(withEns);
+      setRunning(false); setNote(""); return;
+    }
     setRows(mode==="ensemble"?ranked:keep.map(r=>{
       const e=ranked.find(x=>x.sym===r.sym); return e?{...r,ens:e.ens}:r;
     }));
@@ -12998,7 +13080,8 @@ function AIMScreener({ book }) {
   const csv=()=>{
     if(!rows||!rows.length) return;
     let s="Rank,Symbol,LTP,PctBelow52wHigh,PosInRange,AnnVolPct,BounceBackPct,DrawdownsSeen,TurnoverCr,Above200DMA,MarketCapCr,ROE,DebtEquity,OPM,PledgePct,Score,"+
-      "Movement,Oscillation,Recovery,Tradeable,Agreement,Spread,Votes,SingleRank\n";
+      "Movement,Oscillation,Recovery,Tradeable,BeatsHolding,Agreement,Spread,Votes,SingleRank,"+
+      "EdgeVsHoldPct,RKReturnPct,HoldReturnPct,SimTrades\n";
     rows.forEach((r,i)=>{
       s+=[i+1,r.sym,r.ltp.toFixed(2),r.drawdown.toFixed(1),r.posPct.toFixed(1),r.volAnn.toFixed(1),
           r.bouncePct===null?"":r.bouncePct.toFixed(0),r.ddCount,r.turn===null?"":r.turn.toFixed(2),
@@ -13008,7 +13091,13 @@ function AIMScreener({ book }) {
           r.ens?Math.round(r.ens.parts.move||0):"", r.ens?Math.round(r.ens.parts.osc||0):"",
           r.ens?Math.round(r.ens.parts.rec||0):"", r.ens?Math.round(r.ens.parts.trade||0):"",
           r.ens?r.ens.agree:"", r.ens?r.ens.spread:"", r.ens?r.ens.votes:"",
-          r.ens?r.ens.singleRank:""].join(",")+"\n";
+          r.ens?Math.round(r.ens.parts.edge||0):"",
+          r.ens?r.ens.agree:"", r.ens?r.ens.spread:"", r.ens?r.ens.votes:"",
+          r.ens?r.ens.singleRank:"",
+          r.m&&r.m.edge?r.m.edge.edgePct.toFixed(1):"",
+          r.m&&r.m.edge?r.m.edge.rkRet.toFixed(1):"",
+          r.m&&r.m.edge?r.m.edge.holdRet.toFixed(1):"",
+          r.m&&r.m.edge?r.m.edge.trades:""].join(",")+"\n";
     });
     const a=document.createElement("a");
     a.href=URL.createObjectURL(new Blob([s],{type:"text/csv"}));
@@ -13118,18 +13207,25 @@ function AIMScreener({ book }) {
       </div>}
 
       <div style={{display:"flex",gap:6,marginBottom:9}}>
-        {[["single","One formula"],["ensemble","Four scorers, by agreement"]].map(([k,l])=>
+        {[["single","One formula"],["ensemble","Five scorers, by agreement"],["edge","Beats holding first"]].map(([k,l])=>
           <button key={k} onClick={()=>setMode(k)} style={{flex:1,padding:"9px 8px",borderRadius:8,
             border:"none",background:mode===k?"#5a3a1a":"#f0f0ec",
             color:mode===k?"#fff":"#6a6a60",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>{l}</button>)}
       </div>
+      {mode==="edge"&&<div style={{fontSize:10.5,color:"#8a8a70",marginBottom:9,lineHeight:1.5,
+        background:"#f4f8f4",border:"1px solid #d8e4d8",borderRadius:8,padding:"8px 10px"}}>
+        Ordered purely by how far RK would have beaten simply holding, over the same two years,
+        with the method run as you actually run it — 70% deployed, reviewed monthly, a 10% safe
+        zone. This is the honest test. Union Bank scored four out of four on every descriptive
+        measure and still lost heavily to holding, because it trended instead of oscillating.
+      </div>}
+
       {mode==="ensemble"&&<div style={{fontSize:10.5,color:"#8a8a70",marginBottom:9,lineHeight:1.5,
         background:"#fbfaf6",border:"1px solid #ece8dc",borderRadius:8,padding:"8px 10px"}}>
-        Four scorers look at different things — movement, oscillation, recovery, and whether an
-        order can actually fill — and rank the list separately. What counts is where they agree.
-        A stock all four rate highly is a different thing from one that averages well because a
-        single scorer liked it. This makes the ranking harder to be wrong about for one reason;
-        it does not make it predictive.
+        Five scorers look at different things — movement, oscillation, recovery, whether an order
+        can actually fill, and whether the method would have beaten simply holding — then rank the
+        list separately. What counts is where they agree. This makes the ranking harder to be
+        wrong about for one reason; it does not make it predictive.
       </div>}
 
       {!running
@@ -13155,12 +13251,21 @@ function AIMScreener({ book }) {
             <span style={{fontSize:11,color:"#888",marginLeft:6}}>Rs.{r.ltp.toFixed(0)}</span></div>
           {mode==="ensemble"&&r.ens
             ? <div style={{textAlign:"right"}}>
-                <b style={{fontSize:14,color:r.ens.votes>=3?"#1a5a3a":"#8a6a2a"}}>
+                <b style={{fontSize:14,color:r.ens.votes>=4?"#1a5a3a":"#8a6a2a"}}>
                   {Math.round(r.ens.agree)}</b>
-                <div style={{fontSize:9,color:"#9a9a8a"}}>{r.ens.votes}/4 agree</div>
+                <div style={{fontSize:9,color:"#9a9a8a"}}>{r.ens.votes}/{SCORERS.length} agree</div>
               </div>
-            : <b style={{fontSize:14,color:"#5a3a1a"}}>{Math.round(r.score)}</b>}
+            : mode==="edge"&&r.m&&r.m.edge
+              ? <div style={{textAlign:"right"}}>
+                  <b style={{fontSize:14,color:r.m.edge.edgePct>=0?"#1a7a3a":"#c0392b"}}>
+                    {r.m.edge.edgePct>=0?"+":""}{r.m.edge.edgePct.toFixed(0)}%</b>
+                  <div style={{fontSize:9,color:"#9a9a8a"}}>vs holding</div>
+                </div>
+              : <b style={{fontSize:14,color:"#5a3a1a"}}>{Math.round(r.score)}</b>}
         </div>
+        {mode==="edge"&&r.m&&r.m.edge&&<div style={{fontSize:10.5,color:"#8a8a80",marginTop:4}}>
+          RK {r.m.edge.rkRet.toFixed(0)}% · holding {r.m.edge.holdRet.toFixed(0)}% · {r.m.edge.trades} trades
+        </div>}
 
         {mode==="ensemble"&&r.ens&&<div style={{marginTop:6}}>
           {SCORERS.map(sc=>{
@@ -13175,6 +13280,14 @@ function AIMScreener({ book }) {
               <span style={{fontSize:9.5,color:"#9a9a8a",width:22,textAlign:"right"}}>{Math.round(p)}</span>
             </div>;
           })}
+          {r.m&&r.m.edge&&<div style={{fontSize:10,marginTop:4,fontWeight:700,
+            color:r.m.edge.edgePct>=0?"#1a7a3a":"#c0392b"}}>
+            {r.m.edge.edgePct>=0
+              ? "RK beat holding by "+r.m.edge.edgePct.toFixed(0)+"% over two years"
+              : "holding beat RK by "+Math.abs(r.m.edge.edgePct).toFixed(0)+"% over two years"}
+            <span style={{fontWeight:400,color:"#9a9a8a"}}>
+              {" · "+r.m.edge.rkRet.toFixed(0)+"% vs "+r.m.edge.holdRet.toFixed(0)+"%, "+r.m.edge.trades+" trades"}</span>
+          </div>}
           <div style={{fontSize:9.5,color:"#9a9a8a",marginTop:3}}>
             {r.ens.spread<12
               ? "the four broadly agree"
