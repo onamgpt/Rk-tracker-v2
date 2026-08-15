@@ -12796,13 +12796,55 @@ function AIMScreener({ book }) {
     };
     const edge=simulateEdge();
 
+    // ── is this share STRUCTURALLY suited, or did it just suit one window? ──
+    // A single edge figure can be luck. These measure the property itself.
+
+    // Run the method over four independent stretches. A share that suits the
+    // method wins in most of them; one that won by luck wins in one.
+    const edgeIn=(from,to)=>{
+      if(to-from<80) return null;
+      const p0=closes[from]; if(!(p0>0)) return null;
+      let u=70/p0, cash=30, pc=70;
+      for(let i=from+21;i<to;i+=21){
+        const p=closes[i]; if(!(p>0)) continue;
+        const mv=u*p, safe=0.10*mv;
+        if(pc-mv>safe){ const w=Math.min(pc-mv-safe,cash); if(w>p*0.0001){u+=w/p;cash-=w;pc+=w*0.5;} }
+        else if(mv-pc>safe){ const g=mv-pc-safe; if(g>p*0.0001){u-=g/p;cash+=g;} }
+      }
+      const last=closes[to-1];
+      const rk=u*last+cash, hold=100/p0*last;
+      return hold>0?(rk-hold)/hold*100:null;
+    };
+    let winRate=null, edgeSpread=null, edgesArr=[];
+    if(n>=400){
+      const w=Math.floor(n/4);
+      for(let k=0;k<4;k++){
+        const e=edgeIn(k*w,(k+1)*w);
+        if(e!==null) edgesArr.push(e);
+      }
+      if(edgesArr.length>=3){
+        winRate=edgesArr.filter(x=>x>0).length/edgesArr.length*100;
+        const mu=edgesArr.reduce((a,b)=>a+b,0)/edgesArr.length;
+        edgeSpread=Math.sqrt(edgesArr.reduce((a,b)=>a+(b-mu)*(b-mu),0)/edgesArr.length);
+      }
+    }
+
+    // How much of the move is drift and how much is swing. A share that ends
+    // where it started but travelled a long way is the ideal shape.
+    const travelled=(()=>{
+      let path=0;
+      for(let i=1;i<n;i++) if(closes[i-1]>0) path+=Math.abs(closes[i]-closes[i-1])/closes[i-1];
+      const net=Math.abs(closes[n-1]-closes[0])/closes[0];
+      return net>0?path/net:null;      // high = lots of movement, little net drift
+    })();
+
     // Series that the exchange has put under surveillance. Market orders are
     // refused on these and settlement is trade-to-trade.
     const t2t=/-BE$|-BZ$|-IL$|-SM$|-ST$/i.test(String(sym||""));
 
     return {ltp,hi,lo,drawdown,posPct,volAnn,ma200,maRising,bouncePct,ddCount:total,turn,bars:n,
             vol60,volRatio,oscPerYear,avgMove,upDays,worstDay,bestDay,maxDD,sinceHigh,
-            turnCV,ret1y,ret3m,edge,t2t};
+            turnCV,ret1y,ret3m,edge,t2t,winRate,edgeSpread,edges:edgesArr,travelled};
   };
 
   // ── STAGE 1 GATE — runs before any score is computed ───────────────────────
@@ -12836,6 +12878,10 @@ function AIMScreener({ book }) {
 
     // And the question that matters: over its own history, did the method beat
     // doing nothing? A stock that only trends is one RK sells all the way up.
+    // Winning in one stretch out of four is luck, not fit.
+    if(m.winRate!==null&&m.winRate!==undefined&&m.winRate<50)
+      return "beat holding in only "+Math.round(m.winRate/25)+" of 4 stretches — suited by luck, not structure";
+
     if(m.edge&&m.edge.edgePct<-25)
       return "holding beat RK by "+Math.abs(m.edge.edgePct).toFixed(0)+"% here — it trends rather than oscillates";
 
@@ -12947,7 +12993,23 @@ function AIMScreener({ book }) {
     {key:"osc",  label:"Oscillation",  fn:scoreOscillation},
     {key:"rec",  label:"Recovery",     fn:scoreRecovery},
     {key:"trade",label:"Tradeable",    fn:scoreTradeable},
-    {key:"edge", label:"Beats holding",fn:scoreEdge}
+    {key:"edge", label:"Beats holding",fn:scoreEdge},
+    {key:"fit",  label:"Suited, not lucky", fn:(m)=>{
+      // Two things separate a share that suits the method from one that
+      // happened to suit a particular two years: it wins across independent
+      // stretches, and it travels far without going anywhere.
+      let s=50;
+      if(m.winRate!==null&&m.winRate!==undefined){
+        s = m.winRate;                                  // 0, 33, 67 or 100
+        if(m.edgeSpread!==null) s=clamp(s-m.edgeSpread*0.6);  // erratic is worse
+      }
+      const t=m.travelled;
+      if(t!==null&&t!==undefined){
+        const tScore = t>900 ? 95 : clamp(t<1.5?0:(t<12?(t-1.5)/10.5*100:100));
+        s = s*0.6 + tScore*0.4;
+      }
+      return clamp(s);
+    }}
   ];
 
   // Convert each scorer's raw numbers into a rank percentile across the whole
@@ -13080,8 +13142,8 @@ function AIMScreener({ book }) {
   const csv=()=>{
     if(!rows||!rows.length) return;
     let s="Rank,Symbol,LTP,PctBelow52wHigh,PosInRange,AnnVolPct,BounceBackPct,DrawdownsSeen,TurnoverCr,Above200DMA,MarketCapCr,ROE,DebtEquity,OPM,PledgePct,Score,"+
-      "Movement,Oscillation,Recovery,Tradeable,BeatsHolding,Agreement,Spread,Votes,SingleRank,"+
-      "EdgeVsHoldPct,RKReturnPct,HoldReturnPct,SimTrades\n";
+      "Movement,Oscillation,Recovery,Tradeable,BeatsHolding,SuitedNotLucky,Agreement,Spread,Votes,SingleRank,"+
+      "EdgeVsHoldPct,RKReturnPct,HoldReturnPct,SimTrades,WinRatePct,EdgeSpread,TravelRatio\n";
     rows.forEach((r,i)=>{
       s+=[i+1,r.sym,r.ltp.toFixed(2),r.drawdown.toFixed(1),r.posPct.toFixed(1),r.volAnn.toFixed(1),
           r.bouncePct===null?"":r.bouncePct.toFixed(0),r.ddCount,r.turn===null?"":r.turn.toFixed(2),
@@ -13090,13 +13152,16 @@ function AIMScreener({ book }) {
           Math.round(r.score),
           r.ens?Math.round(r.ens.parts.move||0):"", r.ens?Math.round(r.ens.parts.osc||0):"",
           r.ens?Math.round(r.ens.parts.rec||0):"", r.ens?Math.round(r.ens.parts.trade||0):"",
-          r.ens?Math.round(r.ens.parts.edge||0):"",
+          r.ens?Math.round(r.ens.parts.edge||0):"", r.ens?Math.round(r.ens.parts.fit||0):"",
           r.ens?r.ens.agree:"", r.ens?r.ens.spread:"", r.ens?r.ens.votes:"",
           r.ens?r.ens.singleRank:"",
           r.m&&r.m.edge?r.m.edge.edgePct.toFixed(1):"",
           r.m&&r.m.edge?r.m.edge.rkRet.toFixed(1):"",
           r.m&&r.m.edge?r.m.edge.holdRet.toFixed(1):"",
-          r.m&&r.m.edge?r.m.edge.trades:""].join(",")+"\n";
+          r.m&&r.m.edge?r.m.edge.trades:"",
+          r.m&&r.m.winRate!=null?r.m.winRate.toFixed(0):"",
+          r.m&&r.m.edgeSpread!=null?r.m.edgeSpread.toFixed(1):"",
+          r.m&&r.m.travelled!=null?(r.m.travelled>900?"999":r.m.travelled.toFixed(1)):""].join(",")+"\n";
     });
     const a=document.createElement("a");
     a.href=URL.createObjectURL(new Blob([s],{type:"text/csv"}));
@@ -13206,7 +13271,7 @@ function AIMScreener({ book }) {
       </div>}
 
       <div style={{display:"flex",gap:6,marginBottom:9}}>
-        {[["single","One formula"],["ensemble","Five scorers, by agreement"],["edge","Beats holding first"]].map(([k,l])=>
+        {[["single","One formula"],["ensemble","Six scorers, by agreement"],["edge","Beats holding first"]].map(([k,l])=>
           <button key={k} onClick={()=>setMode(k)} style={{flex:1,padding:"9px 8px",borderRadius:8,
             border:"none",background:mode===k?"#5a3a1a":"#f0f0ec",
             color:mode===k?"#fff":"#6a6a60",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>{l}</button>)}
@@ -13279,6 +13344,13 @@ function AIMScreener({ book }) {
               <span style={{fontSize:9.5,color:"#9a9a8a",width:22,textAlign:"right"}}>{Math.round(p)}</span>
             </div>;
           })}
+          {r.m&&(r.m.winRate!==null&&r.m.winRate!==undefined)&&
+            <div style={{fontSize:10,marginTop:3,color:r.m.winRate>=67?"#1a5a3a":"#a0661a"}}>
+              beat holding in {Math.round(r.m.winRate/25)} of 4 separate stretches
+              {r.m.travelled!==null&&r.m.travelled!==undefined&&r.m.travelled<900
+                ? " · travels "+r.m.travelled.toFixed(1)+"x its net move"
+                : " · travels a long way, goes nowhere"}
+            </div>}
           {r.m&&r.m.edge&&<div style={{fontSize:10,marginTop:4,fontWeight:700,
             color:r.m.edge.edgePct>=0?"#1a7a3a":"#c0392b"}}>
             {r.m.edge.edgePct>=0
