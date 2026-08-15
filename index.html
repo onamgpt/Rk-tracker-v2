@@ -12498,6 +12498,7 @@ function AIMBacktest() {
 function AIMScreener({ book }) {
   const isUS = book==="USA";
   const [universe,setUniverse]=useState(isUS?"sp100":"nifty");
+  const [mode,setMode]=useState("single");   // single | ensemble
   const cur = isUS ? "$" : "₹";
   const [watch,setWatch]=useState([]);
   const [watchPaste,setWatchPaste]=useState("");
@@ -12685,7 +12686,80 @@ function AIMScreener({ book }) {
       if(cc) turn=(t/cc)/1e7;               // rupees -> crore
     }
 
-    return {ltp,hi,lo,drawdown,posPct,volAnn,ma200,maRising,bouncePct,ddCount:total,turn,bars:n};
+    // ── extra measures, for the ensemble ────────────────────────────────────
+    // The single formula reuses the same few facts under different names, so
+    // its four "votes" largely agree by construction. These are chosen to be
+    // as independent of each other as the price series allows.
+
+    // Volatility of the recent quarter against the year: is it waking up or
+    // settling down? A stock whose movement is expanding gives RK more to work.
+    const volWindow=(arr)=>{
+      let a=0,b=0,k=0;
+      for(let i=1;i<arr.length;i++){ if(arr[i-1]>0){ const r=(arr[i]-arr[i-1])/arr[i-1]; a+=r; b+=r*r; k++; } }
+      const m2=k?a/k:0;
+      return k>1?Math.sqrt(Math.max(0,b/k-m2*m2))*Math.sqrt(252)*100:0;
+    };
+    const vol60=volWindow(closes.slice(Math.max(0,n-60)));
+    const volRatio=volAnn>0?vol60/volAnn:1;
+
+    // How often the price crosses its own 50-day mean. Genuine oscillation
+    // shows up here; a stock that trends in one line does not.
+    let crosses=0, above=null;
+    if(n>=60){
+      for(let i=n-200<50?50:n-200;i<n;i++){
+        let sum=0; for(let j=i-49;j<=i;j++) sum+=closes[j];
+        const ma=sum/50;
+        const nowAbove=closes[i]>=ma;
+        if(above!==null&&nowAbove!==above) crosses++;
+        above=nowAbove;
+      }
+    }
+    const oscPerYear=n>0?crosses*(252/Math.min(n,200)):0;
+
+    // Typical size of a daily move, and how lopsided the distribution is.
+    // A stock that falls in steps and rises in steps suits accumulation;
+    // one that gaps violently does not.
+    let absSum=0,absK=0,up=0,dn=0,maxUp=0,maxDn=0;
+    for(let i=1;i<n;i++){
+      if(closes[i-1]>0){
+        const r=(closes[i]-closes[i-1])/closes[i-1];
+        absSum+=Math.abs(r); absK++;
+        if(r>0){ up++; if(r>maxUp) maxUp=r; } else if(r<0){ dn++; if(r<maxDn) maxDn=r; }
+      }
+    }
+    const avgMove=absK?absSum/absK*100:0;
+    const upDays=(up+dn)>0?up/(up+dn)*100:50;
+    const worstDay=Math.abs(maxDn)*100;
+    const bestDay=maxUp*100;
+
+    // Deepest fall over the window, and how long it has taken to come back.
+    let mPeak=closes[0], maxDD=0, sinceHigh=0;
+    for(let i=1;i<n;i++){
+      if(closes[i]>mPeak){ mPeak=closes[i]; sinceHigh=0; } else sinceHigh++;
+      const d=(mPeak-closes[i])/mPeak*100;
+      if(d>maxDD) maxDD=d;
+    }
+
+    // Turnover steadiness — thin days are where a limit order sits unfilled.
+    let turnCV=null;
+    if(vols&&vols.length>=20){
+      const k=Math.min(60,vols.length);
+      const arr=[];
+      for(let i=vols.length-k;i<vols.length;i++) if(vols[i]&&closes[i]) arr.push(vols[i]*closes[i]);
+      if(arr.length>5){
+        const m3=arr.reduce((a,b)=>a+b,0)/arr.length;
+        const v3=arr.reduce((a,b)=>a+(b-m3)*(b-m3),0)/arr.length;
+        turnCV=m3>0?Math.sqrt(v3)/m3:null;
+      }
+    }
+
+    // Return over one year, and over the last quarter.
+    const ret1y=n>=250&&closes[n-250]>0?(ltp-closes[n-250])/closes[n-250]*100:null;
+    const ret3m=n>=63&&closes[n-63]>0?(ltp-closes[n-63])/closes[n-63]*100:null;
+
+    return {ltp,hi,lo,drawdown,posPct,volAnn,ma200,maRising,bouncePct,ddCount:total,turn,bars:n,
+            vol60,volRatio,oscPerYear,avgMove,upDays,worstDay,bestDay,maxDD,sinceHigh,
+            turnCV,ret1y,ret3m};
   };
 
   // ── STAGE 1 GATE — runs before any score is computed ───────────────────────
@@ -12731,6 +12805,103 @@ function AIMScreener({ book }) {
     // manual weights: volatility 30, bounce-back 25, trend 20, plus the
     // drawdown band at 25 — without it the list ranks stocks at their highs first.
     return v*0.30+b*0.25+t*0.20+bandScore(m.drawdown)*0.25;
+  };
+
+  // ── ENSEMBLE ───────────────────────────────────────────────────────────────
+  // Four scorers that look at genuinely different things, ranked separately.
+  // What matters is not the average but the agreement: a stock every scorer
+  // rates highly is a different proposition from one that averages well
+  // because a single scorer loved it. Disagreement is information — it says
+  // the setup is ambiguous, and those are the ones to leave alone.
+  //
+  // This makes the ranking harder to be wrong about for one reason. It does
+  // not make it predictive, and it is not meant to.
+  const clamp=(x)=>Math.max(0,Math.min(100,x));
+
+  // 1. MOVEMENT — is there enough oscillation to harvest, and is it awake?
+  const scoreMovement=(m)=>{
+    let s=0;
+    // annualised volatility, best around 25-45
+    if(m.volAnn<15) s+=m.volAnn/15*30;
+    else if(m.volAnn<25) s+=30+(m.volAnn-15)/10*50;
+    else if(m.volAnn<=45) s+=80;
+    else s+=Math.max(0,80-(m.volAnn-45)*2.5);
+    // recent quarter livelier than the year is a plus, much quieter a minus
+    const vr=m.volRatio||1;
+    s+= vr>=0.9&&vr<=1.6 ? 20 : (vr>1.6 ? 10 : Math.max(0,20-(0.9-vr)*40));
+    return clamp(s);
+  };
+
+  // 2. OSCILLATION — does it actually cross its own mean, or just trend?
+  const scoreOscillation=(m)=>{
+    const x=m.oscPerYear||0;
+    // roughly 6-20 crossings a year is a stock that swings around a centre
+    let s = x<3 ? x/3*35 : (x<=20 ? 35+ (Math.min(x,12)-3)/9*65 : Math.max(35,100-(x-20)*3));
+    // a daily move that is neither trivial nor violent
+    const a=m.avgMove||0;
+    s = s*0.75 + clamp(a<0.6?a/0.6*50:(a<=3?50+(a-0.6)/2.4*50:Math.max(0,100-(a-3)*25)))*0.25;
+    return clamp(s);
+  };
+
+  // 3. RECOVERY — when it falls, does it come back, and how brutally does it fall?
+  const scoreRecovery=(m)=>{
+    let s=(m.bouncePct===null?45:m.bouncePct)*0.55;
+    // deepest fall in the window: some is necessary, too much is a broken story
+    const d=m.maxDD||0;
+    s += clamp(d<8?d/8*40:(d<=35?100-(d-8)/27*30:Math.max(0,70-(d-35)*3)))*0.25;
+    // a savage single day suggests gap risk rather than oscillation
+    const w=m.worstDay||0;
+    s += clamp(w<4?100:(w<10?100-(w-4)*10:Math.max(0,40-(w-10)*5)))*0.20;
+    return clamp(s);
+  };
+
+  // 4. TRADEABILITY — can an order actually fill, on any day, at a fair price?
+  const scoreTradeable=(m)=>{
+    let s=0;
+    const t=m.turn===null?5:m.turn;
+    s += clamp(t<2?t/2*30:(t<50?30+(t-2)/48*70:100))*0.5;
+    // steady turnover beats spiky turnover
+    const cv=m.turnCV;
+    s += clamp(cv===null?55:(cv<0.6?100:(cv<1.5?100-(cv-0.6)*60:Math.max(0,45-(cv-1.5)*30))))*0.3;
+    // and a price that is not so low that ticks dominate
+    s += clamp(m.ltp<20?20:(m.ltp<100?60:100))*0.2;
+    return clamp(s);
+  };
+
+  const SCORERS=[
+    {key:"move", label:"Movement",     fn:scoreMovement},
+    {key:"osc",  label:"Oscillation",  fn:scoreOscillation},
+    {key:"rec",  label:"Recovery",     fn:scoreRecovery},
+    {key:"trade",label:"Tradeable",    fn:scoreTradeable}
+  ];
+
+  // Convert each scorer's raw numbers into a rank percentile across the whole
+  // surviving list, so the four are comparable however differently they score.
+  const ensembleRank=(rows)=>{
+    const pct={};
+    SCORERS.forEach(sc=>{
+      const vals=rows.map(r=>({sym:r.sym, v:sc.fn(r.m)}))
+                     .sort((a,b)=>a.v-b.v);
+      const n=vals.length;
+      vals.forEach((x,i)=>{
+        pct[x.sym]=pct[x.sym]||{};
+        pct[x.sym][sc.key]= n>1 ? (i/(n-1))*100 : 50;
+      });
+    });
+
+    return rows.map(r=>{
+      const p=pct[r.sym]||{};
+      const arr=SCORERS.map(sc=>p[sc.key]===undefined?50:p[sc.key]);
+      const mean=arr.reduce((a,b)=>a+b,0)/arr.length;
+      const varr=arr.reduce((a,b)=>a+(b-mean)*(b-mean),0)/arr.length;
+      const spread=Math.sqrt(varr);
+      // how many scorers put it in the top third
+      const votes=arr.filter(x=>x>=66.7).length;
+      // agreement: high mean, low disagreement
+      const agree=clamp(mean-spread*0.9);
+      return {...r, ens:{parts:p, mean:Math.round(mean*10)/10,
+        spread:Math.round(spread*10)/10, votes, agree:Math.round(agree*10)/10}};
+    }).sort((a,b)=>b.ens.agree-a.ens.agree);
   };
 
   // Indian tickers need the .NS suffix on Yahoo; American ones must not have it.
@@ -12803,14 +12974,22 @@ function AIMScreener({ book }) {
         const fail=gate(m);
         if(fail){ gated++; reasons[fail]=(reasons[fail]||0)+1; return; }
         const f=(fund&&fund.stocks[s])||null;
-        keep.push(Object.assign({sym:s},m,{score:score(m),f:f}));
+        keep.push(Object.assign({sym:s},m,{score:score(m),f:f,m:m}));
       });
       setProg({done,total,kept:keep.length,gated});
       await new Promise(r=>setTimeout(r,220));
     }
 
+    // Rank by the single formula, then run the ensemble alongside it. Both
+    // orderings are kept so they can be compared rather than one replacing
+    // the other — that comparison is the point of the exercise.
     keep.sort((a,b)=>b.score-a.score);
-    setRows(keep);
+    const ranked=ensembleRank(keep);
+    const single={}; keep.forEach((r,i)=>single[r.sym]=i+1);
+    ranked.forEach((r,i)=>{ r.ens.rank=i+1; r.ens.singleRank=single[r.sym]; });
+    setRows(mode==="ensemble"?ranked:keep.map(r=>{
+      const e=ranked.find(x=>x.sym===r.sym); return e?{...r,ens:e.ens}:r;
+    }));
     setRunning(false);
     const parts=Object.keys(reasons).sort((a,b)=>reasons[b]-reasons[a]).map(k=>reasons[k]+" "+k);
     setNote((cancelRef.current?"Stopped early. ":"")+keep.length+" passed the gate, "+gated+" rejected — "+parts.join(", "));
@@ -12818,13 +12997,18 @@ function AIMScreener({ book }) {
 
   const csv=()=>{
     if(!rows||!rows.length) return;
-    let s="Rank,Symbol,LTP,PctBelow52wHigh,PosInRange,AnnVolPct,BounceBackPct,DrawdownsSeen,TurnoverCr,Above200DMA,MarketCapCr,ROE,DebtEquity,OPM,PledgePct,Score\n";
+    let s="Rank,Symbol,LTP,PctBelow52wHigh,PosInRange,AnnVolPct,BounceBackPct,DrawdownsSeen,TurnoverCr,Above200DMA,MarketCapCr,ROE,DebtEquity,OPM,PledgePct,Score,"+
+      "Movement,Oscillation,Recovery,Tradeable,Agreement,Spread,Votes,SingleRank\n";
     rows.forEach((r,i)=>{
       s+=[i+1,r.sym,r.ltp.toFixed(2),r.drawdown.toFixed(1),r.posPct.toFixed(1),r.volAnn.toFixed(1),
           r.bouncePct===null?"":r.bouncePct.toFixed(0),r.ddCount,r.turn===null?"":r.turn.toFixed(2),
           (r.ma200!==null&&r.ltp>=r.ma200)?"Y":"N",
           r.f?r.f.mc:"",r.f?r.f.roe:"",r.f?r.f.de:"",r.f?r.f.opm:"",r.f?(r.f.pl||0):"",
-          Math.round(r.score)].join(",")+"\n";
+          Math.round(r.score),
+          r.ens?Math.round(r.ens.parts.move||0):"", r.ens?Math.round(r.ens.parts.osc||0):"",
+          r.ens?Math.round(r.ens.parts.rec||0):"", r.ens?Math.round(r.ens.parts.trade||0):"",
+          r.ens?r.ens.agree:"", r.ens?r.ens.spread:"", r.ens?r.ens.votes:"",
+          r.ens?r.ens.singleRank:""].join(",")+"\n";
     });
     const a=document.createElement("a");
     a.href=URL.createObjectURL(new Blob([s],{type:"text/csv"}));
@@ -12954,8 +13138,38 @@ function AIMScreener({ book }) {
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div><b style={{fontSize:13}}>{i+1}. {r.sym}</b>
             <span style={{fontSize:11,color:"#888",marginLeft:6}}>Rs.{r.ltp.toFixed(0)}</span></div>
-          <b style={{fontSize:14,color:"#5a3a1a"}}>{Math.round(r.score)}</b>
+          {mode==="ensemble"&&r.ens
+            ? <div style={{textAlign:"right"}}>
+                <b style={{fontSize:14,color:r.ens.votes>=3?"#1a5a3a":"#8a6a2a"}}>
+                  {Math.round(r.ens.agree)}</b>
+                <div style={{fontSize:9,color:"#9a9a8a"}}>{r.ens.votes}/4 agree</div>
+              </div>
+            : <b style={{fontSize:14,color:"#5a3a1a"}}>{Math.round(r.score)}</b>}
         </div>
+
+        {mode==="ensemble"&&r.ens&&<div style={{marginTop:6}}>
+          {SCORERS.map(sc=>{
+            const p=r.ens.parts[sc.key];
+            if(p===undefined) return null;
+            return <div key={sc.key} style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+              <span style={{fontSize:9.5,color:"#8a8a7a",width:66}}>{sc.label}</span>
+              <div style={{flex:1,height:5,background:"#f2f2ec",borderRadius:3}}>
+                <div style={{width:p.toFixed(0)+"%",height:"100%",borderRadius:3,
+                  background:p>=66.7?"#1a7a3a":p>=33?"#c8a03a":"#c8b8a8"}}/>
+              </div>
+              <span style={{fontSize:9.5,color:"#9a9a8a",width:22,textAlign:"right"}}>{Math.round(p)}</span>
+            </div>;
+          })}
+          <div style={{fontSize:9.5,color:"#9a9a8a",marginTop:3}}>
+            {r.ens.spread<12
+              ? "the four broadly agree"
+              : r.ens.spread<22
+                ? "some disagreement between the scorers"
+                : "the scorers disagree sharply — an ambiguous setup"}
+            {r.ens.singleRank?(" · the old formula put it "+r.ens.singleRank+
+              (r.ens.singleRank===r.ens.rank?"":(", this one "+r.ens.rank))):""}
+          </div>
+        </div>}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:2,marginTop:5,fontSize:11,color:"#555"}}>
           <div>{r.drawdown.toFixed(0)}% below high</div>
           <div>vol {r.volAnn.toFixed(0)}%</div>
