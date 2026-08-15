@@ -13117,6 +13117,21 @@ function AIMScreener({ book }) {
           placeholder="paste Kite access token" style={inp}/>
       </div>}
 
+      <div style={{display:"flex",gap:6,marginBottom:9}}>
+        {[["single","One formula"],["ensemble","Four scorers, by agreement"]].map(([k,l])=>
+          <button key={k} onClick={()=>setMode(k)} style={{flex:1,padding:"9px 8px",borderRadius:8,
+            border:"none",background:mode===k?"#5a3a1a":"#f0f0ec",
+            color:mode===k?"#fff":"#6a6a60",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>{l}</button>)}
+      </div>
+      {mode==="ensemble"&&<div style={{fontSize:10.5,color:"#8a8a70",marginBottom:9,lineHeight:1.5,
+        background:"#fbfaf6",border:"1px solid #ece8dc",borderRadius:8,padding:"8px 10px"}}>
+        Four scorers look at different things — movement, oscillation, recovery, and whether an
+        order can actually fill — and rank the list separately. What counts is where they agree.
+        A stock all four rate highly is a different thing from one that averages well because a
+        single scorer liked it. This makes the ranking harder to be wrong about for one reason;
+        it does not make it predictive.
+      </div>}
+
       {!running
         ? <button onClick={run} style={{...btn,background:"#5a3a1a",color:"#fff",width:"100%"}}>🔍 Scan</button>
         : <button onClick={()=>{cancelRef.current=true;}} style={{...btn,background:"#c62828",color:"#fff",width:"100%"}}>■ Stop</button>}
