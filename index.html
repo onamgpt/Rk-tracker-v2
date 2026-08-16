@@ -12931,7 +12931,7 @@ function AIMScreener({ book }) {
     // else it scores. Ranking on absolute return without this let shares that
     // merely went up a great deal reach the top of the list while losing to
     // doing nothing.
-    if(m.edge&&m.edge.edgePct<=0)
+    if(mode!=="max" && m.edge && m.edge.edgePct<=0)
       return "holding beat RK by "+Math.abs(m.edge.edgePct).toFixed(1)+"% here — the method adds nothing on this share";
 
     return null;                            // null means it passed
@@ -13188,6 +13188,20 @@ function AIMScreener({ book }) {
     const ranked=ensembleRank(keep);
     const single={}; keep.forEach((r,i)=>single[r.sym]=i+1);
     ranked.forEach((r,i)=>{ r.ens.rank=i+1; r.ens.singleRank=single[r.sym]; });
+    if(mode==="max"){
+      // The other question: which shares simply made the most, running the
+      // method on them. No edge test — a share where holding would have done
+      // better still belongs here if the money was good, and the card says so.
+      const withEns=keep.map(r=>{
+        const e=ranked.find(x=>x.sym===r.sym); return e?{...r,ens:e.ens}:r; });
+      withEns.sort((a,b)=>{
+        const A=(a.m&&a.m.edge&&a.m.edge.ann!=null)?a.m.edge.ann:-999;
+        const B=(b.m&&b.m.edge&&b.m.edge.ann!=null)?b.m.edge.ann:-999;
+        return B-A;
+      });
+      setRows(withEns);
+      setRunning(false); setNote(""); return;
+    }
     if(mode==="harvest"){
       // Rank by what there is to take out of the share each year — swing size
       // times how often, which is what the method converts into money — and
@@ -13367,11 +13381,20 @@ function AIMScreener({ book }) {
       </div>}
 
       <div style={{display:"flex",gap:6,marginBottom:9}}>
-        {[["single","One formula"],["ensemble","Seven scorers"],["edge","Beats holding"],["harvest","Most to harvest"]].map(([k,l])=>
+        {[["single","One formula"],["ensemble","Seven scorers"],["edge","Beats holding"],
+          ["harvest","Method earns its keep"],["max","Most money made"]].map(([k,l])=>
           <button key={k} onClick={()=>setMode(k)} style={{flex:1,padding:"9px 8px",borderRadius:8,
             border:"none",background:mode===k?"#5a3a1a":"#f0f0ec",
             color:mode===k?"#fff":"#6a6a60",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>{l}</button>)}
       </div>
+      {mode==="max"&&<div style={{fontSize:10.5,color:"#8a8a70",marginBottom:9,lineHeight:1.5,
+        background:"#f4f6fb",border:"1px solid #d8dfe8",borderRadius:8,padding:"8px 10px"}}>
+        The other question: which shares simply made the most money, running the method on them.
+        No test against holding here, so shares where you would have done better doing nothing
+        still appear — each card says which. Useful for deciding where to put money; the other
+        mode is for deciding whether this method is worth running on a share at all.
+      </div>}
+
       {mode==="harvest"&&<div style={{fontSize:10.5,color:"#8a8a70",marginBottom:9,lineHeight:1.5,
         background:"#f7f4ec",border:"1px solid #e8e0cc",borderRadius:8,padding:"8px 10px"}}>
         Only shares where the method beat simply holding survive the gate at all. Ranked by how
@@ -13431,6 +13454,13 @@ function AIMScreener({ book }) {
                   {Math.round(r.ens.agree)}</b>
                 <div style={{fontSize:9,color:"#9a9a8a"}}>{r.ens.votes}/{SCORERS.length} agree</div>
               </div>
+            : mode==="max"&&r.m&&r.m.edge&&r.m.edge.ann!=null
+              ? <div style={{textAlign:"right"}}>
+                  <b style={{fontSize:14,color:r.m.edge.ann>=0?"#1a5a3a":"#c0392b"}}>
+                    {r.m.edge.ann>=0?"+":""}{r.m.edge.ann.toFixed(1)}%</b>
+                  <div style={{fontSize:9,color:r.m.edge.edgePct>0?"#1a7a3a":"#c0392b"}}>
+                    a year{r.m.edge.edgePct>0?" · method helped":" · holding was better"}</div>
+                </div>
             : mode==="harvest"&&r.m&&r.m.edge
               ? <div style={{textAlign:"right"}}>
                   <b style={{fontSize:14,color:"#1a5a3a"}}>+{r.m.edge.edgePct.toFixed(1)}%</b>
