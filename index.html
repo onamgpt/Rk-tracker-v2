@@ -12927,8 +12927,12 @@ function AIMScreener({ book }) {
     if(m.winRate!==null&&m.winRate!==undefined&&m.winRate<50)
       return "beat holding in only "+Math.round(m.winRate/25)+" of 4 stretches — suited by luck, not structure";
 
-    if(m.edge&&m.edge.edgePct<-25)
-      return "holding beat RK by "+Math.abs(m.edge.edgePct).toFixed(0)+"% here — it trends rather than oscillates";
+    // If holding won at all, the share is not suited to this method — whatever
+    // else it scores. Ranking on absolute return without this let shares that
+    // merely went up a great deal reach the top of the list while losing to
+    // doing nothing.
+    if(m.edge&&m.edge.edgePct<=0)
+      return "holding beat RK by "+Math.abs(m.edge.edgePct).toFixed(1)+"% here — the method adds nothing on this share";
 
     return null;                            // null means it passed
   };
@@ -13196,10 +13200,13 @@ function AIMScreener({ book }) {
       const score=(r)=>{
         if(!r.m||!r.m.edge||r.m.edge.ann==null) return -999;
         const ann=r.m.edge.ann;
-        const consistent=(r.m.winRate||0)>=75 ? 1.3 : ((r.m.winRate||0)>=50 ? 1 : 0.65);
-        const beats=(r.m.edge.edgePct>0)?1.2:0.85;
+        // Everything here already beats holding, so rank on how much it beats
+        // it by — not on the raw return, which simply favours shares that rose.
+        const consistent=(r.m.winRate||0)>=75 ? 1.4 : ((r.m.winRate||0)>=50 ? 1 : 0.6);
         const room=r.m.swings ? (1+Math.min(0.35,Math.max(0,(r.m.swings.median-15)/100))) : 0.9;
-        return ann*consistent*beats*room;
+        const edge=r.m.edge.edgePct;
+        // the edge is what the method contributed; the return keeps it honest
+        return (edge*0.7 + Math.max(0,ann)*0.3) * consistent * room;
       };
       withEns.sort((a,b)=>score(b)-score(a));
       setRows(withEns);
@@ -13367,6 +13374,13 @@ function AIMScreener({ book }) {
       </div>
       {mode==="harvest"&&<div style={{fontSize:10.5,color:"#8a8a70",marginBottom:9,lineHeight:1.5,
         background:"#f7f4ec",border:"1px solid #e8e0cc",borderRadius:8,padding:"8px 10px"}}>
+        Only shares where the method beat simply holding survive the gate at all. Ranked by how
+        much it beat it by, with the return kept in view so a large edge on a share going nowhere
+        does not outrank a large edge on one that also made money. Ranking on the raw return alone
+        put shares at the top that lost to holding — they had merely risen a great deal.
+      </div>}
+
+      {false&&<div>
         Ranked by how much there is to take out of the share each year — the typical swing size
         times how often it swings — weighted up where the method beat holding consistently.
         This is Lichello's own point: a share going 5 to 10 to 2 and back to 5 returns nothing
@@ -13417,11 +13431,11 @@ function AIMScreener({ book }) {
                   {Math.round(r.ens.agree)}</b>
                 <div style={{fontSize:9,color:"#9a9a8a"}}>{r.ens.votes}/{SCORERS.length} agree</div>
               </div>
-            : mode==="harvest"&&r.m&&r.m.edge&&r.m.edge.ann!=null
+            : mode==="harvest"&&r.m&&r.m.edge
               ? <div style={{textAlign:"right"}}>
-                  <b style={{fontSize:14,color:r.m.edge.ann>=0?"#1a5a3a":"#c0392b"}}>
-                    {r.m.edge.ann>=0?"+":""}{r.m.edge.ann.toFixed(1)}%</b>
-                  <div style={{fontSize:9,color:"#9a9a8a"}}>a year, measured</div>
+                  <b style={{fontSize:14,color:"#1a5a3a"}}>+{r.m.edge.edgePct.toFixed(1)}%</b>
+                  <div style={{fontSize:9,color:"#9a9a8a"}}>
+                    {r.m.edge.ann!=null?("over holding · "+r.m.edge.ann.toFixed(0)+"%/yr"):"over holding"}</div>
                 </div>
             : mode==="edge"&&r.m&&r.m.edge
               ? <div style={{textAlign:"right"}}>
