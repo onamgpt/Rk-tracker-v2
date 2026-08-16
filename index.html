@@ -12829,6 +12829,45 @@ function AIMScreener({ book }) {
       }
     }
 
+    // ── AMPLITUDE — the thing the method actually harvests ──────────────────
+    // Lichello's own example is a share going 5 -> 10 -> 5 -> 2 -> 5. Holding
+    // returns nothing. The method makes money because it sold at ten and
+    // accumulated at two. What produced the profit was the SIZE of the swings,
+    // not any edge over a flat hold. A share swinging forty percent gives far
+    // more per cycle than one swinging eight, however consistent the latter is.
+    const swings=(()=>{
+      // Turning points: a reversal of at least 8% ends the current leg.
+      const TH=0.08;
+      let piv=[{i:0,p:closes[0]}], dir=1, ext=closes[0], extI=0;
+      for(let i=1;i<n;i++){
+        const p=closes[i];
+        if(dir===1){
+          if(p>ext){ ext=p; extI=i; }
+          else if(p<ext*(1-TH)){ piv.push({i:extI,p:ext}); dir=-1; ext=p; extI=i; }
+        } else {
+          if(p<ext){ ext=p; extI=i; }
+          else if(p>ext*(1+TH)){ piv.push({i:extI,p:ext}); dir=1; ext=p; extI=i; }
+        }
+      }
+      piv.push({i:n-1,p:closes[n-1]});
+      const legs=[];
+      for(let k=1;k<piv.length;k++){
+        const a=piv[k-1].p, b=piv[k].p;
+        if(a>0&&b>0) legs.push(Math.abs(b-a)/Math.min(a,b)*100);
+      }
+      // One leg is a trend, not an oscillation. Two round trips is the least
+      // that says anything about how the share behaves.
+      if(legs.length<3) return null;
+      const sorted=legs.slice().sort((a,b)=>a-b);
+      const median=sorted[Math.floor(sorted.length/2)];
+      const perYear=legs.length/(n/252);
+      const rangeRatio=lo>0?hi/lo:null;
+      // What the swinging is worth in a year: roughly half of each leg is
+      // capturable, times how many legs arrive.
+      const harvest=median*0.5*perYear;
+      return {count:legs.length, median, biggest:Math.max(...legs), perYear, rangeRatio, harvest};
+    })();
+
     // How much of the move is drift and how much is swing. A share that ends
     // where it started but travelled a long way is the ideal shape.
     const travelled=(()=>{
@@ -12844,7 +12883,7 @@ function AIMScreener({ book }) {
 
     return {ltp,hi,lo,drawdown,posPct,volAnn,ma200,maRising,bouncePct,ddCount:total,turn,bars:n,
             vol60,volRatio,oscPerYear,avgMove,upDays,worstDay,bestDay,maxDD,sinceHigh,
-            turnCV,ret1y,ret3m,edge,t2t,winRate,edgeSpread,edges:edgesArr,travelled};
+            turnCV,ret1y,ret3m,edge,t2t,winRate,edgeSpread,edges:edgesArr,travelled,swings};
   };
 
   // ── STAGE 1 GATE — runs before any score is computed ───────────────────────
@@ -12994,6 +13033,20 @@ function AIMScreener({ book }) {
     {key:"rec",  label:"Recovery",     fn:scoreRecovery},
     {key:"trade",label:"Tradeable",    fn:scoreTradeable},
     {key:"edge", label:"Beats holding",fn:scoreEdge},
+    {key:"amp",  label:"Room to work", fn:(m)=>{
+      // Lichello's example makes the point: a share going 5 to 10 to 2 and back
+      // to 5 returns nothing to a holder, and a great deal to this method,
+      // because the swings were wide. Amplitude is what gets harvested.
+      if(!m.swings) return 20;                 // fewer than three legs — a trend
+      const s=m.swings;
+      // typical swing size: 8% is barely worth a trade, 60% is a gift
+      const amp = clamp(s.median<8?0:(s.median<60?(s.median-8)/52*100:100));
+      // and how often they come round
+      const freq = clamp(s.perYear<1?s.perYear*30:(s.perYear<6?30+(s.perYear-1)/5*70:100));
+      // the full range the share has covered, which is what Lichello measured
+      const rng = clamp(!s.rangeRatio?40:(s.rangeRatio<1.3?0:(s.rangeRatio<4?(s.rangeRatio-1.3)/2.7*100:100)));
+      return clamp(amp*0.45+freq*0.3+rng*0.25);
+    }},
     {key:"fit",  label:"Suited, not lucky", fn:(m)=>{
       // Two things separate a share that suits the method from one that
       // happened to suit a particular two years: it wins across independent
@@ -13124,6 +13177,23 @@ function AIMScreener({ book }) {
     const ranked=ensembleRank(keep);
     const single={}; keep.forEach((r,i)=>single[r.sym]=i+1);
     ranked.forEach((r,i)=>{ r.ens.rank=i+1; r.ens.singleRank=single[r.sym]; });
+    if(mode==="harvest"){
+      // Rank by what there is to take out of the share each year — swing size
+      // times how often, which is what the method converts into money — and
+      // only among those that beat holding consistently.
+      const withEns=keep.map(r=>{
+        const e=ranked.find(x=>x.sym===r.sym); return e?{...r,ens:e.ens}:r; });
+      const score=(r)=>{
+        if(!r.m||!r.m.swings) return -1;
+        const h=r.m.swings.harvest;
+        const consistent=(r.m.winRate||0)>=75 ? 1.35 : ((r.m.winRate||0)>=50 ? 1 : 0.6);
+        const beats=(r.m.edge&&r.m.edge.edgePct>0)?1.25:0.8;
+        return h*consistent*beats;
+      };
+      withEns.sort((a,b)=>score(b)-score(a));
+      setRows(withEns);
+      setRunning(false); setNote(""); return;
+    }
     if(mode==="edge"){
       const withEns=keep.map(r=>{
         const e=ranked.find(x=>x.sym===r.sym); return e?{...r,ens:e.ens}:r; });
@@ -13143,7 +13213,8 @@ function AIMScreener({ book }) {
     if(!rows||!rows.length) return;
     let s="Rank,Symbol,LTP,PctBelow52wHigh,PosInRange,AnnVolPct,BounceBackPct,DrawdownsSeen,TurnoverCr,Above200DMA,MarketCapCr,ROE,DebtEquity,OPM,PledgePct,Score,"+
       "Movement,Oscillation,Recovery,Tradeable,BeatsHolding,SuitedNotLucky,Agreement,Spread,Votes,SingleRank,"+
-      "EdgeVsHoldPct,RKReturnPct,HoldReturnPct,SimTrades,WinRatePct,EdgeSpread,TravelRatio\n";
+      "EdgeVsHoldPct,RKReturnPct,HoldReturnPct,SimTrades,WinRatePct,EdgeSpread,TravelRatio,"+
+      "SwingMedianPct,SwingBiggestPct,SwingsPerYear,RangeRatio,HarvestPctYr\n";
     rows.forEach((r,i)=>{
       s+=[i+1,r.sym,r.ltp.toFixed(2),r.drawdown.toFixed(1),r.posPct.toFixed(1),r.volAnn.toFixed(1),
           r.bouncePct===null?"":r.bouncePct.toFixed(0),r.ddCount,r.turn===null?"":r.turn.toFixed(2),
@@ -13152,7 +13223,7 @@ function AIMScreener({ book }) {
           Math.round(r.score),
           r.ens?Math.round(r.ens.parts.move||0):"", r.ens?Math.round(r.ens.parts.osc||0):"",
           r.ens?Math.round(r.ens.parts.rec||0):"", r.ens?Math.round(r.ens.parts.trade||0):"",
-          r.ens?Math.round(r.ens.parts.edge||0):"", r.ens?Math.round(r.ens.parts.fit||0):"",
+          r.ens?Math.round(r.ens.parts.edge||0):"", r.ens?Math.round(r.ens.parts.amp||0):"", r.ens?Math.round(r.ens.parts.fit||0):"",
           r.ens?r.ens.agree:"", r.ens?r.ens.spread:"", r.ens?r.ens.votes:"",
           r.ens?r.ens.singleRank:"",
           r.m&&r.m.edge?r.m.edge.edgePct.toFixed(1):"",
@@ -13161,7 +13232,12 @@ function AIMScreener({ book }) {
           r.m&&r.m.edge?r.m.edge.trades:"",
           r.m&&r.m.winRate!=null?r.m.winRate.toFixed(0):"",
           r.m&&r.m.edgeSpread!=null?r.m.edgeSpread.toFixed(1):"",
-          r.m&&r.m.travelled!=null?(r.m.travelled>900?"999":r.m.travelled.toFixed(1)):""].join(",")+"\n";
+          r.m&&r.m.travelled!=null?(r.m.travelled>900?"999":r.m.travelled.toFixed(1)):"",
+          r.m&&r.m.swings?r.m.swings.median.toFixed(1):"",
+          r.m&&r.m.swings?r.m.swings.biggest.toFixed(1):"",
+          r.m&&r.m.swings?r.m.swings.perYear.toFixed(2):"",
+          r.m&&r.m.swings&&r.m.swings.rangeRatio?r.m.swings.rangeRatio.toFixed(2):"",
+          r.m&&r.m.swings?r.m.swings.harvest.toFixed(1):""].join(",")+"\n";
     });
     const a=document.createElement("a");
     a.href=URL.createObjectURL(new Blob([s],{type:"text/csv"}));
@@ -13271,11 +13347,20 @@ function AIMScreener({ book }) {
       </div>}
 
       <div style={{display:"flex",gap:6,marginBottom:9}}>
-        {[["single","One formula"],["ensemble","Six scorers, by agreement"],["edge","Beats holding first"]].map(([k,l])=>
+        {[["single","One formula"],["ensemble","Seven scorers"],["edge","Beats holding"],["harvest","Most to harvest"]].map(([k,l])=>
           <button key={k} onClick={()=>setMode(k)} style={{flex:1,padding:"9px 8px",borderRadius:8,
             border:"none",background:mode===k?"#5a3a1a":"#f0f0ec",
             color:mode===k?"#fff":"#6a6a60",fontWeight:700,fontSize:11.5,cursor:"pointer"}}>{l}</button>)}
       </div>
+      {mode==="harvest"&&<div style={{fontSize:10.5,color:"#8a8a70",marginBottom:9,lineHeight:1.5,
+        background:"#f7f4ec",border:"1px solid #e8e0cc",borderRadius:8,padding:"8px 10px"}}>
+        Ranked by how much there is to take out of the share each year — the typical swing size
+        times how often it swings — weighted up where the method beat holding consistently.
+        This is Lichello's own point: a share going 5 to 10 to 2 and back to 5 returns nothing
+        to a holder and a great deal to this method, because the swings were wide. Beating a
+        flat hold by a few points on a share that barely moves is not the same thing.
+      </div>}
+
       {mode==="edge"&&<div style={{fontSize:10.5,color:"#8a8a70",marginBottom:9,lineHeight:1.5,
         background:"#f4f8f4",border:"1px solid #d8e4d8",borderRadius:8,padding:"8px 10px"}}>
         Ordered purely by how far RK would have beaten simply holding, over the same two years,
@@ -13319,6 +13404,11 @@ function AIMScreener({ book }) {
                   {Math.round(r.ens.agree)}</b>
                 <div style={{fontSize:9,color:"#9a9a8a"}}>{r.ens.votes}/{SCORERS.length} agree</div>
               </div>
+            : mode==="harvest"&&r.m&&r.m.swings
+              ? <div style={{textAlign:"right"}}>
+                  <b style={{fontSize:14,color:"#1a5a3a"}}>{r.m.swings.harvest.toFixed(0)}%</b>
+                  <div style={{fontSize:9,color:"#9a9a8a"}}>a year to harvest</div>
+                </div>
             : mode==="edge"&&r.m&&r.m.edge
               ? <div style={{textAlign:"right"}}>
                   <b style={{fontSize:14,color:r.m.edge.edgePct>=0?"#1a7a3a":"#c0392b"}}>
@@ -13344,6 +13434,12 @@ function AIMScreener({ book }) {
               <span style={{fontSize:9.5,color:"#9a9a8a",width:22,textAlign:"right"}}>{Math.round(p)}</span>
             </div>;
           })}
+          {r.m&&r.m.swings&&<div style={{fontSize:10,marginTop:3,color:"#5a6a7a"}}>
+            swings {r.m.swings.median.toFixed(0)}% typically, biggest {r.m.swings.biggest.toFixed(0)}%
+            · {r.m.swings.perYear.toFixed(1)} a year
+            {r.m.swings.rangeRatio?(" · range "+r.m.swings.rangeRatio.toFixed(1)+"x low to high"):""}
+            <b style={{color:"#1a5a3a"}}>{" · about "+r.m.swings.harvest.toFixed(0)+"%/yr to harvest"}</b>
+          </div>}
           {r.m&&(r.m.winRate!==null&&r.m.winRate!==undefined)&&
             <div style={{fontSize:10,marginTop:3,color:r.m.winRate>=67?"#1a5a3a":"#a0661a"}}>
               beat holding in {Math.round(r.m.winRate/25)} of 4 separate stretches
