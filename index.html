@@ -12836,8 +12836,11 @@ function AIMScreener({ book }) {
     // not any edge over a flat hold. A share swinging forty percent gives far
     // more per cycle than one swinging eight, however consistent the latter is.
     const swings=(()=>{
-      // Turning points: a reversal of at least 8% ends the current leg.
-      const TH=0.08;
+      // Turning points: a reversal of at least 15% ends the current leg.
+      // At 8% the detector counted ordinary noise as swings — twenty a year,
+      // a turn every fortnight — which inflated the harvest estimate. A share
+      // has to reverse meaningfully before it is a swing worth trading.
+      const TH=0.15;
       let piv=[{i:0,p:closes[0]}], dir=1, ext=closes[0], extI=0;
       for(let i=1;i<n;i++){
         const p=closes[i];
@@ -13039,10 +13042,11 @@ function AIMScreener({ book }) {
       // because the swings were wide. Amplitude is what gets harvested.
       if(!m.swings) return 20;                 // fewer than three legs — a trend
       const s=m.swings;
-      // typical swing size: 8% is barely worth a trade, 60% is a gift
-      const amp = clamp(s.median<8?0:(s.median<60?(s.median-8)/52*100:100));
-      // and how often they come round
-      const freq = clamp(s.perYear<1?s.perYear*30:(s.perYear<6?30+(s.perYear-1)/5*70:100));
+      // typical swing size: 15% is the floor now, 60% is a gift
+      const amp = clamp(s.median<15?0:(s.median<60?(s.median-15)/45*100:100));
+      // and how often they come round — with a 15% threshold, two to five
+      // real reversals a year is a busy share
+      const freq = clamp(s.perYear<0.8?s.perYear*35:(s.perYear<5?28+(s.perYear-0.8)/4.2*72:100));
       // the full range the share has covered, which is what Lichello measured
       const rng = clamp(!s.rangeRatio?40:(s.rangeRatio<1.3?0:(s.rangeRatio<4?(s.rangeRatio-1.3)/2.7*100:100)));
       return clamp(amp*0.45+freq*0.3+rng*0.25);
