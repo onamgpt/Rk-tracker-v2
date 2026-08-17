@@ -12372,12 +12372,12 @@ function AIMBacktest() {
           if(buy>cash){ buy=cash; starved++; }
           if(buy>0.5){
             shares+=buy/p; cash-=buy; pc+=buy/2;
-            trades.push({d:i,t:"BUY",amt:buy,p:p});
+            trades.push({d:i,t:"BUY",amt:buy,p:p,sh:buy/p});
           }
         } else if(mv-pc-safe>0){
           const sell=mv-pc-safe;
           shares-=sell/p; cash+=sell;      // PC deliberately unchanged
-          trades.push({d:i,t:"SELL",amt:sell,p:p});
+          trades.push({d:i,t:"SELL",amt:sell,p:p,sh:sell/p});
         }
 
         const tot=shares*p+cash;
@@ -12488,7 +12488,12 @@ function AIMBacktest() {
         <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:5}}>LAST TRADES</div>
         {res.trades.map((t,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"2px 0"}}>
           <span style={{color:t.t==="BUY"?"#1565c0":"#2e7d32",fontWeight:700}}>{t.t}</span>
-          <span>Rs.{fmt(t.amt)} @ Rs.{t.p.toFixed(1)}</span>
+          <span>
+            {t.sh!=null
+              ? (t.sh>=1 ? Math.round(t.sh).toLocaleString("en-IN") : t.sh.toFixed(3))+" sh @ Rs."+t.p.toFixed(1)
+              : "Rs."+fmt(t.amt)+" @ Rs."+t.p.toFixed(1)}
+            <span style={{color:"#aaa"}}>{t.sh!=null?("  ·  Rs."+fmt(t.amt)):""}</span>
+          </span>
         </div>)}
       </div>}
     </div>}
