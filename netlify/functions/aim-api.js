@@ -155,6 +155,11 @@ exports.handler = async (event) => {
 
   const action = body.action || "dashboard";
   const book   = (body.book || "INDIA").toUpperCase();
+  // Each person's rows are namespaced inside the book column: "USA" is the
+  // owner's book, "prasad:USA" is Prasad's. Separate books, no schema change,
+  // and every existing row keeps working exactly as it did.
+  const owner   = String(body.owner || "main").toLowerCase().replace(/[^a-z0-9_]/g, "") || "main";
+  const bookKey = (owner === "main") ? book : (owner + ":" + book);
 
   try {
     // ------------------------------------------------------------ DASHBOARD
@@ -164,15 +169,15 @@ exports.handler = async (event) => {
       // Hide closed positions, but never let that filter blank the portfolio:
       // if the column is missing on an older table the query would 400, so we
       // fall back to an unfiltered read rather than showing the user nothing.
-      let hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&or=(active.is.null,active.eq.true)&order=symbol.asc");
+      let hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(bookKey) + "&or=(active.is.null,active.eq.true)&order=symbol.asc");
       if (hr.status >= 300) {
         console.log("holdings filtered read failed (" + hr.status + ") - falling back to unfiltered");
-        hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&order=symbol.asc");
+        hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(bookKey) + "&order=symbol.asc");
       }
       if (hr.status >= 300) return FAIL("holdings read failed: " + JSON.stringify(hr.body));
       const holdings = hr.body || [];
 
-      const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + encodeURIComponent(book));
+      const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + encodeURIComponent(bookKey));
       const cash = (cr.status < 300 && cr.body && cr.body.length) ? n(cr.body[0].cash) : 0;
 
       const allowFractional = (book === "USA");
@@ -207,7 +212,7 @@ exports.handler = async (event) => {
     if (action === "setCash") {
       const amt = n(body.cash);
       const r = await sb("POST", "/rest/v1/aim_cash",
-        { book, cash: amt, updated_at: new Date().toISOString() },
+        { book: bookKey, cash: amt, updated_at: new Date().toISOString() },
         { "Prefer": "resolution=merge-duplicates,return=representation" });
       if (r.status >= 300) return FAIL("cash update failed: " + JSON.stringify(r.body));
       return OK({ ok: true, cash: r2(amt) });
@@ -222,7 +227,7 @@ exports.handler = async (event) => {
       if (shares <= 0 || price <= 0) return FAIL("shares and price must be positive", 400);
 
       const amount = shares * price;
-      const id = book + "|" + symbol;
+      const id = bookKey + "|" + symbol;
       const today = body.date || new Date().toISOString().slice(0, 10);
 
       // Adoption is bookkeeping, not a purchase. Shares already held were paid
@@ -236,12 +241,12 @@ exports.handler = async (event) => {
         return FAIL("position already open for " + symbol + " — use recordTrade instead", 400);
       }
 
-      const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + encodeURIComponent(book));
+      const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + encodeURIComponent(bookKey));
       const cashNow = (cr.status < 300 && cr.body && cr.body.length) ? n(cr.body[0].cash) : 0;
       const cashAfter = isAdopt ? cashNow : (cashNow - amount - costs);
 
       const row = {
-        id, book, symbol, name: body.name || symbol,
+        id, book: bookKey, symbol, name: body.name || symbol,
         shares, avg_cost: r2((amount + costs) / shares),
         portfolio_control: r2(amount),
         last_price: price, last_review: today, active: true,
@@ -258,7 +263,7 @@ exports.handler = async (event) => {
       if (hr.status >= 300) return FAIL("could not open position: " + JSON.stringify(hr.body));
 
       await sb("POST", "/rest/v1/aim_transactions", {
-        book, symbol, txn_date: today, action: isAdopt ? "ADOPT" : "BUY",
+        book: bookKey, symbol, txn_date: today, action: isAdopt ? "ADOPT" : "BUY",
         shares, price, amount: r2(amount), costs: r2(costs),
         pc_before: 0, pc_after: r2(amount), cash_after: r2(cashAfter),
         note: body.note || (isAdopt
@@ -268,7 +273,7 @@ exports.handler = async (event) => {
 
       if (!isAdopt) {
         await sb("POST", "/rest/v1/aim_cash",
-          { book, cash: r2(cashAfter), updated_at: new Date().toISOString() },
+          { book: bookKey, cash: r2(cashAfter), updated_at: new Date().toISOString() },
           { "Prefer": "resolution=merge-duplicates" });
       }
 
@@ -277,7 +282,7 @@ exports.handler = async (event) => {
 
     // ------------------------------------------------------------ PRICE UPDATE
     if (action === "updatePrice") {
-      const id = book + "|" + String(body.symbol || "").trim().toUpperCase();
+      const id = bookKey + "|" + String(body.symbol || "").trim().toUpperCase();
       const r = await sb("PATCH", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(id),
         { last_price: n(body.price), last_review: body.date || new Date().toISOString().slice(0, 10),
           updated_at: new Date().toISOString() },
@@ -290,7 +295,7 @@ exports.handler = async (event) => {
     // ------------------------------------------------------------ RECORD TRADE
     if (action === "recordTrade") {
       const symbol = String(body.symbol || "").trim().toUpperCase();
-      const id = book + "|" + symbol;
+      const id = bookKey + "|" + symbol;
       const act = String(body.tradeAction || "").toUpperCase();
       if (["BUY", "SELL"].indexOf(act) === -1) return FAIL("tradeAction must be BUY or SELL", 400);
 
@@ -317,7 +322,7 @@ exports.handler = async (event) => {
         ? (newShares > 0 ? (oldCost + amount + costs) / newShares : 0)
         : n(h.avg_cost);
 
-      const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + encodeURIComponent(book));
+      const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + encodeURIComponent(bookKey));
       const cashNow = (cr.status < 300 && cr.body && cr.body.length) ? n(cr.body[0].cash) : 0;
       const cashAfter = act === "BUY" ? cashNow - amount - costs : cashNow + amount - costs;
 
@@ -332,14 +337,14 @@ exports.handler = async (event) => {
       });
 
       await sb("POST", "/rest/v1/aim_transactions", {
-        book, symbol, txn_date: today, action: act,
+        book: bookKey, symbol, txn_date: today, action: act,
         shares, price, amount: r2(amount), costs: r2(costs),
         pc_before: r2(pcBefore), pc_after: r2(pcAfter), cash_after: r2(cashAfter),
         note: body.note || ""
       });
 
       await sb("POST", "/rest/v1/aim_cash",
-        { book, cash: r2(cashAfter), updated_at: new Date().toISOString() },
+        { book: bookKey, cash: r2(cashAfter), updated_at: new Date().toISOString() },
         { "Prefer": "resolution=merge-duplicates" });
 
       return OK({
@@ -352,7 +357,7 @@ exports.handler = async (event) => {
 
     // ---------------------------------------------------------------- LEDGER
     if (action === "ledger") {
-      let q = "/rest/v1/aim_transactions?select=*&book=eq." + encodeURIComponent(book);
+      let q = "/rest/v1/aim_transactions?select=*&book=eq." + encodeURIComponent(bookKey);
       if (body.symbol) q += "&symbol=eq." + encodeURIComponent(String(body.symbol).toUpperCase());
       q += "&order=txn_date.desc,id.desc&limit=" + (body.limit || 300);
       const r = await sb("GET", q);
@@ -363,14 +368,14 @@ exports.handler = async (event) => {
     // ----------------------------------------------------------------- AUDIT
     // Recompute PC from the full ledger and compare against what is stored.
     if (action === "audit") {
-      let hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book) + "&or=(active.is.null,active.eq.true)");
+      let hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(bookKey) + "&or=(active.is.null,active.eq.true)");
       if (hr.status >= 300) {
-        hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book));
+        hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(bookKey));
       }
       if (hr.status >= 300) return FAIL("holdings read failed");
       const holdings = hr.body || [];
 
-      const tr = await sb("GET", "/rest/v1/aim_transactions?select=*&book=eq." + encodeURIComponent(book) + "&order=txn_date.asc,id.asc&limit=5000");
+      const tr = await sb("GET", "/rest/v1/aim_transactions?select=*&book=eq." + encodeURIComponent(bookKey) + "&order=txn_date.asc,id.asc&limit=5000");
       const txns = (tr.status < 300 && tr.body) ? tr.body : [];
 
       const results = holdings.map(h => {
@@ -402,13 +407,13 @@ exports.handler = async (event) => {
     // Plain look at what is actually in the table, so a stubborn row can be
     // identified rather than guessed at.
     if (action === "rawHoldings") {
-      const raw = await sb("GET", "/rest/v1/aim_holdings?select=id,book,symbol,shares,avg_cost,active&book=eq." + encodeURIComponent(book));
+      const raw = await sb("GET", "/rest/v1/aim_holdings?select=id,book,symbol,shares,avg_cost,active&book=eq." + encodeURIComponent(bookKey));
       return OK({ ok: true, status: raw.status, rows: raw.body || [] });
     }
 
     if (action === "closePosition") {
       const symbol = String(body.symbol || "").trim().toUpperCase();
-      const id = book + "|" + symbol;
+      const id = bookKey + "|" + symbol;
       // verify it exists first, and keep the row so cash can be put back if the
       // position was entered by mistake rather than genuinely sold.
       // Do not trust the constructed id. Rows entered by hand, or created by an
@@ -416,7 +421,7 @@ exports.handler = async (event) => {
       // its natural key instead, and fall back to the id only if that misses.
       let row = null;
       let bySym = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." +
-        encodeURIComponent(book) + "&symbol=eq." + encodeURIComponent(symbol));
+        encodeURIComponent(bookKey) + "&symbol=eq." + encodeURIComponent(symbol));
       if (bySym.status < 300 && bySym.body && bySym.body.length) row = bySym.body[0];
       if (!row) {
         const byId = await sb("GET", "/rest/v1/aim_holdings?select=*&id=eq." + encodeURIComponent(id));
@@ -424,7 +429,7 @@ exports.handler = async (event) => {
       }
       if (!row) {
         // Last resort: case-insensitive scan of the whole book.
-        const all = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(book));
+        const all = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(bookKey));
         if (all.status < 300 && all.body) {
           row = all.body.find(function (x) {
             return String(x.symbol || "").trim().toUpperCase() === symbol;
@@ -440,11 +445,11 @@ exports.handler = async (event) => {
       let cashRestored = 0;
       if (body.refundCash) {
         const basis = n(row.shares) * n(row.avg_cost);
-        const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + encodeURIComponent(book));
+        const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + encodeURIComponent(bookKey));
         const cashNow = (cr.status < 300 && cr.body && cr.body.length) ? n(cr.body[0].cash) : 0;
         cashRestored = r2(basis);
         await sb("POST", "/rest/v1/aim_cash",
-          { book, cash: r2(cashNow + basis), updated_at: new Date().toISOString() },
+          { book: bookKey, cash: r2(cashNow + basis), updated_at: new Date().toISOString() },
           { "Prefer": "resolution=merge-duplicates" });
       }
       // Delete outright. Ledger history lives in its own table and is untouched,
@@ -453,7 +458,7 @@ exports.handler = async (event) => {
       let r = await sb("DELETE", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(realId));
       if (r.status >= 300) {
         // Some tables refuse delete by id; try the natural key.
-        r = await sb("DELETE", "/rest/v1/aim_holdings?book=eq." + encodeURIComponent(book) +
+        r = await sb("DELETE", "/rest/v1/aim_holdings?book=eq." + encodeURIComponent(bookKey) +
           "&symbol=eq." + encodeURIComponent(symbol));
       }
       if (r.status >= 300) {
@@ -466,7 +471,7 @@ exports.handler = async (event) => {
         }
       }
       const after = await sb("GET", "/rest/v1/aim_holdings?select=id,active&book=eq." +
-        encodeURIComponent(book) + "&symbol=eq." + encodeURIComponent(symbol));
+        encodeURIComponent(bookKey) + "&symbol=eq." + encodeURIComponent(symbol));
       if (after.status < 300 && after.body && after.body.length && after.body[0].active !== false) {
         return FAIL("removal did not take for " + symbol + " — row id " + after.body[0].id + " still present");
       }
@@ -572,14 +577,15 @@ exports.handler = async (event) => {
     // so both scenarios are shown rather than one guessed figure.
     if (action === "compare") {
       const books = ["INDIA", "USA", "CRYPTO"];
+      const keyOf = (b) => (owner === "main") ? b : (owner + ":" + b);
       const out = [];
 
       for (const b of books) {
-        const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + b);
+        const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(keyOf(b)));
         const holdings = (hr.status < 300 && hr.body) ? hr.body : [];
-        const tr = await sb("GET", "/rest/v1/aim_transactions?select=*&book=eq." + b + "&order=txn_date.asc,id.asc&limit=5000");
+        const tr = await sb("GET", "/rest/v1/aim_transactions?select=*&book=eq." + encodeURIComponent(keyOf(b)) + "&order=txn_date.asc,id.asc&limit=5000");
         const txns = (tr.status < 300 && tr.body) ? tr.body : [];
-        const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + b);
+        const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + encodeURIComponent(keyOf(b)));
         const cash = (cr.status < 300 && cr.body && cr.body.length) ? n(cr.body[0].cash) : 0;
 
         let realised = 0, costsPaid = 0;
