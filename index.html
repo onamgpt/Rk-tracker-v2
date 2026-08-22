@@ -77,6 +77,11 @@ const BUILD_STAMP="2026-08-07 06:02 UTC";
 const SALES_USERS=["sunil","satish","sugeesh","sadasivan","sebi","vinod","biju","sooraj","murugan"];
 const IS_FAMILY=FAMILY_USERS.includes(URL_USER);
 const IS_SALES=SALES_USERS.includes(URL_USER);
+// Anyone who is not staff and not family is an outside trading user. They get
+// the two trading screens on a book of their own and nothing else. Adding one
+// is a PIN, not a build — which is the whole point.
+const STAFF_USERS=["main","prakash","maadhu","virupaksha","gopal","staff1","staff2","staff3","staff4",...FAMILY_USERS,...SALES_USERS];
+const IS_TRADER=!STAFF_USERS.includes(URL_USER);
 // Owner-only team view: staff members who have their own sheet. Add {u:"maadhu",sheet:true} once their sheet is mapped in sheets.js.
 const TEAM_MEMBERS=[{u:"prakash",label:"Prakash"},{u:"staff1",label:"Staff 1"},{u:"staff2",label:"Staff 2"},{u:"staff3",label:"Staff 3"},{u:"staff4",label:"Staff 4"}];
 const IS_SHARED=["main","prakash","staff1","staff2","staff3","staff4","maadhu","virupaksha","gopal",...SALES_USERS].includes(URL_USER);
@@ -3100,14 +3105,14 @@ function ForwardTest({ onClose }) {
 
   useEffect(()=>{ (async()=>{
     try{
-      const r=await sheetsAPI("getPortfolio",{key:"screener_runs",user:"main"});
+      const r=await sheetsAPI("getPortfolio",{key:"screener_runs",user:URL_USER});
       if(r&&r.data&&Array.isArray(r.data)) setRuns(r.data);
     }catch(e){}
   })(); },[]);
 
   const persist=async(list)=>{
     setRuns(list);
-    try{ await sheetsAPI("savePortfolio",{key:"screener_runs",user:"main",data:list}); }
+    try{ await sheetsAPI("savePortfolio",{key:"screener_runs",user:URL_USER,data:list}); }
     catch(e){ setMsg("✗ could not save"); }
   };
 
@@ -11642,8 +11647,13 @@ function EmailScan({entries,onClose,onSaveEntry,onRefresh}){
 }
 
 function PinManager({ onClose }){
-  const USERS=["main","prakash","sooraj","sunil","biju","murugan","sebi","sugeesh","satish","sadasivan","vinod","staff1","staff2","staff3","staff4"];
+  const STAFF=["main","prakash","sooraj","sunil","biju","murugan","sebi","sugeesh","satish","sadasivan","vinod","staff1","staff2","staff3","staff4"];
   const [pins,setPins]=useState({});
+  const [added,setAdded]=useState([]);
+  const [newUser,setNewUser]=useState("");
+  // Anyone who already has a PIN belongs on this list even if they were never
+  // written into the code — that is what lets a new person be added without a build.
+  const USERS=[...STAFF,...Object.keys(pins).filter(u=>!STAFF.includes(u)),...added.filter(u=>!STAFF.includes(u)&&!pins[u])];
   const [drafts,setDrafts]=useState({});
   const [msg,setMsg]=useState("");
   const [loaded,setLoaded]=useState(false);
@@ -11684,6 +11694,22 @@ function PinManager({ onClose }){
           <button onClick={()=>setPin(u)} style={{padding:"7px 12px",borderRadius:6,border:"none",background:"#1a7a4a",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>Set</button>
         </div>
       ))}
+      {loaded && <div style={{marginTop:12,padding:10,borderRadius:8,background:"#f4f8f4",border:"1px solid #dde8dd"}}>
+        <div style={{fontSize:11,fontWeight:700,color:"#3a5a3a",marginBottom:6}}>ADD A PERSON</div>
+        <div style={{display:"flex",gap:6}}>
+          <input value={newUser} onChange={e=>setNewUser(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g,""))}
+            placeholder="username, e.g. prasad" style={inp}/>
+          <button onClick={()=>{ const u=newUser.trim(); if(!u) return;
+              if(!USERS.includes(u)) setAdded([...added,u]); setNewUser(""); }}
+            style={{padding:"7px 12px",borderRadius:6,border:"none",background:"#1a5a9a",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>Add</button>
+        </div>
+        <div style={{fontSize:10.5,color:"#6a7a6a",marginTop:6,lineHeight:1.5}}>
+          They appear in the list above — give them a PIN, then send them
+          the site address with <b>?user=</b> and their name on the end.
+          Anyone not on the staff list gets the trading screens only,
+          with their own separate book. No PIN means no entry.
+        </div>
+      </div>}
       <div style={{fontSize:10,color:"#8a9a8a",marginTop:10,fontStyle:"italic"}}>
         To remove a PIN, clear the box and press Set. Each person enters their PIN once per device. If a device was already unlocked, changing a PIN takes effect next time they open on a new device or after clearing site data.
       </div>
@@ -11715,7 +11741,9 @@ function PinGate({ children }){
       const r=await sheetsAPI("getPortfolio",{key:"user_pins",user:"main"});
       const map=(r&&r.data)||{};
       setPins(map);
-      if(!map[me]){ setState("open"); }   // no PIN set for this user yet -> allow
+      // Staff fail open so the owner can never be locked out. Outside trading
+      // users fail shut — an unguessed name must not be a way in.
+      if(!map[me]){ setState(IS_TRADER?"denied":"open"); }
       else setState("locked");
     }catch(e){ setState("open"); }        // any failure -> allow (do not lock owner out)
   })()},[]);
@@ -11729,6 +11757,15 @@ function PinGate({ children }){
 
   if(state==="checking") return <div style={{padding:40,textAlign:"center",color:"#889",fontFamily:"system-ui"}}>…</div>;
   if(state==="open") return children;
+  if(state==="denied") return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(160deg,#1a3a2a,#0a2a1a)",fontFamily:"system-ui",padding:20}}>
+      <div style={{background:"#fff",borderRadius:16,padding:"28px 24px",maxWidth:320,width:"100%",textAlign:"center",boxShadow:"0 10px 40px rgba(0,0,0,.3)"}}>
+        <div style={{fontSize:34,marginBottom:6}}>🔒</div>
+        <div style={{fontSize:15,fontWeight:700,color:"#1a3a2a"}}>No access set up</div>
+        <div style={{fontSize:12,color:"#889",marginTop:8,lineHeight:1.6}}>
+          This name has no PIN yet. Ask for one to be set before signing in.</div>
+      </div>
+    </div>);
 
   // locked screen
   return (
@@ -12515,14 +12552,14 @@ function AIMScreener({ book }) {
 
   useEffect(()=>{ (async()=>{
     try{
-      const r=await sheetsAPI("getPortfolio",{key:watchKey(),user:"main"});
+      const r=await sheetsAPI("getPortfolio",{key:watchKey(),user:URL_USER});
       if(r&&r.data&&Array.isArray(r.data)) setWatch(r.data);
     }catch(e){}
   })(); },[isUS]);
 
   const saveWatch=async(list)=>{
     setWatch(list);
-    try{ await sheetsAPI("savePortfolio",{key:watchKey(),user:"main",data:list}); }catch(e){}
+    try{ await sheetsAPI("savePortfolio",{key:watchKey(),user:URL_USER,data:list}); }catch(e){}
   };
 
   const addWatch=async()=>{
@@ -12545,10 +12582,10 @@ function AIMScreener({ book }) {
     try{
       const full=await getFullList();
       if(!full){ setNote("❌ Needs a Zerodha token — connect below."); setChecking(false); return; }
-      const r=await sheetsAPI("getPortfolio",{key:snapKey(),user:"main"});
+      const r=await sheetsAPI("getPortfolio",{key:snapKey(),user:URL_USER});
       const prev=(r&&r.data&&r.data.symbols)||null;
       if(!prev){
-        await sheetsAPI("savePortfolio",{key:snapKey(),user:"main",
+        await sheetsAPI("savePortfolio",{key:snapKey(),user:URL_USER,
           data:{symbols:full,at:new Date().toISOString().slice(0,10)}});
         setNote("✓ Baseline saved — "+full.length.toLocaleString("en-IN")+
           " symbols recorded today. Run this again next month and anything new will be listed.");
@@ -12556,7 +12593,7 @@ function AIMScreener({ book }) {
       }
       const before=new Set(prev);
       const fresh=full.filter(s=>!before.has(s));
-      await sheetsAPI("savePortfolio",{key:snapKey(),user:"main",
+      await sheetsAPI("savePortfolio",{key:snapKey(),user:URL_USER,
         data:{symbols:full,at:new Date().toISOString().slice(0,10)}});
       setNewFound({list:fresh,since:(r.data.at||"the last check")});
       setNote(fresh.length
@@ -13590,7 +13627,7 @@ function AIMTrading({ onClose }) {
   const api=async(payload)=>{
     const r=await fetch("/.netlify/functions/aim-api",{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify(Object.assign({book},payload))
+      body:JSON.stringify(Object.assign({book,owner:URL_USER},payload))
     });
     return r.json();
   };
@@ -14175,13 +14212,15 @@ function AIMTrading({ onClose }) {
   const num=(v)=>{const x=parseFloat(v);return isNaN(x)?0:x;};
   const fmtN=(v)=>num(v).toLocaleString("en-IN",{maximumFractionDigits:2});
 
-  return <div style={{maxHeight:"80vh",overflowY:"auto"}}>
+  return <div style={IS_TRADER?{}:{maxHeight:"80vh",overflowY:"auto"}}>
     <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
       <button onClick={()=>setBook("INDIA")} style={{...btn,background:book==="INDIA"?"#5a3a1a":"#eee",color:book==="INDIA"?"#fff":"#555"}}>🇮🇳 India</button>
       <button onClick={()=>setBook("USA")} style={{...btn,background:book==="USA"?"#5a3a1a":"#eee",color:book==="USA"?"#fff":"#555"}}>🇺🇸 USA</button>
-      <button onClick={()=>setBook("CRYPTO")} style={{...btn,background:isCrypto?"#5a3a1a":"#eee",color:isCrypto?"#fff":"#555"}}>₿ Crypto</button>
-      <button onClick={()=>setBook("HOLD")} style={{...btn,background:book==="HOLD"?"#5a3a1a":"#eee",color:book==="HOLD"?"#fff":"#555"}}>🏦 Indiabulls</button>
-      <button onClick={onClose} style={{...btn,background:"#eee",color:"#333",marginLeft:"auto"}}>✕</button>
+      {!IS_TRADER&&<button onClick={()=>setBook("CRYPTO")} style={{...btn,background:isCrypto?"#5a3a1a":"#eee",color:isCrypto?"#fff":"#555"}}>₿ Crypto</button>}
+      {!IS_TRADER&&<button onClick={()=>setBook("HOLD")} style={{...btn,background:book==="HOLD"?"#5a3a1a":"#eee",color:book==="HOLD"?"#fff":"#555"}}>🏦 Indiabulls</button>}
+      {IS_TRADER&&<span style={{marginLeft:"auto",fontSize:11,color:"#8a7a5a",fontWeight:700}}>
+        {URL_USER.charAt(0).toUpperCase()+URL_USER.slice(1)}</span>}
+      {!IS_TRADER&&<button onClick={onClose} style={{...btn,background:"#eee",color:"#333",marginLeft:"auto"}}>✕</button>}
     </div>
 
     {book!=="HOLD"&&<div style={{display:"flex",gap:4,marginBottom:10,flexWrap:"wrap"}}>
@@ -14267,7 +14306,7 @@ function AIMTrading({ onClose }) {
         </div>
       </div>}
 
-      {book==="INDIA"&&<div style={card}>
+      {book==="INDIA"&&!IS_TRADER&&<div style={card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div style={{fontSize:11,color:"#888",fontWeight:700}}>ZERODHA</div>
           <span style={{fontSize:10.5,fontWeight:700,color:kite?"#2e7d32":"#c62828"}}>
@@ -15504,6 +15543,12 @@ function App(){
    // no note-entry screen they will never use.
    if (IS_SALES && !forceFull) return <div style={{minHeight:"100vh",background:"linear-gradient(160deg,#fdf8ef,#f8f2e4)"}}>
      <FieldConsole onClose={()=>{}} rootMode={true} onOpenFull={()=>setForceFull(true)}/>
+   </div>;
+
+   // An outside trading user has no business with the rest of the tracker.
+   // Their whole app is the trading screen, on their own book.
+   if (IS_TRADER) return <div style={{minHeight:"100vh",background:"linear-gradient(160deg,#fdf8ef,#f8f2e4)",padding:"8px 6px 40px"}}>
+     <AIMTrading onClose={()=>{}}/>
    </div>;
 
 
