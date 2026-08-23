@@ -14038,12 +14038,13 @@ function AIMTrading({ onClose }) {
   const refreshPrices=async()=>{
     if(!data||!data.holdings.length){ setMsg("✗ No holdings to price"); return; }
     // The USA book has its own source — Zerodha covers India only.
-    if(book==="USA"){
+    if(book==="USA"||(book==="INDIA"&&IS_TRADER)){
       setBusy("prices"); setMsg("");
       try{
         const syms=data.holdings.map(h=>h.symbol);
         const r=await fetch("/.netlify/functions/usquote",{method:"POST",
-          headers:{"Content-Type":"application/json"},body:JSON.stringify({symbols:syms})});
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({symbols:syms,market:book==="USA"?"USA":"INDIA"})});
         const j=await r.json();
         if(!j||!j.ok) throw new Error((j&&j.error)||"no price data");
         let n=0, asOf="";
@@ -14303,18 +14304,18 @@ function AIMTrading({ onClose }) {
         </div>
       </div>}
 
-      {book==="USA"&&<div style={card}>
+      {(book==="USA"||(book==="INDIA"&&IS_TRADER))&&<div style={card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div style={{fontSize:11,color:"#888",fontWeight:700}}>US MARKET PRICES</div>
+          <div style={{fontSize:11,color:"#888",fontWeight:700}}>{book==="USA"?"US MARKET PRICES":"NSE PRICES"}</div>
           <span style={{fontSize:10,color:"#999"}}>daily close</span>
         </div>
         <button onClick={refreshPrices} disabled={!!busy}
           style={{...btn,background:"#1a3a6a",color:"#fff",width:"100%",marginTop:6}}>
-          {busy==="prices"?"…":"🔄 Refresh US prices"}</button>
+          {busy==="prices"?"…":(book==="USA"?"🔄 Refresh US prices":"🔄 Refresh prices")}</button>
         <div style={{fontSize:10.5,color:"#8a8a80",marginTop:5,lineHeight:1.5}}>
-          Until you refresh, US holdings are valued at the last price you typed in —
-          which can be weeks old, and makes every signal on this book unreliable.
-          This book also trades in fractions, so signals act below one whole share.
+          {book==="USA"
+            ? "Until you refresh, holdings are valued at the last price you typed in — which can be weeks old, and makes every signal on this book unreliable. This book also trades in fractions, so signals act below one whole share."
+            : "Until you refresh, holdings are valued at the last price you typed in. Enter symbols as they appear on the NSE — RELIANCE, INFY, TCS — with no suffix."}
         </div>
       </div>}
 
