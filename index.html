@@ -13595,7 +13595,14 @@ function AIMScreener({ book }) {
 }
 
 function AIMTrading({ onClose }) {
-  const [book,setBook]=useState("INDIA");
+  // Outside users open on USA: it is the only book with a price source they can
+  // reach on their own, and landing on India left them with no refresh button.
+  // Their choice is then remembered so an India-based user is not fought with.
+  const [book,setBook]=useState(()=>{
+    if(!IS_TRADER) return "INDIA";
+    try{ return localStorage.getItem("rk_book_"+URL_USER)||"USA"; }catch(e){ return "USA"; }
+  });
+  useEffect(()=>{ if(IS_TRADER){ try{ localStorage.setItem("rk_book_"+URL_USER,book); }catch(e){} } },[book]);
   const [tab,setTab]=useState("dash");        // dash | ledger | audit | gate
   const [data,setData]=useState(null);
   const [ledger,setLedger]=useState([]);
