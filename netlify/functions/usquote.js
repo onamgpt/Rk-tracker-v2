@@ -1,4 +1,4 @@
-// Live prices for the USA book.
+// Daily-close prices for the USA and India books.
 //
 // Originally used Stooq, which stopped returning data. Yahoo is already proven
 // in this codebase — the backtest has used it throughout — so this now goes
@@ -40,11 +40,25 @@ exports.handler = async (event) => {
 
   // All at once. Yahoo tolerates this and the whole call has to finish inside
   // the function time limit.
+  // Indian symbols carry an exchange suffix on Yahoo: NSE is .NS, BSE is .BO.
+  // A few names are listed only on one of them, so try NSE first and fall back.
+  const india = String(body.market || "USA").toUpperCase() === "INDIA";
+  const candidates = (sym) => {
+    if (!india) return [sym];
+    if (/\.(NS|BO)$/.test(sym)) return [sym];
+    return [sym + ".NS", sym + ".BO"];
+  };
+
   const results = await Promise.all(symbols.map(async (raw) => {
     const sym = String(raw).trim().toUpperCase();
-    const url = "https://query1.finance.yahoo.com/v8/finance/chart/" +
-      encodeURIComponent(sym) + "?interval=1d&range=5d";
-    const r = await get(url);
+    let r = null;
+    for (const c of candidates(sym)) {
+      const url = "https://query1.finance.yahoo.com/v8/finance/chart/" +
+        encodeURIComponent(c) + "?interval=1d&range=5d";
+      r = await get(url);
+      // Keep the first response that actually carries a price, not merely a 200.
+      if (r.status === 200 && r.body && r.body.indexOf("regularMarketPrice") > -1) break;
+    }
     return { sym, r };
   }));
 
