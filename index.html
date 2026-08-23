@@ -72,6 +72,7 @@ const OWNER_CHAT_ID="8632288596";
 const URL_USER=new URLSearchParams(window.location.search).get("user")||"main";
 const IS_OWNER=(URL_USER==="main");  // only the owner sees profit/margin figures
 const IS_ORDERS_USER=["main","prakash"].includes(URL_USER); // shop order management: owner + Prakash
+const IS_LOGISTICS_USER=["main","prakash"].includes(URL_USER); // despatch-to-payment tracking: owner + Prakash
 const FAMILY_USERS=["wife","daughter"];
 const BUILD_STAMP="2026-08-07 06:02 UTC";
 const SALES_USERS=["sunil","satish","sugeesh","sadasivan","sebi","vinod","biju","sooraj","murugan"];
@@ -11689,7 +11690,11 @@ function PinManager({ onClose }){
       {loaded && USERS.map(u=>(
         <div key={u} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid #eee"}}>
           <span style={{width:80,fontSize:13,fontWeight:600,color:"#333"}}>{u.charAt(0).toUpperCase()+u.slice(1)}</span>
-          <span style={{fontSize:11,color:pins[u]?"#1a7a3a":"#aaa",width:60}}>{pins[u]?"● set":"— none"}</span>
+          <span style={{fontSize:11,color:pins[u]?"#1a7a3a":"#aaa",width:52}}>{pins[u]?"● set":"— none"}</span>
+          {(()=>{ const staff=STAFF_USERS.includes(u);
+            return <span style={{fontSize:9,fontWeight:800,letterSpacing:.3,padding:"2px 6px",borderRadius:4,
+              whiteSpace:"nowrap",background:staff?"#e8f0fa":"#fdf0e0",color:staff?"#1a4a7a":"#8a5a1a"}}>
+              {staff?"FULL":"TRADING"}</span>; })()}
           <input value={drafts[u]||""} onChange={e=>setDrafts({...drafts,[u]:e.target.value.replace(/[^0-9]/g,"")})} type="password" inputMode="numeric" placeholder="new PIN" style={inp}/>
           <button onClick={()=>setPin(u)} style={{padding:"7px 12px",borderRadius:6,border:"none",background:"#1a7a4a",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>Set</button>
         </div>
@@ -15644,11 +15649,11 @@ function App(){
                 {l:"🏋️ Gym",fn:()=>setShowGym(true), personalOnly:true},
                 {l:"👨‍👩‍👧 Family",fn:()=>setShowFamily(true), personalOnly:true},
                 {l:"💬 Remind",fn:()=>setShowPaymentReminders(true), ownerOnly:true},
-                {l:"🚚 Logistics",fn:()=>setShowLogistics(true), ownerOnly:true},
+                {l:"🚚 Logistics",fn:()=>setShowLogistics(true), logisticsOnly:true},
                 {l:"📧 Email Scan",fn:()=>setShowEmailScan(true), ownerOnly:true},
                 {l:"🔗 Share",fn:()=>setShowShare(true), notSales:true},
                 {l:"⚙️ Settings",fn:()=>setShowDD(true), notSales:true}
-              ].filter(item => (!item.ownerOnly || IS_OWNER) && (!item.personalOnly || IS_OWNER || IS_FAMILY) && (!item.ordersOnly || IS_ORDERS_USER) && (!item.notSales || !IS_SALES)).map(it=><button key={it.l} onClick={()=>{setNavMenuOpen(false);it.fn();}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:6,border:"none",background:"transparent",color:"#f0dcae",cursor:"pointer",fontSize:13,fontWeight:600}}>{it.l}</button>)}
+              ].filter(item => (!item.ownerOnly || IS_OWNER) && (!item.personalOnly || IS_OWNER || IS_FAMILY) && (!item.ordersOnly || IS_ORDERS_USER) && (!item.logisticsOnly || IS_LOGISTICS_USER) && (!item.notSales || !IS_SALES)).map(it=><button key={it.l} onClick={()=>{setNavMenuOpen(false);it.fn();}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:6,border:"none",background:"transparent",color:"#f0dcae",cursor:"pointer",fontSize:13,fontWeight:600}}>{it.l}</button>)}
             </div>}
           </div>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
@@ -15888,7 +15893,7 @@ function App(){
     <Modal open={showAI} onClose={()=>setShowAI(false)} wide><AIPanel entries={entries} onClose={()=>setShowAI(false)} onShowAgeing={()=>setShowAgeing(true)} onShowMatcher={()=>setShowMatcher(true)} onShowLogistics={()=>setShowLogistics(true)} onShowLedger={()=>setShowLedger(true)}/></Modal>
     <Modal open={showAgeing} onClose={()=>setShowAgeing(false)} wide><AgeingReport entries={entries} onClose={()=>setShowAgeing(false)} onMarkPaid={markPaid}/></Modal>
     <Modal open={showMatcher} onClose={()=>setShowMatcher(false)} wide><PaymentMatcher entries={entries} onClose={()=>setShowMatcher(false)} onMarkPaid={markPaid}/></Modal>
-    <Modal open={showLogistics && IS_OWNER} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={(e)=>saveEntry(e,{silent:true})} onNewSalesOrder={()=>{setEditE({category:"Sales - Order",paymentStatus:"Payment Pending"});setShowForm(true);}}/></Modal>
+    <Modal open={showLogistics && IS_LOGISTICS_USER} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={(e)=>saveEntry(e,{silent:true})} onNewSalesOrder={()=>{setEditE({category:"Sales - Order",paymentStatus:"Payment Pending"});setShowForm(true);}}/></Modal>
     <Modal open={showLedger} onClose={()=>setShowLedger(false)} wide><LedgerUpload entries={entries} onClose={()=>setShowLedger(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
     <Modal open={showLocation && IS_OWNER} onClose={()=>setShowLocation(false)} wide><LocationTracker onClose={()=>setShowLocation(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showDayBook} onClose={()=>setShowDayBook(false)} wide><DayBook onClose={()=>setShowDayBook(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
