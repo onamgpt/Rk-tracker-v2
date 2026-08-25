@@ -15410,6 +15410,23 @@ function App(){
 
   const saveEntry=async(entry,opts)=>{
     setSaving(true);
+    // Anything a colleague creates should reach the owner as it happens —
+    // otherwise it sits in the sheet until someone thinks to go and look.
+    const isNewEntry = !entries.find(x=>x.id===entry.id);
+    if(isNewEntry && URL_USER!=="main" && /^Sales - (Order|Payment)$/.test(entry.category||"")){
+      const who = URL_USER.charAt(0).toUpperCase()+URL_USER.slice(1);
+      const amt = Number(entry.amount||0);
+      const line = "\ud83d\udce6 <b>"+who+" logged a new "+
+        (/Payment/.test(entry.category)?"sales payment":"sales order")+"</b>\n"+
+        (entry.vendor||entry.party||entry.person||entry.title||"(no party named)")+
+        (amt>0?"\n\u20b9"+amt.toLocaleString("en-IN"):"")+
+        (entry.date?"\n"+entry.date:"")+
+        (entry.paymentStatus?"\n"+entry.paymentStatus:"")+
+        (entry.notes?"\n\n"+String(entry.notes).slice(0,180):"");
+      try{ fetch("/.netlify/functions/telegram",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"send",chatId:OWNER_CHAT_ID,message:line})}); }catch(e){}
+    }
     // Auto 60-day payment reminder for Purchase / Sales invoice / CSD / KPKB (only if none set)
     entry=auto60Reminder(Object.assign({},entry));
     // STEP 1: Save locally immediately — never wait for Drive
