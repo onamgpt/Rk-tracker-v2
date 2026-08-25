@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Gut Log</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=Inter+Tight:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0e1113; --card:#171b1f; --card2:#1e242a; --line:#2a3238;
+  --ink:#e6e9ec; --dim:#8e9aa4; --faint:#5c6870;
+  --green:#4ea87a; --amber:#c99a3e; --red:#c05a52; --blue:#4a86b8;
+  --sans:'Inter Tight',system-ui,-apple-system,sans-serif;
+  --serif:'Newsreader',Georgia,serif;
+  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+  font-size:15px;line-height:1.55;padding-bottom:60px}
+.wrap{max-width:620px;margin:0 auto;padding:14px 14px 40px}
+h1{font-family:var(--serif);font-size:23px;font-weight:600;margin:6px 0 2px}
+.sub{color:var(--dim);font-size:12.5px;margin-bottom:14px}
+.tabs{display:flex;gap:6px;margin-bottom:16px;position:sticky;top:0;z-index:20;
+  background:var(--bg);padding:8px 0}
+.tabs button{flex:1;padding:9px 4px;border:none;border-radius:9px;background:var(--card2);
+  color:var(--dim);font-family:var(--sans);font-size:12.5px;font-weight:700;cursor:pointer}
+.tabs button.on{background:var(--blue);color:#fff}
+.card{background:var(--card);border:1px solid var(--line);border-radius:13px;
+  padding:14px;margin-bottom:12px}
+.lbl{font-size:11px;font-weight:700;letter-spacing:.4px;color:var(--faint);
+  text-transform:uppercase;margin-bottom:7px}
+input,select,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);
+  background:var(--card2);color:var(--ink);font-family:var(--sans);font-size:15px}
+textarea{min-height:70px;resize:vertical}
+input[type=date],input[type=time],input[type=datetime-local]{font-family:var(--mono);font-size:14px}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{padding:7px 11px;border-radius:16px;border:1px solid var(--line);background:var(--card2);
+  color:var(--dim);font-size:12.5px;font-weight:500;cursor:pointer;user-select:none}
+.chip.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.seg{display:flex;gap:5px}
+.seg button{flex:1;padding:8px 3px;border-radius:8px;border:1px solid var(--line);
+  background:var(--card2);color:var(--dim);font-size:12px;font-weight:600;cursor:pointer;
+  font-family:var(--sans)}
+.seg button.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.gap{font-family:var(--mono);font-size:26px;font-weight:700;text-align:center;padding:10px 0}
+.gap small{display:block;font-family:var(--sans);font-size:11.5px;font-weight:500;
+  letter-spacing:.3px;text-transform:uppercase}
+.scores{display:flex;flex-direction:column;gap:11px}
+.scoreRow{display:flex;align-items:center;gap:9px}
+.scoreRow span{width:96px;font-size:13px;color:var(--dim);flex-shrink:0}
+.scoreRow .seg{flex:1}
+.scoreRow .seg button{padding:7px 0;font-family:var(--mono);font-size:13px}
+.btn{width:100%;padding:13px;border-radius:10px;border:none;background:var(--blue);
+  color:#fff;font-family:var(--sans);font-size:15px;font-weight:700;cursor:pointer}
+.btn.ghost{background:var(--card2);color:var(--ink);border:1px solid var(--line)}
+.btn.sm{padding:9px;font-size:13px}
+.msg{padding:9px 12px;border-radius:8px;font-size:13px;font-weight:600;margin-bottom:11px}
+.msg.ok{background:#16301f;color:#7fd6a4}
+.msg.warn{background:#302516;color:#e0b060}
+.strip{display:flex;gap:2px;align-items:flex-end;height:56px;margin:4px 0 8px}
+.strip div{flex:1;border-radius:2px 2px 0 0;min-height:3px}
+.fx{display:flex;justify-content:space-between;align-items:center;padding:9px 0;
+  border-bottom:1px solid var(--line);font-size:13.5px;gap:10px}
+.fx:last-child{border-bottom:none}
+.fx b{font-family:var(--mono);font-size:13px;flex-shrink:0}
+.ep{background:var(--card2);border-radius:9px;padding:10px;margin-bottom:7px;font-size:13px}
+.ep .top{display:flex;justify-content:space-between;gap:8px;margin-bottom:3px}
+.ep .dt{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.ep button{background:none;border:none;color:var(--red);font-size:16px;cursor:pointer;padding:0 3px}
+.rep{font-family:var(--mono);font-size:11.5px;line-height:1.65;white-space:pre-wrap;
+  background:var(--card2);border-radius:9px;padding:13px;max-height:420px;overflow-y:auto}
+.chk{display:flex;align-items:flex-start;gap:9px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.chk:last-child{border-bottom:none}
+.chk input{width:19px;height:19px;flex-shrink:0;margin-top:2px}
+.chk .dstamp{font-family:var(--mono);font-size:11px;color:var(--faint)}
+.note{font-size:11.5px;color:var(--faint);line-height:1.6;margin-top:9px}
+.dial text{font-family:var(--sans);font-size:9px;fill:var(--faint)}
+.dial .hr{cursor:pointer}
+.hide{display:none}
+@media print{
+  body{background:#fff;color:#000;padding:0}
+  .tabs,.btn,.no-print{display:none!important}
+  .card{border:none;background:#fff;padding:0}
+  .rep{background:#fff;color:#000;max-height:none;overflow:visible;font-size:10.5px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Gut Log</h1>
+  <div class="sub">Nightly diary — building evidence for the consultation</div>
+
+  <div class="tabs">
+    <button data-t="night" class="on">Night</button>
+    <button data-t="episode">Episode</button>
+    <button data-t="patterns">Patterns</button>
+    <button data-t="doctor">Doctor</button>
+  </div>
+
+  <div id="msg"></div>
+  <div id="view"></div>
+</div>
+
+<script>
+/* ─────────────────────────────────────────────────────────────
+   Storage. localStorage is the instant layer; Supabase (through the
+   tracker's existing db function) is the one that survives Safari
+   clearing its site data. Every save writes both.
+   ───────────────────────────────────────────────────────────── */
+var LS = "rk_gut_v1";
+var DB = { nights:{}, tests:{}, episodes:[] };
+var SYNC = "";
+
+function loadLocal(){
+  try{
+    var raw = localStorage.getItem(LS);
+    if(raw){ var o = JSON.parse(raw);
+      DB.nights = o.nights||{}; DB.tests = o.tests||{}; DB.episodes = o.episodes||[]; }
+  }catch(e){}
+}
+function saveLocal(){
+  try{ localStorage.setItem(LS, JSON.stringify(DB)); }catch(e){}
+}
+async function cloud(action, extra){
+  var body = Object.assign({ action:action, user:"main", key:"gut" }, extra||{});
+  var r = await fetch("/.netlify/functions/db", {
+    method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)
+  });
+  if(!r.ok) throw new Error("server " + r.status);
+  return r.json();
+}
+async function pull(){
+  try{
+    var r = await cloud("getPortfolio", {});
+    if(r && r.data && (r.data.nights || r.data.episodes)){
+      var srv = r.data;
+      var srvN = Object.keys(srv.nights||{}).length;
+      var locN = Object.keys(DB.nights||{}).length;
+      // Whichever side holds more nights wins — this only matters on a fresh
+      // device, and losing a night to an overwrite is worse than a duplicate.
+      if(srvN >= locN){
+        DB.nights = srv.nights||{}; DB.tests = srv.tests||{}; DB.episodes = srv.episodes||[];
+        saveLocal();
+      }
+      SYNC = "synced";
+    } else { SYNC = "new"; }
+  }catch(e){ SYNC = "offline"; }
+  render();
+}
+var pushTimer = null;
+function save(quiet){
+  saveLocal();
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(function(){
+    cloud("savePortfolio", { data: DB }).then(function(){
+      SYNC = "synced"; if(!quiet) flash("Saved and backed up", "ok");
+    }).catch(function(){
+      SYNC = "offline"; flash("Saved on this device — backup failed, will retry on next save", "warn");
+    });
+  }, 600);
+}
+function flash(t, k){
+  var m = document.getElementById("msg");
+  m.innerHTML = '<div class="msg ' + (k||"ok") + '">' + t + '</div>';
+  setTimeout(function(){ if(m.textContent === t) m.innerHTML = ""; }, 3200);
+}
+
+/* ── helpers ── */
+function today(){ return new Date().toISOString().slice(0,10); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g, function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+function n(v){ var x = parseFloat(v); return isNaN(x) ? null : x; }
+function mean(a){ return a.length ? a.reduce(function(s,x){return s+x;},0)/a.length : null; }
+function r1(x){ return x==null ? "—" : (Math.round(x*10)/10).toFixed(1); }
+
+// Gap in hours between finishing food and lying down. Crossing midnight is
+// the normal case here, not the exception.
+function gapHours(food, lay){
+  if(!food || !lay) return null;
+  var f = food.split(":"), l = lay.split(":");
+  var fm = (+f[0])*60 + (+f[1]), lm = (+l[0])*60 + (+l[1]);
+  if(lm < fm) lm += 1440;
+  return (lm - fm) / 60;
+}
+function gapColor(g){
+  if(g == null) return "var(--faint)";
+  if(g < 4) return "var(--red)";
+  if(g < 4.5) return "var(--amber)";
+  return "var(--green)";
+}
+
+var FOODS = [
+  ["eggs","Whole eggs"],["whites","Egg whites"],["dal","Dal"],["curd","Curd"],
+  ["rice","Rice"],["chapati","Chapati / dosa"],["fried","Fried or ghee"],
+  ["spicy","Spicy"],["coffee","Coffee / tea"],["waterMeal","Water with meal"],
+  ["walked","Walked after"],["bedRaised","Bed raised"],["leftSide","Slept left side"]
+];
+var SCORES = [
+  ["regurg","Regurgitation"],["sleep","Sleep quality"],
+  ["bloat","Bloating"],["belch","Belching"]
+];
+var EP_TYPES = ["Massage","Long drive","Flight","Travel day","Meal out","Late gym","Stress","Illness","Other"];
+var EP_POS = ["Face down (prone)","Lying flat","Lying on side","Sitting long","Standing","Bending forward"];
+var TESTS = [
+  "Oesophageal manometry","24-hour pH / impedance study","Barium swallow",
+  "Gastric emptying scan","Upper GI endoscopy","Anorectal manometry",
+  "Balloon expulsion test","Colonic transit study","Defecography",
+  "Thyroid function (TSH, T3, T4)","Coeliac serology"
+];
+
+/* ── state for the night form ── */
+var cur = null;
+function blankNight(d){
+  return { date:d, lastFood:"", layDown:"", foods:{}, fat:"", portion:"", texture:"",
+           protein:"", bowel:"", urge:"", pressure:[], scores:{} };
+}
+function loadNight(d){
+  cur = DB.nights[d] ? JSON.parse(JSON.stringify(DB.nights[d])) : blankNight(d);
+  if(!cur.pressure) cur.pressure = [];
+  if(!cur.foods) cur.foods = {};
+  if(!cur.scores) cur.scores = {};
+}
+
+var tab = "night";
+document.querySelectorAll(".tabs button").forEach(function(b){
+  b.onclick = function(){
+    document.querySelectorAll(".tabs button").forEach(function(x){ x.classList.remove("on"); });
+    b.classList.add("on"); tab = b.dataset.t; render();
+  };
+});
+
+function render(){
+  var v = document.getElementById("view");
+  if(tab === "night")    v.innerHTML = viewNight();
+  if(tab === "episode")  v.innerHTML = viewEpisode();
+  if(tab === "patterns") v.innerHTML = viewPatterns();
+  if(tab === "doctor")   v.innerHTML = viewDoctor();
+  wire();
+}
+
+/* ═══════════ NIGHT ═══════════ */
+function viewNight(){
+  if(!cur) loadNight(today());
+  var g = gapHours(cur.lastFood, cur.layDown);
+  var saved = DB.nights[cur.date] ? " · saved" : "";
+  var h = "";
+
+  h += '<div class="card">'
+     + '<div class="lbl">Night of' + saved + '</div>'
+     + '<input type="date" id="nDate" value="' + cur.date + '"/>'
+     + '<div class="row" style="margin-top:10px">'
+     +   '<div><div class="lbl">Last food finished</div>'
+     +     '<input type="time" id="nFood" value="' + cur.lastFood + '"/></div>'
+     +   '<div><div class="lbl">Lay down</div>'
+     +     '<input type="time" id="nLay" value="' + cur.layDown + '"/></div>'
+     + '</div>'
+     + '<div class="gap" style="color:' + gapColor(g) + '">'
+     +   (g == null ? "—" : r1(g) + "h")
+     +   '<small>' + (g == null ? "gap before lying down"
+         : g < 4 ? "under 4 hours" : g < 4.5 ? "borderline" : "comfortable gap") + '</small>'
+     + '</div></div>';
+
+  h += '<div class="card"><div class="lbl">What was eaten, what was done</div><div class="chips">';
+  FOODS.forEach(function(f){
+    h += '<div class="chip food' + (cur.foods[f[0]] ? " on" : "") + '" data-f="' + f[0] + '">' + f[1] + '</div>';
+  });
+  h += '</div></div>';
+
+  h += '<div class="card">'
+     + seg("Fat level", "fat", ["Low","Medium","High"], cur.fat)
+     + seg("Portion size", "portion", ["Small","Medium","Large"], cur.portion)
+     + seg("Texture", "texture", ["Liquid","Soft","Solid"], cur.texture)
+     + '<div class="lbl" style="margin-top:13px">Protein (grams)</div>'
+     + '<input type="number" id="nProtein" inputmode="decimal" value="' + esc(cur.protein) + '" placeholder="approx"/>'
+     + '</div>';
+
+  h += '<div class="card">'
+     + seg("Bowel movement", "bowel", ["None","Hard","Normal"], cur.bowel)
+     + seg("Urge signal", "urge", ["Absent","Weak","Present"], cur.urge)
+     + '</div>';
+
+  h += '<div class="card"><div class="lbl">Where the pressure sits</div>' + dial() + '</div>';
+
+  h += '<div class="card"><div class="lbl">Morning scores</div><div class="scores">';
+  SCORES.forEach(function(s){
+    h += '<div class="scoreRow"><span>' + s[1] + '</span><div class="seg">';
+    for(var i=0;i<=5;i++){
+      h += '<button class="score' + (cur.scores[s[0]] === i ? " on" : "") + '" data-s="' + s[0] + '" data-v="' + i + '">' + i + '</button>';
+    }
+    h += '</div></div>';
+  });
+  h += '</div><div class="note">0 is none, 5 is worst. Sleep quality is scored the same way — '
+     + '5 means the worst sleep, so every score reads in the same direction.</div></div>';
+
+  h += '<button class="btn" id="saveNight">Save this night</button>';
+  return h;
+}
+function seg(label, key, opts, val){
+  var h = '<div class="lbl" style="margin-top:11px">' + label + '</div><div class="seg">';
+  opts.forEach(function(o){
+    h += '<button class="segb' + (val === o ? " on" : "") + '" data-k="' + key + '" data-v="' + o + '">' + o + '</button>';
+  });
+  return h + '</div>';
+}
+// Clock inverted so 12 sits at the bottom by the pelvis and 6 at the top by
+// the breastbone — the dial is meant to map onto the body, not a wall clock.
+function dial(){
+  var cx = 130, cy = 130, r = 88, h = '<svg class="dial" viewBox="0 0 260 260" width="100%" style="max-width:260px;display:block;margin:0 auto">';
+  h += '<circle cx="130" cy="130" r="104" fill="none" stroke="var(--line)" stroke-width="1"/>';
+  h += '<text x="130" y="20" text-anchor="middle">breastbone</text>';
+  h += '<text x="130" y="250" text-anchor="middle">pelvis</text>';
+  for(var i=1;i<=12;i++){
+    var a = (90 - (i % 12) * 30) * Math.PI / 180;
+    var x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+    var on = cur.pressure.indexOf(i) > -1;
+    h += '<g class="hr" data-h="' + i + '">'
+       + '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="18" '
+       + 'fill="' + (on ? "var(--red)" : "var(--card2)") + '" stroke="var(--line)" stroke-width="1"/>'
+       + '<text x="' + x.toFixed(1) + '" y="' + (y+3.5).toFixed(1) + '" text-anchor="middle" '
+       + 'style="font-size:12px;font-weight:700;fill:' + (on ? "#fff" : "var(--dim)") + '">' + i + '</text></g>';
+  }
+  h += '</svg><div class="note" style="text-align:center">Tap every hour where you feel pressure.</div>';
+  return h;
+}
+
+/* ═══════════ EPISODE ═══════════ */
+var ep = null;
+function blankEp(){
+  var d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return { when: d.toISOString().slice(0,16), type:"", pos:"", hours:"",
+           rectum:"", urge:"", discomfort:null, ended:"", notes:"" };
+}
+function viewEpisode(){
+  if(!ep) ep = blankEp();
+  var h = '<div class="card">'
+    + '<div class="lbl">When</div><input type="datetime-local" id="eWhen" value="' + ep.when + '"/>'
+    + '<div class="lbl" style="margin-top:11px">What was happening</div>'
+    + '<select id="eType"><option value="">Choose…</option>'
+    + EP_TYPES.map(function(t){ return '<option' + (ep.type===t?" selected":"") + '>' + t + '</option>'; }).join("")
+    + '</select>'
+    + '<div class="lbl" style="margin-top:11px">Body position</div>'
+    + '<select id="ePos"><option value="">Choose…</option>'
+    + EP_POS.map(function(t){ return '<option' + (ep.pos===t?" selected":"") + '>' + t + '</option>'; }).join("")
+    + '</select>'
+    + '<div class="lbl" style="margin-top:11px">Hours since food</div>'
+    + '<input type="number" id="eHours" inputmode="decimal" step="0.5" value="' + esc(ep.hours) + '"/>'
+    + seg("Rectum state", "rectum", ["Cleared","Loaded","Unsure"], ep.rectum)
+    + seg("Urge signal", "eurge", ["Absent","Weak","Present"], ep.urge)
+    + '<div class="lbl" style="margin-top:13px">Discomfort</div><div class="seg">';
+  for(var i=0;i<=5;i++) h += '<button class="edisc' + (ep.discomfort===i?" on":"") + '" data-v="' + i + '">' + i + '</button>';
+  h += '</div>'
+    + seg("How it ended", "ended", ["After stool","After burping","On its own","Persisted"], ep.ended)
+    + '<div class="lbl" style="margin-top:13px">Notes</div>'
+    + '<textarea id="eNotes" placeholder="Anything worth remembering">' + esc(ep.notes) + '</textarea>'
+    + '</div><button class="btn" id="saveEp">Save episode</button>';
+
+  var list = (DB.episodes||[]).slice().sort(function(a,b){ return (b.when||"").localeCompare(a.when||""); });
+  if(list.length){
+    h += '<div class="card" style="margin-top:12px"><div class="lbl">Recent episodes ('
+       + list.length + ')</div><div style="max-height:340px;overflow-y:auto">';
+    list.slice(0,40).forEach(function(e){
+      h += '<div class="ep"><div class="top"><b>' + esc(e.type||"Episode") + '</b>'
+         + '<button class="delEp" data-id="' + esc(e.id) + '">×</button></div>'
+         + '<div class="dt">' + esc((e.when||"").replace("T"," ")) + '</div>'
+         + '<div style="color:var(--dim);margin-top:3px">'
+         + [e.pos, e.rectum ? "rectum " + e.rectum.toLowerCase() : "",
+            e.hours !== "" && e.hours != null ? e.hours + "h since food" : "",
+            e.discomfort != null ? "discomfort " + e.discomfort : "",
+            e.ended].filter(Boolean).map(esc).join(" · ')".replace("')","")) + '</div>'
+         + (e.notes ? '<div style="margin-top:4px">' + esc(e.notes) + '</div>' : "")
+         + '</div>';
+    });
+    h += '</div></div>';
+  }
+  return h;
+}
+
+/* ═══════════ PATTERNS ═══════════ */
+function nightsArr(){
+  return Object.keys(DB.nights).sort().map(function(k){ return DB.nights[k]; });
+}
+function viewPatterns(){
+  var all = nightsArr();
+  if(all.length < 3){
+    return '<div class="card"><div class="lbl">Not enough yet</div>'
+      + '<div style="color:var(--dim);font-size:14px">' + all.length + ' night'
+      + (all.length===1?"":"s") + ' recorded. Patterns need at least three, and mean '
+      + 'something after about three weeks. Keep logging — this page fills itself in.</div></div>';
+  }
+  var last = all.slice(-30);
+  var h = '<div class="card"><div class="lbl">Last ' + last.length + ' nights — regurgitation</div><div class="strip">';
+  last.forEach(function(x){
+    var s = x.scores && x.scores.regurg;
+    var c = s == null ? "var(--card2)" : s >= 4 ? "var(--red)" : s >= 2 ? "var(--amber)" : "var(--green)";
+    h += '<div style="height:' + (s == null ? 6 : 12 + s*9) + 'px;background:' + c + '"></div>';
+  });
+  h += '</div><div class="note">Left is oldest. Grey means no score entered.</div></div>';
+
+  // Factor comparison. A factor only earns a line once there are three nights
+  // on each side of it — below that the difference is noise wearing a number.
+  var facs = [];
+  FOODS.forEach(function(f){
+    facs.push({ name:f[1], on:function(x){ return !!(x.foods && x.foods[f[0]]); } });
+  });
+  facs.push({ name:"Gap under 4h", on:function(x){ var g = gapHours(x.lastFood, x.layDown); return g != null && g < 4; } });
+  facs.push({ name:"No bowel movement", on:function(x){ return x.bowel === "None"; } });
+  facs.push({ name:"Hard stool", on:function(x){ return x.bowel === "Hard"; } });
+  facs.push({ name:"Urge absent", on:function(x){ return x.urge === "Absent"; } });
+  facs.push({ name:"Large portion", on:function(x){ return x.portion === "Large"; } });
+  facs.push({ name:"High fat", on:function(x){ return x.fat === "High"; } });
+  facs.push({ name:"Solid texture", on:function(x){ return x.texture === "Solid"; } });
+
+  var scored = all.filter(function(x){ return x.scores && x.scores.regurg != null; });
+  var rows = [];
+  facs.forEach(function(f){
+    var a = scored.filter(f.on).map(function(x){ return x.scores.regurg; });
+    var b = scored.filter(function(x){ return !f.on(x); }).map(function(x){ return x.scores.regurg; });
+    if(a.length >= 3 && b.length >= 3){
+      var ma = mean(a), mb = mean(b);
+      rows.push({ name:f.name, with:ma, without:mb, diff:ma-mb, na:a.length, nb:b.length });
+    }
+  });
+  rows.sort(function(x,y){ return Math.abs(y.diff) - Math.abs(x.diff); });
+
+  h += '<div class="card"><div class="lbl">What tracks with worse nights</div>';
+  if(!rows.length){
+    h += '<div style="color:var(--dim);font-size:13.5px">Nothing has three nights both '
+       + 'with and without it yet. That threshold is deliberate — smaller samples '
+       + 'produce confident-looking numbers that mean nothing.</div>';
+  } else {
+    rows.forEach(function(r){
+      var c = r.diff > 0.4 ? "var(--red)" : r.diff < -0.4 ? "var(--green)" : "var(--dim)";
+      h += '<div class="fx"><span>' + esc(r.name)
+         + '<br><span style="font-size:11px;color:var(--faint)">' + r.na + ' with · ' + r.nb + ' without</span></span>'
+         + '<b style="color:' + c + '">' + (r.diff>0?"+":"") + r1(r.diff) + '</b></div>';
+    });
+    h += '<div class="note">Difference in mean regurgitation score on nights with '
+       + 'that factor versus without. Positive means worse. This shows what moves '
+       + 'together — not what causes what.</div>';
+  }
+  h += '</div>';
+
+  // Episodes
+  var eps = DB.episodes || [];
+  var cl = eps.filter(function(e){ return e.rectum === "Cleared" && e.discomfort != null; }).map(function(e){ return e.discomfort; });
+  var ld = eps.filter(function(e){ return e.rectum === "Loaded" && e.discomfort != null; }).map(function(e){ return e.discomfort; });
+  var pr = eps.filter(function(e){ return e.pos === "Face down (prone)" && e.discomfort != null; }).map(function(e){ return e.discomfort; });
+  var ot = eps.filter(function(e){ return e.pos && e.pos !== "Face down (prone)" && e.discomfort != null; }).map(function(e){ return e.discomfort; });
+  if(eps.length){
+    h += '<div class="card"><div class="lbl">Episodes (' + eps.length + ')</div>'
+      + '<div class="fx"><span>Rectum cleared</span><b>' + r1(mean(cl)) + ' <span style="color:var(--faint)">(' + cl.length + ')</span></b></div>'
+      + '<div class="fx"><span>Rectum loaded</span><b>' + r1(mean(ld)) + ' <span style="color:var(--faint)">(' + ld.length + ')</span></b></div>'
+      + '<div class="fx"><span>Face down</span><b>' + r1(mean(pr)) + ' <span style="color:var(--faint)">(' + pr.length + ')</span></b></div>'
+      + '<div class="fx"><span>Other positions</span><b>' + r1(mean(ot)) + ' <span style="color:var(--faint)">(' + ot.length + ')</span></b></div>'
+      + '<div class="note">Mean discomfort, with the number of episodes behind each figure. '
+      + 'A mean built on one or two episodes is not yet worth reading.</div></div>';
+  }
+
+  // Pressure map
+  var up = 0, low = 0, cnt = {};
+  all.forEach(function(x){ (x.pressure||[]).forEach(function(hh){
+    cnt[hh] = (cnt[hh]||0) + 1;
+    if(hh >= 5 && hh <= 7) up++; else if(hh === 12 || hh === 1 || hh === 11) low++;
+  }); });
+  h += '<div class="card"><div class="lbl">Where pressure is felt</div>'
+    + '<div class="fx"><span>Upper — breastbone (5–7)</span><b>' + up + '</b></div>'
+    + '<div class="fx"><span>Lower — pelvis (11, 12, 1)</span><b>' + low + '</b></div>'
+    + '<div class="note">Counted across every night logged.</div></div>';
+
+  h += '<button class="btn ghost" id="copySum">Copy summary to discuss with Claude</button>';
+  return h;
+}
+function summaryText(){
+  var all = nightsArr(), scored = all.filter(function(x){ return x.scores && x.scores.regurg != null; });
+  var t = "GUT LOG SUMMARY\n" + all.length + " nights, " + (DB.episodes||[]).length + " episodes\n\n";
+  t += "Mean regurgitation: " + r1(mean(scored.map(function(x){ return x.scores.regurg; }))) + "\n";
+  var gaps = all.map(function(x){ return gapHours(x.lastFood, x.layDown); }).filter(function(g){ return g != null; });
+  t += "Mean gap food to lying down: " + r1(mean(gaps)) + "h\n";
+  t += "Nights with no bowel movement: " + all.filter(function(x){ return x.bowel === "None"; }).length + "\n";
+  t += "Nights urge absent: " + all.filter(function(x){ return x.urge === "Absent"; }).length + "\n";
+  return t;
+}
+
+/* ═══════════ DOCTOR ═══════════ */
+function report(){
+  var all = nightsArr();
+  var scored = all.filter(function(x){ return x.scores && x.scores.regurg != null; });
+  var gaps = all.map(function(x){ return gapHours(x.lastFood, x.layDown); }).filter(function(g){ return g != null; });
+  var L = [];
+  L.push("SYMPTOM DIARY — SUMMARY FOR CONSULTATION");
+  L.push("Prepared " + today());
+  L.push("Period covered: " + (all.length ? all[0].date + " to " + all[all.length-1].date : "—"));
+  L.push("Nights logged: " + all.length + "    Episodes logged: " + (DB.episodes||[]).length);
+  L.push("");
+  L.push("PRESENTING COMPLAINT");
+  L.push("Regurgitation of food residue into the throat on lying down, at times");
+  L.push("several hours after the last meal, disturbing sleep. Long standing.");
+  L.push("Occurs alongside chronic constipation with absent urge sensation; the two");
+  L.push("appear to track together.");
+  L.push("");
+  L.push("MEDICATION HISTORY");
+  L.push("Proton pump inhibitor, approximately three years, historic. No resolution.");
+  L.push("");
+  L.push("SYMPTOM FREQUENCY (0 none — 5 worst)");
+  [["regurg","Regurgitation"],["sleep","Sleep disturbance"],["bloat","Bloating"],["belch","Belching"]].forEach(function(s){
+    var v = all.filter(function(x){ return x.scores && x.scores[s[0]] != null; }).map(function(x){ return x.scores[s[0]]; });
+    var bad = v.filter(function(x){ return x >= 3; }).length;
+    L.push("  " + (s[1] + "                    ").slice(0,22) + "mean " + r1(mean(v))
+      + "   scored 3+ on " + bad + " of " + v.length + " nights");
+  });
+  L.push("");
+  L.push("BOWEL FUNCTION");
+  L.push("  No movement:      " + all.filter(function(x){ return x.bowel === "None"; }).length + " nights");
+  L.push("  Hard stool:       " + all.filter(function(x){ return x.bowel === "Hard"; }).length + " nights");
+  L.push("  Normal:           " + all.filter(function(x){ return x.bowel === "Normal"; }).length + " nights");
+  L.push("  Urge absent:      " + all.filter(function(x){ return x.urge === "Absent"; }).length + " nights");
+  L.push("");
+  L.push("MEAL TIMING");
+  L.push("  Mean interval, last food to lying down: " + r1(mean(gaps)) + " hours");
+  L.push("  Nights under 4 hours: " + gaps.filter(function(g){ return g < 4; }).length + " of " + gaps.length);
+  L.push("");
+  L.push("DIARY ASSOCIATIONS (mean regurgitation, with vs without)");
+  var facs = FOODS.map(function(f){ return { name:f[1], on:function(x){ return !!(x.foods && x.foods[f[0]]); } }; });
+  facs.push({ name:"No bowel movement", on:function(x){ return x.bowel === "None"; } });
+  facs.push({ name:"Gap under 4 hours", on:function(x){ var g = gapHours(x.lastFood,x.layDown); return g != null && g < 4; } });
+  var any = false;
+  facs.forEach(function(f){
+    var a = scored.filter(f.on).map(function(x){ return x.scores.regurg; });
+    var b = scored.filter(function(x){ return !f.on(x); }).map(function(x){ return x.scores.regurg; });
+    if(a.length >= 3 && b.length >= 3){
+      any = true;
+      L.push("  " + (f.name + "                        ").slice(0,26)
+        + r1(mean(a)) + " (n=" + a.length + ")  vs  " + r1(mean(b)) + " (n=" + b.length + ")");
+    }
+  });
+  if(!any) L.push("  Insufficient data — minimum three nights either side of each factor.");
+  L.push("");
+  L.push("PRESSURE DISTRIBUTION");
+  var up = 0, low = 0;
+  all.forEach(function(x){ (x.pressure||[]).forEach(function(hh){
+    if(hh >= 5 && hh <= 7) up++; else if(hh === 12 || hh === 1 || hh === 11) low++; }); });
+  L.push("  Upper abdomen / retrosternal: " + up + " reports");
+  L.push("  Lower abdomen / pelvic:       " + low + " reports");
+  L.push("");
+  L.push("INVESTIGATIONS NOT YET PERFORMED");
+  TESTS.forEach(function(t){ if(!DB.tests[t]) L.push("  [ ] " + t); });
+  L.push("");
+  L.push("INVESTIGATIONS COMPLETED");
+  var done = TESTS.filter(function(t){ return DB.tests[t]; });
+  if(done.length) done.forEach(function(t){ L.push("  [x] " + t + "  — " + DB.tests[t]); });
+  else L.push("  None to date.");
+  L.push("");
+  L.push("QUESTIONS FOR THE CONSULTATION");
+  L.push("  1. Is this reflux, or a motility or emptying problem presenting as reflux?");
+  L.push("  2. Given three years of PPI without resolution, what does that rule out?");
+  L.push("  3. Does the constipation share a mechanism with the regurgitation, or");
+  L.push("     is it raising abdominal pressure and driving it mechanically?");
+  L.push("  4. Which investigation would change management soonest?");
+  L.push("  5. Is the absent urge sensation itself worth investigating separately?");
+  L.push("");
+  L.push("Diary kept prospectively. Scores are the patient's own, recorded nightly.");
+  return L.join("\n");
+}
+function viewDoctor(){
+  var h = '<div class="card no-print"><div class="lbl">Investigations</div>';
+  TESTS.forEach(function(t){
+    h += '<label class="chk"><input type="checkbox" class="tchk" data-t="' + esc(t) + '"'
+      + (DB.tests[t] ? " checked" : "") + '/><span>' + esc(t)
+      + (DB.tests[t] ? '<br><span class="dstamp">done ' + esc(DB.tests[t]) + '</span>' : "")
+      + '</span></label>';
+  });
+  h += '<div class="note">Ticking one stamps today\'s date and moves it into the completed '
+     + 'list on the report.</div></div>';
+  h += '<div class="card"><div class="lbl no-print">Report</div><div class="rep">' + esc(report()) + '</div></div>';
+  h += '<div class="row no-print" style="margin-bottom:10px">'
+     + '<button class="btn sm" id="prt">Print</button>'
+     + '<button class="btn sm ghost" id="cpy">Copy</button></div>';
+  h += '<div class="row no-print">'
+     + '<button class="btn sm ghost" id="csv">Export CSV</button>'
+     + '<button class="btn sm ghost" id="bak">Backup JSON</button></div>';
+  h += '<div class="no-print" style="margin-top:10px">'
+     + '<label class="btn sm ghost" style="display:block;text-align:center;cursor:pointer">'
+     + 'Restore from backup<input type="file" id="rst" accept=".json" style="display:none"/></label></div>';
+  h += '<div class="note no-print">Data is saved on this device and backed up to the '
+     + 'tracker\'s own storage. Status: ' + (SYNC === "synced" ? "backed up" : SYNC === "offline"
+     ? "device only — backup unreachable" : "no backup yet") + '.</div>';
+  return h;
+}
+function csv(){
+  var head = ["date","lastFood","layDown","gapHours","fat","portion","texture","protein","bowel","urge","pressure"]
+    .concat(FOODS.map(function(f){ return f[0]; }))
+    .concat(SCORES.map(function(s){ return s[0]; }));
+  var lines = [head.join(",")];
+  nightsArr().forEach(function(x){
+    var row = [x.date, x.lastFood, x.layDown, r1(gapHours(x.lastFood,x.layDown)),
+      x.fat, x.portion, x.texture, x.protein, x.bowel, x.urge, '"' + (x.pressure||[]).join(" ") + '"'];
+    FOODS.forEach(function(f){ row.push(x.foods && x.foods[f[0]] ? 1 : 0); });
+    SCORES.forEach(function(s){ row.push(x.scores && x.scores[s[0]] != null ? x.scores[s[0]] : ""); });
+    lines.push(row.join(","));
+  });
+  return lines.join("\n");
+}
+function dl(name, text, type){
+  var b = new Blob([text], { type: type || "text/plain" });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(b); a.download = name; a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+}
+
+/* ═══════════ wiring ═══════════ */
+function wire(){
+  var $ = function(id){ return document.getElementById(id); };
+
+  if(tab === "night"){
+    $("nDate").onchange = function(e){ loadNight(e.target.value); render(); };
+    $("nFood").oninput  = function(e){ cur.lastFood = e.target.value; render(); };
+    $("nLay").oninput   = function(e){ cur.layDown = e.target.value; render(); };
+    $("nProtein").oninput = function(e){ cur.protein = e.target.value; };
+    document.querySelectorAll(".chip.food").forEach(function(c){
+      c.onclick = function(){ var k = c.dataset.f; cur.foods[k] = !cur.foods[k]; c.classList.toggle("on"); };
+    });
+    document.querySelectorAll(".segb").forEach(function(b){
+      b.onclick = function(){ cur[b.dataset.k] = (cur[b.dataset.k] === b.dataset.v) ? "" : b.dataset.v; render(); };
+    });
+    document.querySelectorAll(".score").forEach(function(b){
+      b.onclick = function(){ cur.scores[b.dataset.s] = +b.dataset.v; render(); };
+    });
+    document.querySelectorAll(".dial .hr").forEach(function(g){
+      g.onclick = function(){
+        var hh = +g.dataset.h, i = cur.pressure.indexOf(hh);
+        if(i > -1) cur.pressure.splice(i,1); else cur.pressure.push(hh);
+        render();
+      };
+    });
+    $("saveNight").onclick = function(){
+      if(!cur.date){ flash("Pick a date first","warn"); return; }
+      DB.nights[cur.date] = JSON.parse(JSON.stringify(cur));
+      save(); flash("Night of " + cur.date + " saved","ok"); render();
+    };
+  }
+
+  if(tab === "episode"){
+    $("eWhen").oninput  = function(e){ ep.when = e.target.value; };
+    $("eType").onchange = function(e){ ep.type = e.target.value; };
+    $("ePos").onchange  = function(e){ ep.pos = e.target.value; };
+    $("eHours").oninput = function(e){ ep.hours = e.target.value; };
+    $("eNotes").oninput = function(e){ ep.notes = e.target.value; };
+    document.querySelectorAll(".segb").forEach(function(b){
+      b.onclick = function(){
+        var k = b.dataset.k === "eurge" ? "urge" : b.dataset.k;
+        ep[k] = (ep[k] === b.dataset.v) ? "" : b.dataset.v; render();
+      };
+    });
+    document.querySelectorAll(".edisc").forEach(function(b){
+      b.onclick = function(){ ep.discomfort = +b.dataset.v; render(); };
+    });
+    $("saveEp").onclick = function(){
+      if(!ep.type){ flash("Pick what was happening","warn"); return; }
+      ep.id = "ep_" + Date.now();
+      DB.episodes.push(JSON.parse(JSON.stringify(ep)));
+      save(); flash("Episode saved","ok"); ep = blankEp(); render();
+    };
+    document.querySelectorAll(".delEp").forEach(function(b){
+      b.onclick = function(){
+        if(!confirm("Delete this episode?")) return;
+        DB.episodes = DB.episodes.filter(function(x){ return x.id !== b.dataset.id; });
+        save(); render();
+      };
+    });
+  }
+
+  if(tab === "patterns"){
+    var c = $("copySum");
+    if(c) c.onclick = function(){
+      navigator.clipboard.writeText(summaryText())
+        .then(function(){ flash("Summary copied","ok"); })
+        .catch(function(){ flash("Copy failed — select the text instead","warn"); });
+    };
+  }
+
+  if(tab === "doctor"){
+    document.querySelectorAll(".tchk").forEach(function(c){
+      c.onchange = function(){
+        var t = c.dataset.t;
+        if(c.checked) DB.tests[t] = today(); else delete DB.tests[t];
+        save(); render();
+      };
+    });
+    $("prt").onclick = function(){ window.print(); };
+    $("cpy").onclick = function(){
+      navigator.clipboard.writeText(report())
+        .then(function(){ flash("Report copied","ok"); })
+        .catch(function(){ flash("Copy failed — select the text instead","warn"); });
+    };
+    $("csv").onclick = function(){ dl("gut-log-" + today() + ".csv", csv(), "text/csv"); };
+    $("bak").onclick = function(){ dl("gut-backup-" + today() + ".json", JSON.stringify(DB,null,2), "application/json"); };
+    $("rst").onchange = function(e){
+      var f = e.target.files[0]; if(!f) return;
+      var r = new FileReader();
+      r.onload = function(){
+        try{
+          var o = JSON.parse(r.result);
+          if(!o.nights && !o.episodes) throw new Error("not a Gut Log backup");
+          if(!confirm("Replace everything currently stored with this backup?")) return;
+          DB.nights = o.nights||{}; DB.tests = o.tests||{}; DB.episodes = o.episodes||[];
+          save(); flash("Restored","ok"); render();
+        }catch(err){ flash("Could not read that file — " + err.message, "warn"); }
+      };
+      r.readAsText(f);
+    };
+  }
+}
+
+loadLocal();
+loadNight(today());
+render();
+pull();
+</script>
+</body>
+</html>
