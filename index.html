@@ -1995,26 +1995,49 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
     setImporting(false);
   };
 
-  // Monthly summary from entries
+  // Monthly summary from entries. The month is steppable — allowances get
+  // settled after the month closes, so the current month is rarely the one
+  // being looked at.
   const now = new Date();
-  const thisMonth = now.getMonth();
-  const thisYear = now.getFullYear();
+  const [mOff, setMOff] = useState(0);          // 0 = this month, -1 = last, ...
+  const cur = new Date(now.getFullYear(), now.getMonth() + mOff, 1);
+  const thisMonth = cur.getMonth();
+  const thisYear = cur.getFullYear();
+  const inMonth = e => e.date && new Date(e.date).getMonth() === thisMonth &&
+                       new Date(e.date).getFullYear() === thisYear;
+
   const locationEntries = (entries || []).filter(e =>
-    e.category === "Sales - Expense" && (e.tags || []).includes("Travel") &&
-    e.date && new Date(e.date).getMonth() === thisMonth &&
-    new Date(e.date).getFullYear() === thisYear
+    e.category === "Sales - Expense" && (e.tags || []).includes("Travel") && inMonth(e)
+  );
+
+  // Everything else booked against an officer in the same month — conveyance,
+  // samples, freight, whatever was logged. Travel is already counted above,
+  // so it is excluded here to avoid double counting.
+  const TEAM = Object.values(SALES_CONFIG.emailMap).map(p => p.name);
+  const travelIds = {};
+  locationEntries.forEach(e => { if (e.id) travelIds[e.id] = 1; });
+  const otherEntries = (entries || []).filter(e =>
+    inMonth(e) && !(e.id && travelIds[e.id]) &&
+    /expense|purchase|petty|convey/i.test(e.category || "") &&
+    TEAM.some(n => String(e.person || e.vendor || "").toLowerCase() === n.toLowerCase())
   );
 
   // Group by person
   const byPerson = {};
+  const seed = n => { if (!byPerson[n]) byPerson[n] = { hq:0, exhq:0, outstation:0, total:0, other:0, entries:[], others:[] }; return byPerson[n]; };
   locationEntries.forEach(e => {
-    if (!byPerson[e.person]) byPerson[e.person] = { hq:0, exhq:0, outstation:0, total:0, entries:[] };
-    const p = byPerson[e.person];
+    const p = seed(e.person);
     if ((e.tags||[]).includes("HQ")) p.hq++;
     else if ((e.tags||[]).includes("Ex-HQ")) p.exhq++;
     else if ((e.tags||[]).includes("Outstation")) p.outstation++;
     p.total += parseFloat(e.amount || 0);
     p.entries.push(e);
+  });
+  otherEntries.forEach(e => {
+    const nm = TEAM.filter(n => String(e.person || e.vendor || "").toLowerCase() === n.toLowerCase())[0];
+    const p = seed(nm);
+    p.other += parseFloat(e.amount || 0);
+    p.others.push(e);
   });
 
   const fmt = n => n == null ? "—" : "₹" + Number(n).toLocaleString("en-IN");
@@ -2126,14 +2149,23 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
 
       {/* ── MONTHLY SUMMARY VIEW ── */}
       {view === "summary" && <>
-        <div style={{ fontSize:13, fontWeight:700, color:"#1a3a6a", marginBottom:10 }}>
-          {MONTHS[thisMonth]} {thisYear} — Travel Allowance Summary
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+          <button onClick={()=>setMOff(mOff-1)} style={{ padding:"5px 11px", borderRadius:7, border:"1px solid #cfd8e8",
+            background:"#fff", color:"#1a3a6a", fontWeight:700, fontSize:13, cursor:"pointer" }}>‹</button>
+          <div style={{ fontSize:13, fontWeight:700, color:"#1a3a6a" }}>
+            {MONTHS[thisMonth]} {thisYear} — Expenses per Officer
+          </div>
+          <button onClick={()=>setMOff(Math.min(0, mOff+1))} disabled={mOff>=0}
+            style={{ padding:"5px 11px", borderRadius:7, border:"1px solid #cfd8e8",
+            background: mOff>=0 ? "#f2f2f2" : "#fff", color:"#1a3a6a", fontWeight:700, fontSize:13,
+            cursor: mOff>=0 ? "default" : "pointer" }}>›</button>
         </div>
 
         {Object.keys(byPerson).length === 0
           ? <div style={{ textAlign:"center", padding:"24px 16px", color:"#999", fontSize:12,
               background:"#fafafa", borderRadius:10 }}>
-              No location entries this month yet.<br/>Scan and import emails above.
+              Nothing recorded against any officer for {MONTHS[thisMonth]}.<br/>
+              Scan and import location emails, or log an expense with the officer's name in the Person field.
             </div>
           : <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
               {Object.entries(byPerson).map(([name, data]) => (
@@ -2141,7 +2173,11 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
                   border:"1px solid #e0e8f0", padding:12 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
                     <div style={{ fontSize:14, fontWeight:700, color:"#1a3a6a" }}>{name}</div>
-                    <div style={{ fontSize:15, fontWeight:700, color:"#2a6a2a" }}>{fmt(data.total)}</div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ fontSize:15, fontWeight:700, color:"#2a6a2a" }}>{fmt(data.total + data.other)}</div>
+                      {data.other > 0 && <div style={{ fontSize:10, color:"#8a7a5a", fontWeight:600 }}>
+                        {fmt(data.total)} travel + {fmt(data.other)} other</div>}
+                    </div>
                   </div>
                   <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
                     {data.hq > 0 && <span style={{ fontSize:11, background:"#e8f5e9", color:"#1a5a1a",
@@ -2152,6 +2188,8 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
                       padding:"3px 10px", borderRadius:8 }}>✈️ Outstation: {data.outstation} days</span>}
                     <span style={{ fontSize:11, background:"#f5f5f5", color:"#555",
                       padding:"3px 10px", borderRadius:8 }}>Total: {data.entries.length} days</span>
+                    {data.others.length > 0 && <span style={{ fontSize:11, background:"#fdf3e0", color:"#8a5a1a",
+                      padding:"3px 10px", borderRadius:8 }}>🧾 {data.others.length} other expense{data.others.length>1?"s":""}</span>}
                   </div>
                 </div>
               ))}
@@ -2159,9 +2197,9 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
               {/* Grand total */}
               <div style={{ background:"#1a3a6a", borderRadius:10, padding:12,
                 display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <div style={{ color:"#fff", fontSize:13, fontWeight:700 }}>Total Allowance Payable</div>
+                <div style={{ color:"#fff", fontSize:13, fontWeight:700 }}>Total Payable This Month</div>
                 <div style={{ color:"#f0c060", fontSize:16, fontWeight:700 }}>
-                  {fmt(Object.values(byPerson).reduce((s, p) => s + p.total, 0))}
+                  {fmt(Object.values(byPerson).reduce((s, p) => s + p.total + p.other, 0))}
                 </div>
               </div>
             </div>
