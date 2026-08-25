@@ -8035,22 +8035,86 @@ function CSD({ onClose, onSaveEntry }) {
   const fmt = n => "₹" + Math.round(Number(n)||0).toLocaleString("en-IN");
   const num = v => { const n = parseFloat(String(v??"").replace(/[^0-9.]/g,"")); return isNaN(n)?0:n; };
 
+  // A spreadsheet carries the exact numbers already. Reading them straight out
+  // beats photographing the screen and asking a model to squint at it — the CSD
+  // allocation is a grid of small digits, which is the worst case for OCR.
+  const sheetToAlloc = (buf) => {
+    const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    const codes = CSD_PRODUCTS.map(p => p.index);
+    // The header row is whichever row carries the index numbers.
+    let hdr = -1, cols = {};
+    for (let i = 0; i < grid.length && hdr < 0; i++) {
+      const row = grid[i].map(c => String(c).trim());
+      const found = {};
+      row.forEach((c, j) => { if (codes.indexOf(c) > -1) found[c] = j; });
+      if (Object.keys(found).length >= 2) { hdr = i; cols = found; }
+    }
+    if (hdr < 0) throw new Error("No row of index numbers (13094, 13095, 13130, 13132) found in this sheet");
+    // Depot names sit in the first column that held the word Depot, else column 0.
+    let dcol = grid[hdr].findIndex(c => String(c).trim().toLowerCase() === "depot");
+    if (dcol < 0) dcol = 0;
+    const rows = [], totals = {};
+    for (let i = hdr + 1; i < grid.length; i++) {
+      const depot = String(grid[i][dcol] || "").trim();
+      if (!depot) continue;
+      if (/grand\s*total|^total$/i.test(depot)) continue;   // a sum, not a depot
+      const cases = {};
+      Object.keys(cols).forEach(code => {
+        const v = parseFloat(String(grid[i][cols[code]]).replace(/[^0-9.]/g, ""));
+        if (v > 0) { cases[code] = v; totals[code] = (totals[code] || 0) + v; }
+      });
+      rows.push({ depot: depot.toUpperCase(), cases });
+    }
+    if (!rows.length) throw new Error("Index numbers found, but no depot rows under them");
+    // Case totals per product, so this doubles as the PO lines if read as a PO.
+    const lines = Object.keys(totals).map(code => {
+      const p = CSD_PRODUCTS.filter(x => x.index === code)[0] || {};
+      return { index: code, name: p.name || "", casePack: p.casePack || 0, rate: p.rate || 0, cases: totals[code] };
+    });
+    // Sheets are usually titled "... for Sep-26" — pull the period off the top rows.
+    let period = "";
+    for (let i = 0; i < Math.min(hdr + 1, grid.length) && !period; i++) {
+      const m = String(grid[i].join(" ")).match(/([A-Z][a-z]{2})[\s\-\/]?(\d{2,4})/);
+      if (m) period = m[1] + "-" + m[2].slice(-2);
+    }
+    return { rows, lines, period };
+  };
+
   const onPick = ev => {
-    const f = ev.target.files && ev.target.files[0]; 
+    const f = ev.target.files && ev.target.files[0];
     if (!f) { setMsg("❌ No file selected"); return; }
+    setPending(null); setFcPending(null);
+    const isSheet = /\.(xlsx|xlsm|xls|csv)$/i.test(f.name || "");
     const r = new FileReader();
     r.onerror = () => setMsg("❌ Failed to read file");
     r.onload = () => {
       if (!r.result) { setMsg("❌ File read returned empty"); return; }
-      setPhoto({ dataUrl: r.result, type: f.type || "image/jpeg" });
-      setMsg(`✓ Ready to scan (${Math.round(f.size/1024)}KB)`);
+      if (isSheet) {
+        try {
+          const a = sheetToAlloc(r.result);
+          setPhoto({ sheet: a, name: f.name });
+          setMsg("✓ Read " + a.rows.length + " depots and " + a.lines.length + " products straight from the sheet — no scanning needed");
+        } catch (e) { setPhoto(null); setMsg("❌ " + String(e.message || e)); }
+      } else {
+        setPhoto({ dataUrl: r.result, type: f.type || "image/jpeg", name: f.name });
+        setMsg("✓ Ready to scan (" + Math.round(f.size/1024) + "KB)");
+      }
     };
-    r.readAsDataURL(f);
-    setPending(null);
+    if (isSheet) r.readAsArrayBuffer(f); else r.readAsDataURL(f);
   };
 
   const scan = async () => {
     if (!photo) return;
+    if (photo.sheet) {
+      setPending({ poNo: "", poDate: new Date().toISOString().slice(0,10),
+        deliveryFrom: "", deliveryTo: "",
+        lines: photo.sheet.lines,
+        allocation: photo.sheet.rows });
+      setMsg("✓ Read from the sheet — check the PO number and dates below, they are not in an allocation sheet");
+      return;
+    }
     setBusy(true); setMsg("📄 Reading the CSD order / allocation…");
     try {
       const b64 = String(photo.dataUrl).split(",")[1];
@@ -8066,7 +8130,7 @@ function CSD({ onClose, onSaveEntry }) {
       const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
       const obj = JSON.parse(s>=0 ? clean.substring(s,e+1) : clean);
       setPending(obj); setMsg("");
-    } catch(e) { setMsg("❌ Couldn't read it clearly — try a sharper image."); }
+    } catch(e) { setMsg("❌ Couldn't read it — " + String(e.message||e) + ". A spreadsheet (.xlsx or .csv) reads exactly and is always better than a photo."); }
     setBusy(false);
   };
 
@@ -8102,6 +8166,11 @@ function CSD({ onClose, onSaveEntry }) {
   // ---- tentative / forecast allocation ----
   const scanForecast = async () => {
     if (!photo) return;
+    if (photo.sheet) {
+      setFcPending({ period: photo.sheet.period || "", rows: photo.sheet.rows });
+      setMsg("✓ Read from the sheet — " + photo.sheet.rows.length + " depots");
+      return;
+    }
     setBusy(true); setMsg("🔮 Reading the tentative allocation…");
     try {
       const b64 = String(photo.dataUrl).split(",")[1];
@@ -8116,7 +8185,7 @@ function CSD({ onClose, onSaveEntry }) {
       const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
       const obj = JSON.parse(s>=0 ? clean.substring(s,e+1) : clean);
       setFcPending(obj); setMsg("");
-    } catch(e) { setMsg("❌ Couldn't read the sheet clearly."); }
+    } catch(e) { setMsg("❌ Couldn't read it — " + String(e.message||e) + ". A spreadsheet (.xlsx or .csv) reads exactly and is always better than a photo."); }
     setBusy(false);
   };
 
@@ -8353,12 +8422,19 @@ function CSD({ onClose, onSaveEntry }) {
         <div style={{ background:"#eef3fb", border:"1px solid #c8d8f0", borderRadius:8, padding:10, marginBottom:10, fontSize:11.5, color:"#2a4a7a" }}>
           Upload the CSD purchase order <b>and</b> its depot-wise allocation sheet. The allocation creates one dispatch row per depot.
         </div>
-        <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={onPick} style={{ display:"none" }}/>
+        <input ref={fileRef} type="file" accept="image/*,application/pdf,.xlsx,.xlsm,.xls,.csv" onChange={onPick} style={{ display:"none" }}/>
         <button onClick={()=>fileRef.current && fileRef.current.click()} style={{ width:"100%", padding:"11px", borderRadius:10, border:"1.5px dashed #2a4a7a", background:"#f3f7fd", color:"#2a4a7a", fontWeight:700, fontSize:14, cursor:"pointer", marginBottom:10 }}>
           📄 Upload PO / allocation
         </button>
         {photo && <div style={{ textAlign:"center", marginBottom:10 }}>
-          <img src={photo.dataUrl} alt="po" style={{ maxWidth:"100%", maxHeight:170, borderRadius:8, border:"1px solid #ddd" }}/>
+          {photo.sheet
+            ? <div style={{padding:"14px",background:"#eef6ee",borderRadius:8,border:"1px solid #cfe4cf",fontSize:13,color:"#2a5a2a",fontWeight:700}}>
+                📗 {photo.name}
+                <div style={{fontSize:11,fontWeight:600,color:"#5a7a5a",marginTop:4}}>
+                  {photo.sheet.rows.length} depots · {photo.sheet.lines.length} products
+                  {photo.sheet.period ? " · " + photo.sheet.period : ""} · read exactly, not scanned</div>
+              </div>
+            : <img src={photo.dataUrl} alt="po" style={{ maxWidth:"100%", maxHeight:170, borderRadius:8, border:"1px solid #ddd" }}/>}
           <div style={{ display:"flex", gap:8, marginTop:8 }}>
             <button onClick={scan} disabled={busy} style={{ flex:1, padding:"11px 6px", borderRadius:10, border:"none", background:"#2a4a7a", color:"#fff", fontWeight:700, fontSize:12.5, cursor:"pointer" }}>
               {busy ? "⏳…" : "📄 Read as PO"}
