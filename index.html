@@ -1126,7 +1126,17 @@ function LogisticsTracker({entries,onClose,onUpdateEntry,onNewSalesOrder}){
   // Only genuine sales orders belong in logistics: must have a logistics tag/stage OR be an explicit Sales-Order with a monetary value.
   const hasStage=(e)=>e.tags&&(e.tags.includes("Logistics")||LOGISTICS_STAGES.some(s=>e.tags.includes("Stage: "+s)));
   const hasValue=(e)=>{const a=parseFloat(String(e.amount||"").replace(/[^0-9.]/g,""));return !isNaN(a)&&a>0;};
-  const shipments=entries.filter(e=>!isJunk(e) && (hasStage(e) || (e.category==="Sales - Order"&&hasValue(e))));
+  // A shipment is goods going to a customer. Travel allowances, commission and
+  // anything else booked against our own staff is money going the other way and
+  // has no despatch stage — a stray Logistics tag must not drag it in here.
+  const isOurOwn=(e)=>{
+    const tg=e.tags||[];
+    if(tg.includes("Travel")||tg.includes("HQ")||tg.includes("Ex-HQ")||tg.includes("Outstation")) return true;
+    if(/commission|allowance|salary|incentive|expense|reimburse/i.test((e.title||"")+" "+(e.category||""))) return true;
+    return false;
+  };
+  const isCustomerOrder=(e)=>e.category==="Sales - Order"||e.category==="Sales - Payment";
+  const shipments=entries.filter(e=>!isJunk(e) && !isOurOwn(e) && isCustomerOrder(e) && (hasStage(e)||hasValue(e)));
   const junkCount=entries.filter(e=>(e.category==="Sales - Payment"||e.category==="Sales - Order")&&isJunk(e)).length;
   const selected=shipments.find(e=>e.id===selectedId);
 
@@ -1251,8 +1261,8 @@ function LogisticsTracker({entries,onClose,onUpdateEntry,onNewSalesOrder}){
         return<div key={e.id} style={{background:"#f8f8f8",borderRadius:10,border:"1px solid #eee",marginBottom:4,overflow:"hidden"}}>
           <div onClick={()=>setSelectedId(e.id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px",cursor:"pointer"}}>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:14,fontWeight:700,color:"#1a3a6a",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.person||e.vendor||e.title||"Invoice"}{e.amount?<span style={{marginLeft:8,color:"#2a6a2a"}}> {"₹"+(String(e.amount).replace(/[^\d]/g,""))}</span>:null}</div>
-              <div style={{fontSize:10,color:"#999",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.title} · {e.date}</div>
+              <div style={{fontSize:14,fontWeight:700,color:"#1a3a6a",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.vendor||e.title||e.person||"Invoice"}{e.amount?<span style={{marginLeft:8,color:"#2a6a2a"}}> {"₹"+(String(e.amount).replace(/[^\d]/g,""))}</span>:null}</div>
+              <div style={{fontSize:10,color:"#999",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{[e.person&&("Officer: "+e.person),e.date].filter(Boolean).join(" · ")}</div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <span style={{fontSize:10,fontWeight:700,color:stageColor,padding:"3px 9px",borderRadius:12,background:stageColor+"15"}}>{STAGE_ICONS[stageIdx]||"📋"} {stageName}</span>
@@ -1970,7 +1980,9 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
         category: "Sales - Expense",
         person: email.salesperson.name,
         amount: String(email.allowance || 0),
-        paymentStatus: "Payment Pending",
+        // Left blank on purpose. "Payment Pending" means a customer owes us;
+        // an allowance is the opposite direction and was polluting receivables.
+        paymentStatus: "",
         tags: ["Travel", email.band.label],
         notes: "Location: " + (email.coords ? email.coords.lat + "," + email.coords.lng : "?") +
                " | HQ: " + (email.salesperson.hq) +
@@ -16033,7 +16045,7 @@ function App(){
     <Modal open={showAI} onClose={()=>setShowAI(false)} wide><AIPanel entries={entries} onClose={()=>setShowAI(false)} onShowAgeing={()=>setShowAgeing(true)} onShowMatcher={()=>setShowMatcher(true)} onShowLogistics={()=>setShowLogistics(true)} onShowLedger={()=>setShowLedger(true)}/></Modal>
     <Modal open={showAgeing} onClose={()=>setShowAgeing(false)} wide><AgeingReport entries={entries} onClose={()=>setShowAgeing(false)} onMarkPaid={markPaid}/></Modal>
     <Modal open={showMatcher} onClose={()=>setShowMatcher(false)} wide><PaymentMatcher entries={entries} onClose={()=>setShowMatcher(false)} onMarkPaid={markPaid}/></Modal>
-    <Modal open={showLogistics && IS_LOGISTICS_USER} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={(e)=>saveEntry(e,{silent:true})} onNewSalesOrder={()=>{setEditE({category:"Sales - Order",paymentStatus:"Payment Pending"});setShowForm(true);}}/></Modal>
+    <Modal open={showLogistics && IS_LOGISTICS_USER} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={(e)=>saveEntry(e,{silent:true})} onNewSalesOrder={()=>{setEditE({category:"",paymentStatus:""});setShowForm(true);}}/></Modal>
     <Modal open={showLedger} onClose={()=>setShowLedger(false)} wide><LedgerUpload entries={entries} onClose={()=>setShowLedger(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
     <Modal open={showLocation && IS_OWNER} onClose={()=>setShowLocation(false)} wide><LocationTracker onClose={()=>setShowLocation(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showDayBook} onClose={()=>setShowDayBook(false)} wide><DayBook onClose={()=>setShowDayBook(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
