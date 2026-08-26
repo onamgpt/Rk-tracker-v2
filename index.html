@@ -1156,7 +1156,10 @@ function computeStatutory(basic, da, hra, other, monthIdx, minWage){
   const gross = bd + n(hra) + n(other);
   const R = PAYROLL_RATES;
 
-  const basicDaShareOk = gross > 0 ? (bd / gross) >= 0.499 : true; // 50% floor, small tolerance
+  // Excludes overtime from this specific ratio — the 50% floor is about CTC
+  // structure, and a heavy-OT month shouldn't falsely trip it.
+  const structuralGross = bd + n(hra);
+  const basicDaShareOk = structuralGross > 0 ? (bd / structuralGross) >= 0.499 : true;
   const pfWage = Math.min(bd, R.pfWageCeiling);
   const pfEmployee = r2(pfWage * R.pfEmployeeRate);
   const eps = Math.min(r2(pfWage * R.epsRate), R.epsCap);
@@ -1193,13 +1196,13 @@ function PayrollTracker({onClose}){
   // entry here at all: it's just always off.
   const [holidays,setHolidays]=useState(null); // [{date,label}]
   const [settings,setSettings]=useState({earnedLeavePerDays:20, casualLeavePerYear:12, sickLeavePerYear:12, minWage:"",
-    minWageByCat:{unskilled:"",semiskilled:"",skilled:"",highlyskilled:""}});
+    minWageByCat:{unskilled:"",semiskilled:"",skilled:"",highlyskilled:""}, normalHoursPerDay:"8"});
   const [loading,setLoading]=useState(true);
   const [msg,setMsg]=useState("");
   const [editW,setEditW]=useState(null);
   const [rollDate,setRollDate]=useState(()=>new Date().toISOString().slice(0,10));
   const [noteFor,setNoteFor]=useState(null);   // workerId currently showing its note editor
-  const [noteDraft,setNoteDraft]=useState({note:"",timeIn:"",timeOut:""});
+  const [noteDraft,setNoteDraft]=useState({note:"",timeIn:"",timeOut:"",ot:""});
   const [curMonth,setCurMonth]=useState(()=>new Date().toISOString().slice(0,7));
   const [auditorFig,setAuditorFig]=useState({pf:"",esi:"",pt:""});
   const [holDraft,setHolDraft]=useState({date:"",label:""});
@@ -1207,23 +1210,27 @@ function PayrollTracker({onClose}){
   const [exits,setExits]=useState(null);   // append-only gratuity/F&F register
   const [exitFor,setExitFor]=useState(null);
   const [exitDate,setExitDate]=useState("");
+  const [deductions,setDeductions]=useState(null);   // [{id,workerId,date,category,amount,reason,realized}]
+  const [dedDraft,setDedDraft]=useState({workerId:"",date:"",category:"Fine",amount:"",reason:"",realized:false});
 
   useEffect(()=>{ (async()=>{
     setLoading(true);
     try{
-      const [w,mu,h,s,ex] = await Promise.all([
+      const [w,mu,h,s,ex,dd] = await Promise.all([
         sheetsAPI("getPortfolio",{key:"payroll_workers"}),
         sheetsAPI("getPortfolio",{key:"payroll_muster"}),
         sheetsAPI("getPortfolio",{key:"payroll_holidays"}),
         sheetsAPI("getPortfolio",{key:"payroll_settings"}),
         sheetsAPI("getPortfolio",{key:"payroll_exits"}),
+        sheetsAPI("getPortfolio",{key:"payroll_deductions"}),
       ]);
       setWorkers((w&&w.data&&Array.isArray(w.data))?w.data:[]);
       setMuster((mu&&mu.data&&typeof mu.data==="object")?mu.data:{});
       setHolidays((h&&h.data&&Array.isArray(h.data))?h.data:[]);
       if(s&&s.data) setSettings(prev=>({...prev,...s.data}));
       setExits((ex&&ex.data&&Array.isArray(ex.data))?ex.data:[]);
-    }catch(e){ setMsg("✗ "+String(e.message||e)); setWorkers([]); setMuster({}); setHolidays([]); setExits([]); }
+      setDeductions((dd&&dd.data&&Array.isArray(dd.data))?dd.data:[]);
+    }catch(e){ setMsg("✗ "+String(e.message||e)); setWorkers([]); setMuster({}); setHolidays([]); setExits([]); setDeductions([]); }
     setLoading(false);
   })(); },[]);
 
@@ -1231,6 +1238,7 @@ function PayrollTracker({onClose}){
   const saveMuster=async(obj)=>{ setMuster(obj); try{ await sheetsAPI("savePortfolio",{key:"payroll_muster",data:obj}); }catch(e){ setMsg("✗ Could not save — check connection"); } };
   const saveHolidays=async(list)=>{ setHolidays(list); try{ await sheetsAPI("savePortfolio",{key:"payroll_holidays",data:list}); }catch(e){} };
   const saveExits=async(list)=>{ setExits(list); try{ await sheetsAPI("savePortfolio",{key:"payroll_exits",data:list}); }catch(e){} };
+  const saveDeductions=async(list)=>{ setDeductions(list); try{ await sheetsAPI("savePortfolio",{key:"payroll_deductions",data:list}); }catch(e){} };
   const saveSettings=async(obj)=>{ setSettings(obj); try{ await sheetsAPI("savePortfolio",{key:"payroll_settings",data:obj}); }catch(e){} };
 
   if(loading) return <div style={{padding:20,textAlign:"center",color:"#888"}}>Loading…</div>;
@@ -1280,7 +1288,7 @@ function PayrollTracker({onClose}){
     // Clean up: an entry that has gone back to plain "present, nothing to say"
     // is removed entirely rather than kept as an empty object — the sparse
     // model only means something if truly-default days leave no trace.
-    const isEmpty = (!merged.status || merged.status==="P") && !merged.note && !merged.timeIn && !merged.timeOut;
+    const isEmpty = (!merged.status || merged.status==="P") && !merged.note && !merged.timeIn && !merged.timeOut && !n(merged.ot);
     if(isEmpty) delete dayRec[workerId]; else dayRec[workerId]=merged;
     const nextMuster = {...muster};
     if(Object.keys(dayRec).length===0) delete nextMuster[dateStr]; else nextMuster[dateStr]=dayRec;
@@ -1293,11 +1301,12 @@ function PayrollTracker({onClose}){
   };
   const openNote = (workerId) => {
     const e = entryOn(rollDate, workerId);
-    setNoteDraft({note:e.note||"", timeIn:e.timeIn||"", timeOut:e.timeOut||""});
+    setNoteDraft({note:e.note||"", timeIn:e.timeIn||"", timeOut:e.timeOut||"", ot:e.ot||""});
     setNoteFor(workerId);
   };
   const saveNote = () => {
-    writeEntry(rollDate, noteFor, {note:noteDraft.note||undefined, timeIn:noteDraft.timeIn||undefined, timeOut:noteDraft.timeOut||undefined});
+    writeEntry(rollDate, noteFor, {note:noteDraft.note||undefined, timeIn:noteDraft.timeIn||undefined,
+      timeOut:noteDraft.timeOut||undefined, ot:noteDraft.ot||undefined});
     setNoteFor(null);
   };
 
@@ -1308,15 +1317,16 @@ function PayrollTracker({onClose}){
     return out;
   };
   const attendanceIn = (workerId, from, to) => {
-    let present=0, absent=0, paidLeave=0, off=0;
+    let present=0, absent=0, paidLeave=0, off=0, otHours=0;
     dateRange(from,to).forEach(ds=>{
       const st = statusOn(ds, workerId);
       if(st==="A") absent++;
       else if(st==="L") paidLeave++;
       else if(isOffDay(ds)) off++;          // Sunday or an approved holiday — paid, not "present"
       else present++;
+      otHours += n(entryOn(ds, workerId).ot);
     });
-    return { present, absent, paidLeave, off, payableDays: present+paidLeave+off };
+    return { present, absent, paidLeave, off, otHours:r2(otHours), payableDays: present+paidLeave+off };
   };
 
   const monthWindow=(ym)=>{
@@ -1326,17 +1336,43 @@ function PayrollTracker({onClose}){
     return { from:y+"-"+String(m).padStart(2,"0")+"-01", to };
   };
 
+  // Statutory overtime: double the ordinary hourly rate, where ordinary rate
+  // is the day's full wage spread over the normal working hours in that day.
+  const otRateFor = (w)=>{
+    const dailyGross = n(w.dailyBasic)+n(w.dailyDA)+n(w.dailyHRA);
+    const hrs = Math.max(1, n(settings.normalHoursPerDay));
+    return r2((dailyGross/hrs) * 2);
+  };
+
+  const dedForMonth = (workerId, ym)=>{
+    const {from,to} = monthWindow(ym);
+    return (deductions||[]).filter(d=>d.workerId===workerId && d.date>=from && d.date<=to);
+  };
+
   const payFor = (w, ym)=>{
     const {from,to} = monthWindow(ym);
     const effFrom = (w.doj && w.doj>from) ? w.doj : from;
-    if(effFrom>to) return { present:0,absent:0,paidLeave:0,off:0,payableDays:0,basic:0,da:0,hra:0,
-      gross:0,basicDaShareOk:true,pfWage:0,pfEmployee:0,pfEmployer:0,eps:0,edli:0,
-      esiApplicable:false,esiEmployee:0,esiEmployer:0,pt:0,bonusAccrual:0,gratuityAccrual:0,netPay:0 };
+    if(effFrom>to) return { present:0,absent:0,paidLeave:0,off:0,otHours:0,payableDays:0,basic:0,da:0,hra:0,
+      otAmount:0,otRate:0,deductionTotal:0,fineTotal:0,gross:0,basicDaShareOk:true,pfWage:0,pfEmployee:0,pfEmployer:0,eps:0,edli:0,
+      esiApplicable:false,esiEmployee:0,esiEmployer:0,pt:0,bonusAccrual:0,gratuityAccrual:0,netPay:0,overFineCap:false,overDeductionCap:false };
     const att = attendanceIn(w.id, effFrom, to);
     const b=r2(n(w.dailyBasic)*att.payableDays), d=r2(n(w.dailyDA)*att.payableDays), h=r2(n(w.dailyHRA)*att.payableDays);
+    const otRate = otRateFor(w);
+    const otAmount = r2(att.otHours * otRate);
     const mIdx = parseInt(ym.split("-")[1],10)-1;
-    const stat = computeStatutory(b, d, h, 0, mIdx, settings.minWage);
-    return { ...att, basic:b, da:d, hra:h, ...stat };
+    const stat = computeStatutory(b, d, h, otAmount, mIdx, settings.minWage);
+
+    const monthDeds = dedForMonth(w.id, ym);
+    const deductionTotal = r2(monthDeds.reduce((s,x)=>s+n(x.amount),0));
+    const fineTotal = r2(monthDeds.filter(x=>x.category==="Fine").reduce((s,x)=>s+n(x.amount),0));
+    // Payment of Wages Act: fines capped at 3% of wages in the month; all
+    // deductions together capped at 50% (75% where co-operative dues apply,
+    // which this tool doesn't try to distinguish — flag conservatively at 50%).
+    const overFineCap = stat.gross>0 && fineTotal > r2(stat.gross*0.03);
+    const overDeductionCap = stat.gross>0 && deductionTotal > r2(stat.gross*0.50);
+
+    return { ...att, basic:b, da:d, hra:h, otRate, otAmount, deductionTotal, fineTotal, overFineCap, overDeductionCap,
+      ...stat, netPay: r2(stat.netPay - deductionTotal) };
   };
 
   const monthRows = activeWorkers.map(w=>({ w, pay: payFor(w, curMonth) }));
@@ -1382,7 +1418,7 @@ function PayrollTracker({onClose}){
     </div>
 
     <div style={{display:"flex",gap:5,marginBottom:10,flexWrap:"wrap"}}>
-      {[["roll","✅ Daily Roll"],["holidays","🎉 Holidays"],["workers","👷 Workers"],["pay","💰 Monthly Pay"],["leave","🗓 Leave"],["reports","📄 Reports"],["summary","📊 Summary"],["settings","⚙ Settings"]].map(([k,l])=>
+      {[["roll","✅ Daily Roll"],["holidays","🎉 Holidays"],["workers","👷 Workers"],["pay","💰 Monthly Pay"],["deductions","🧾 Deductions"],["leave","🗓 Leave"],["reports","📄 Reports"],["summary","📊 Summary"],["settings","⚙ Settings"]].map(([k,l])=>
         <button key={k} onClick={()=>setTab(k)} style={{...btn,padding:"7px 10px",fontSize:11.5,
           background:tab===k?"#5a3a1a":"#f0f0f0",color:tab===k?"#fff":"#555"}}>{l}</button>)}
     </div>
@@ -1454,6 +1490,8 @@ function PayrollTracker({onClose}){
             </div>
             <input value={noteDraft.note} onChange={e=>setNoteDraft({...noteDraft,note:e.target.value})}
               placeholder="Remark, e.g. came in at 10:30" style={{...inp,marginBottom:6}}/>
+            <input value={noteDraft.ot} onChange={e=>setNoteDraft({...noteDraft,ot:e.target.value})}
+              inputMode="decimal" placeholder="Overtime hours today, if any" style={{...inp,marginBottom:6}}/>
             <div style={{display:"flex",gap:6}}>
               <button onClick={saveNote} style={{...btn,background:"#2a4a7a",color:"#fff",flex:1,padding:7}}>Save note</button>
               <button onClick={()=>setNoteFor(null)} style={{...btn,background:"#eee",color:"#555",padding:7}}>Cancel</button>
@@ -1617,14 +1655,20 @@ function PayrollTracker({onClose}){
           <div style={{fontSize:11,color:"#666",lineHeight:1.7}}>
             {pay.present} worked + {pay.off} Sunday/holiday + {pay.paidLeave} paid leave = {pay.payableDays} payable days
             {pay.absent>0 && <span style={{color:"#c62828",fontWeight:700}}> · {pay.absent} absent</span>}<br/>
-            Basic {cur0(pay.basic)} + DA {cur0(pay.da)} + HRA {cur0(pay.hra)}<br/>
+            Basic {cur0(pay.basic)} + DA {cur0(pay.da)} + HRA {cur0(pay.hra)}
+            {pay.otHours>0 && <> + OT {pay.otHours}h × {cur0(pay.otRate)} = {cur0(pay.otAmount)}</>}<br/>
             PF: employee {cur0(pay.pfEmployee)} · employer {cur0(pay.pfEmployer+pay.eps)} (incl. EPS {cur0(pay.eps)}, EDLI {cur0(pay.edli)} extra)<br/>
             ESI: {pay.esiApplicable ? ("employee "+cur0(pay.esiEmployee)+" · employer "+cur0(pay.esiEmployer)) : "not applicable — gross over ₹21,000"}<br/>
             PT: {cur0(pay.pt)} {pay.pt===0 && pay.gross>0 ? "(exempt, gross under ₹25,000)" : ""}<br/>
             Bonus accrual: {cur0(pay.bonusAccrual)} · Gratuity accrual: {cur0(pay.gratuityAccrual)}
+            {pay.deductionTotal>0 && <><br/>Deductions this month: <span style={{color:"#c62828"}}>−{cur0(pay.deductionTotal)}</span></>}
           </div>
           {!pay.basicDaShareOk && pay.gross>0 && <div style={{fontSize:10.5,color:"#c62828",fontWeight:700,marginTop:4}}>
             ⚠ Basic+DA under 50% of gross this month</div>}
+          {pay.overFineCap && <div style={{fontSize:10.5,color:"#c62828",fontWeight:700,marginTop:4}}>
+            ⚠ Fines this month exceed the 3% of wages cap under the Payment of Wages Act</div>}
+          {pay.overDeductionCap && <div style={{fontSize:10.5,color:"#c62828",fontWeight:700,marginTop:4}}>
+            ⚠ Total deductions exceed the 50% of wages cap under the Payment of Wages Act</div>}
           <div style={{fontSize:12.5,fontWeight:800,marginTop:6,paddingTop:6,borderTop:"1px solid #f0f0f0"}}>
             Net pay: {cur0(pay.netPay)}
           </div>
@@ -1663,6 +1707,56 @@ function PayrollTracker({onClose}){
       })}
     </>}
 
+    {/* ============================= DEDUCTIONS ============================ */}
+    {tab==="deductions" && <>
+      <div style={{fontSize:10.5,color:"#888",marginBottom:10,lineHeight:1.5}}>
+        Payment of Wages Act: fines need a displayed list of approved reasons and a chance to show
+        cause first — this tool only tracks the register and the caps, it doesn't replace that process.
+        Fines alone are capped at 3% of that month's wages; all deductions together at 50%.
+      </div>
+      <div style={card}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:6}}>Add a deduction</div>
+        <select style={inp} value={dedDraft.workerId} onChange={e=>setDedDraft({...dedDraft,workerId:e.target.value})}>
+          <option value="">Select worker…</option>
+          {activeWorkers.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}
+        </select>
+        <div style={{display:"flex",gap:6}}>
+          <input type="date" style={inp} value={dedDraft.date} max={todayStr} onChange={e=>setDedDraft({...dedDraft,date:e.target.value})}/>
+          <select style={inp} value={dedDraft.category} onChange={e=>setDedDraft({...dedDraft,category:e.target.value})}>
+            <option>Fine</option><option>Damage/Loss</option><option>Advance Recovery</option><option>Other</option>
+          </select>
+        </div>
+        <input style={inp} inputMode="decimal" placeholder="Amount (₹)" value={dedDraft.amount} onChange={e=>setDedDraft({...dedDraft,amount:e.target.value})}/>
+        <input style={inp} placeholder="Reason — required, goes on the register" value={dedDraft.reason} onChange={e=>setDedDraft({...dedDraft,reason:e.target.value})}/>
+        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,marginBottom:8}}>
+          <input type="checkbox" checked={dedDraft.realized} onChange={e=>setDedDraft({...dedDraft,realized:e.target.checked})}/>
+          Already recovered from wages
+        </label>
+        <button onClick={()=>{
+            if(!dedDraft.workerId||!dedDraft.date||!n(dedDraft.amount)||!dedDraft.reason){
+              setMsg("✗ Worker, date, amount and reason are all required for the register"); return; }
+            saveDeductions([...(deductions||[]), {id:"ded_"+Date.now(), ...dedDraft}]);
+            setDedDraft({workerId:"",date:"",category:"Fine",amount:"",reason:"",realized:false});
+            setMsg("✓ Added to the register");
+          }} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%"}}>Add</button>
+      </div>
+
+      <div style={{fontWeight:800,fontSize:13,marginBottom:6}}>Recorded ({(deductions||[]).length})</div>
+      {(!deductions||deductions.length===0) && <div style={{color:"#999",fontSize:13}}>None recorded.</div>}
+      {(deductions||[]).slice().sort((a,b)=>b.date.localeCompare(a.date)).map(d=>{
+        const w = workers.find(x=>x.id===d.workerId);
+        return <div key={d.id} style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px"}}>
+          <div style={{fontSize:12}}>
+            <b>{w?w.name:"(removed)"}</b> — {d.category}, {cur0(d.amount)} on {d.date}
+            {!d.realized && <span style={{color:"#a5720a"}}> · not yet recovered</span>}
+            <div style={{color:"#888",fontSize:11}}>{d.reason}</div>
+          </div>
+          <button onClick={()=>saveDeductions(deductions.filter(x=>x.id!==d.id))}
+            style={{background:"none",border:"none",color:"#c62828",fontSize:16,cursor:"pointer"}}>×</button>
+        </div>;
+      })}
+    </>}
+
     {/* ============================== REPORTS ============================= */}
     {tab==="reports" && <>
       <input type="month" value={curMonth} onChange={e=>setCurMonth(e.target.value)} style={{...inp,marginBottom:10}}/>
@@ -1671,11 +1765,11 @@ function PayrollTracker({onClose}){
         <div style={{fontWeight:800,fontSize:13,marginBottom:4}}>Wage register — {curMonth}</div>
         <div style={{fontSize:10.5,color:"#888",marginBottom:8}}>One row per worker: days, gross, PF, ESI, PT, net.</div>
         <button onClick={()=>{
-            const rows=[["Name","DOJ","Category","Worked","Sunday/Holiday","Paid Leave","Absent","Basic","DA","HRA","Gross",
-              "PF Employee","PF Employer","ESI Employee","ESI Employer","PT","Net Pay"]];
+            const rows=[["Name","DOJ","Category","Worked","Sunday/Holiday","Paid Leave","Absent","Basic","DA","HRA",
+              "OT Hours","OT Amount","Gross","PF Employee","PF Employer","ESI Employee","ESI Employer","PT","Deductions","Net Pay"]];
             monthRows.forEach(({w,pay})=>rows.push([w.name,w.doj,CAT_LABEL[w.category]||w.category,
-              pay.present,pay.off,pay.paidLeave,pay.absent,pay.basic,pay.da,pay.hra,pay.gross,
-              pay.pfEmployee,r2(pay.pfEmployer+pay.eps),pay.esiEmployee,pay.esiEmployer,pay.pt,pay.netPay]));
+              pay.present,pay.off,pay.paidLeave,pay.absent,pay.basic,pay.da,pay.hra,pay.otHours,pay.otAmount,pay.gross,
+              pay.pfEmployee,r2(pay.pfEmployer+pay.eps),pay.esiEmployee,pay.esiEmployer,pay.pt,pay.deductionTotal,pay.netPay]));
             downloadCSV("wage-register-"+curMonth+".csv", rows);
           }} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%"}}>Download wage register (CSV)</button>
       </div>
@@ -1697,6 +1791,38 @@ function PayrollTracker({onClose}){
             });
             downloadCSV("muster-roll-"+curMonth+".csv", rows);
           }} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%"}}>Download muster roll (CSV)</button>
+      </div>
+
+      <div style={card}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:4}}>Overtime register — {curMonth}</div>
+        <div style={{fontSize:10.5,color:"#888",marginBottom:8}}>Every day any worker logged overtime hours, at the statutory double rate.</div>
+        <button onClick={()=>{
+            const {from,to}=monthWindow(curMonth);
+            const rows=[["Name","Date","OT Hours","Ordinary Hourly Rate","OT Rate (2x)","OT Amount"]];
+            activeWorkers.forEach(w=>{
+              const rate=otRateFor(w);
+              dateRange(from,to).forEach(ds=>{
+                const oh=n(entryOn(ds,w.id).ot);
+                if(oh>0) rows.push([w.name,ds,oh,r2(rate/2),rate,r2(oh*rate)]);
+              });
+            });
+            if(rows.length===1){ setMsg("No overtime logged for "+curMonth); return; }
+            downloadCSV("overtime-register-"+curMonth+".csv", rows);
+          }} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%"}}>Download overtime register (CSV)</button>
+      </div>
+
+      <div style={card}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:4}}>Fines &amp; deductions register — {curMonth}</div>
+        <button onClick={()=>{
+            const {from,to}=monthWindow(curMonth);
+            const rows=[["Name","Date","Category","Amount","Reason","Recovered"]];
+            (deductions||[]).filter(d=>d.date>=from&&d.date<=to).forEach(d=>{
+              const w=workers.find(x=>x.id===d.workerId);
+              rows.push([w?w.name:"(removed)",d.date,d.category,d.amount,d.reason,d.realized?"Yes":"No"]);
+            });
+            if(rows.length===1){ setMsg("No deductions recorded for "+curMonth); return; }
+            downloadCSV("deductions-register-"+curMonth+".csv", rows);
+          }} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%"}}>Download deductions register (CSV)</button>
       </div>
 
       <div style={card}>
@@ -1789,6 +1915,10 @@ function PayrollTracker({onClose}){
             value={(settings.minWageByCat||{})[cat]||""}
             onChange={e=>setSettings({...settings,minWageByCat:{...(settings.minWageByCat||{}),[cat]:e.target.value}})}/>
         </div>)}
+
+      <div style={{fontSize:11,fontWeight:700,marginBottom:3,marginTop:6}}>Normal working hours per day (for overtime rate)</div>
+      <input style={inp} inputMode="numeric" value={settings.normalHoursPerDay}
+        onChange={e=>setSettings({...settings,normalHoursPerDay:e.target.value})}/>
 
       <button onClick={()=>saveSettings(settings)} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%",marginTop:6}}>Save settings</button>
     </div>}
