@@ -1155,6 +1155,44 @@ function LogisticsTracker({entries,onClose,onUpdateEntry,onNewSalesOrder}){
     }
   };
 
+  // Turns an entry's Reminder field into an actual Telegram push, or cancels
+  // one that no longer applies. This is what "Reminder -> Telegram (fires
+  // 24/7)" on the form was always supposed to do — until now it only drove
+  // an in-app badge, which nobody sees unless the tracker happens to be open.
+  const syncTelegramReminder=async(entry)=>{
+    try{
+      const cur=await sheetsAPI("getPortfolio",{key:"tg_scheduled"});
+      let list=(cur&&cur.data&&Array.isArray(cur.data.scheduled))?cur.data.scheduled:[];
+      const tag="tg_rem_"+entry.id;
+      list=list.filter(m=>m.id!==tag);   // always drop any previous version first
+
+      const cancelled = !entry.reminder || entry.remindDone;
+      if(!cancelled){
+        // Send to the chat of whoever owns this entry, falling back to the
+        // owner — a colleague's personal reminder has no business waking you.
+        const cr=await sheetsAPI("getPortfolio",{key:"tg_contacts"});
+        const contacts=(cr&&cr.data&&Array.isArray(cr.data))?cr.data:[];
+        const mine=contacts.find(c=>String(c.label||c.name||"").toLowerCase()===String(URL_USER).toLowerCase());
+        const chatId = mine ? mine.chatId : OWNER_CHAT_ID;
+        const days = parseInt(entry.remindDays||"0",10);
+        const item = {
+          id: tag,
+          text: "\u23f0 <b>"+(entry.title||"Reminder")+"</b>"+(entry.reminderNote?"\n"+entry.reminderNote:""),
+          chatIds: chatId?[chatId]:[],
+          when: new Date(entry.reminder).toISOString(),
+          repeat: days>0 ? "daily" : "once",
+          entryId: entry.id, owner: URL_USER,
+          created: new Date().toISOString()
+        };
+        // "Keep reminding for N days" is a window, not a forever-alarm — give
+        // the scheduler an end date so it stops nagging once that window closes.
+        if(days>0){ const u=new Date(entry.reminder); u.setDate(u.getDate()+days); item.until=u.toISOString(); }
+        if(item.chatIds.length) list.push(item);
+      }
+      await sheetsAPI("savePortfolio",{key:"tg_scheduled",data:{scheduled:list}});
+    }catch(e){ /* never block a save over this */ }
+  };
+
   const scheduleFollowup=async(entry, days, region)=>{
     try{
       // Find Prakash's Telegram chatId
@@ -15475,6 +15513,10 @@ function App(){
         setSyncStatus(r.error?"📱 Saved locally · sync pending":"✅ Saved · backed up to Sheets");
       }).catch(()=>setSyncStatus("📱 Saved locally"));
     });
+    // Push (or cancel) the actual Telegram alarm for this entry's reminder field.
+    // Saving an entry has never done this before now — the "fires 24/7" label
+    // on the form was aspirational, not wired to anything.
+    syncTelegramReminder(finalEntry);
     if(entry.person&&!dropdowns.persons.includes(entry.person))addToDropdown("persons",entry.person);
     if(entry.vendor&&!dropdowns.vendors.includes(entry.vendor))addToDropdown("vendors",entry.vendor);
     if(entry.account&&!dropdowns.accounts.includes(entry.account))addToDropdown("accounts",entry.account);
