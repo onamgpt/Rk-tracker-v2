@@ -1181,66 +1181,93 @@ function computeStatutory(basic, da, hra, other, monthIdx, minWage){
 }
 
 function PayrollTracker({onClose}){
-  const [tab,setTab]=useState("workers");
+  const [tab,setTab]=useState("roll");
   const [workers,setWorkers]=useState(null);
-  const [months,setMonths]=useState(null);   // { "YYYY-MM": { workerId: {daysPresent,paidLeave,...} } }
+  // Sparse by design: a date only gets an entry in here for the workers who
+  // were NOT present that day. Everyone else, every day, is present unless
+  // this says otherwise — that's the whole point of "mark the exception."
+  const [muster,setMuster]=useState(null);   // { "YYYY-MM-DD": { workerId: "A"|"L" } }
   const [settings,setSettings]=useState({earnedLeavePerDays:20, casualLeavePerYear:12, sickLeavePerYear:12, minWage:""});
   const [loading,setLoading]=useState(true);
   const [msg,setMsg]=useState("");
   const [editW,setEditW]=useState(null);
+  const [rollDate,setRollDate]=useState(()=>new Date().toISOString().slice(0,10));
   const [curMonth,setCurMonth]=useState(()=>new Date().toISOString().slice(0,7));
   const [auditorFig,setAuditorFig]=useState({pf:"",esi:"",pt:""});
 
   useEffect(()=>{ (async()=>{
     setLoading(true);
     try{
-      const [w,m,s] = await Promise.all([
+      const [w,mu,s] = await Promise.all([
         sheetsAPI("getPortfolio",{key:"payroll_workers"}),
-        sheetsAPI("getPortfolio",{key:"payroll_months"}),
+        sheetsAPI("getPortfolio",{key:"payroll_muster"}),
         sheetsAPI("getPortfolio",{key:"payroll_settings"}),
       ]);
       setWorkers((w&&w.data&&Array.isArray(w.data))?w.data:[]);
-      setMonths((m&&m.data&&typeof m.data==="object")?m.data:{});
+      setMuster((mu&&mu.data&&typeof mu.data==="object")?mu.data:{});
       if(s&&s.data) setSettings(prev=>({...prev,...s.data}));
-    }catch(e){ setMsg("✗ "+String(e.message||e)); setWorkers([]); setMonths({}); }
+    }catch(e){ setMsg("✗ "+String(e.message||e)); setWorkers([]); setMuster({}); }
     setLoading(false);
   })(); },[]);
 
   const saveWorkers=async(list)=>{ setWorkers(list); try{ await sheetsAPI("savePortfolio",{key:"payroll_workers",data:list}); }catch(e){} };
-  const saveMonths=async(obj)=>{ setMonths(obj); try{ await sheetsAPI("savePortfolio",{key:"payroll_months",data:obj}); }catch(e){} };
+  const saveMuster=async(obj)=>{ setMuster(obj); try{ await sheetsAPI("savePortfolio",{key:"payroll_muster",data:obj}); }catch(e){ setMsg("✗ Could not save — check connection"); } };
   const saveSettings=async(obj)=>{ setSettings(obj); try{ await sheetsAPI("savePortfolio",{key:"payroll_settings",data:obj}); }catch(e){} };
 
   if(loading) return <div style={{padding:20,textAlign:"center",color:"#888"}}>Loading…</div>;
 
   const activeWorkers = workers.filter(w=>w.active!==false);
-  const monthIdx = parseInt(curMonth.split("-")[1],10)-1;
-  const monthData = months[curMonth] || {};
+  const todayStr = new Date().toISOString().slice(0,10);
 
-  // ---- attendance / pay entry -------------------------------------------
-  const setDay=(workerId, field, val)=>{
-    const rec = {...(monthData[workerId]||{daysPresent:"",paidLeave:"",unpaidAbsent:""})};
-    rec[field]=val;
-    const next = {...months, [curMonth]: {...monthData, [workerId]: rec}};
-    saveMonths(next);
+  // ---- daily roll: cycle Present -> Absent -> Paid Leave -> Present -------
+  const statusOn = (dateStr, workerId) => (muster[dateStr]||{})[workerId] || "P";
+  const cycleStatus = (dateStr, workerId) => {
+    const cur = statusOn(dateStr, workerId);
+    const next = cur==="P" ? "A" : cur==="A" ? "L" : "P";
+    const dayRec = {...(muster[dateStr]||{})};
+    if(next==="P") delete dayRec[workerId]; else dayRec[workerId]=next;
+    const nextMuster = {...muster};
+    if(Object.keys(dayRec).length===0) delete nextMuster[dateStr]; else nextMuster[dateStr]=dayRec;
+    saveMuster(nextMuster);
   };
 
-  const totalWorkingDays = (ym)=>{
+  // ---- derive attendance for any date range purely from the sparse log ----
+  // No day ever needs to be "closed" or confirmed — every date between join
+  // and today is present by default, so the count falls straight out of the
+  // exceptions on record. This is what makes "only mark absences" possible.
+  const dateRange=(from,to)=>{
+    const out=[]; let d=new Date(from+"T00:00:00");
+    const end=new Date(to+"T00:00:00");
+    while(d<=end){ out.push(d.toISOString().slice(0,10)); d.setDate(d.getDate()+1); }
+    return out;
+  };
+  const attendanceIn = (workerId, from, to) => {
+    let present=0, absent=0, paidLeave=0;
+    dateRange(from,to).forEach(ds=>{
+      const st = statusOn(ds, workerId);
+      if(st==="A") absent++; else if(st==="L") paidLeave++; else present++;
+    });
+    return { present, absent, paidLeave, payableDays: present+paidLeave };
+  };
+
+  const monthWindow=(ym)=>{
     const [y,m]=ym.split("-").map(Number);
-    return new Date(y, m, 0).getDate();
+    const lastDay=new Date(y,m,0).getDate();
+    const to = ym===todayStr.slice(0,7) ? todayStr : (y+"-"+String(m).padStart(2,"0")+"-"+String(lastDay).padStart(2,"0"));
+    return { from:y+"-"+String(m).padStart(2,"0")+"-01", to };
   };
 
   const payFor = (w, ym)=>{
-    const rec = (months[ym]||{})[w.id] || {};
-    const totalDays = totalWorkingDays(ym);
-    const present = n(rec.daysPresent), paidLeave = n(rec.paidLeave);
-    const payableDays = present + paidLeave;
-    const factor = totalDays>0 ? payableDays/totalDays : 0;
-    const basic = r2(n(w.dailyBasic)*totalDays*factor/ (totalDays>0?1:1)); // dailyBasic is a per-day rate already
-    // dailyBasic/DA/HRA are RATES PER DAY WORKED, so pay is simply rate x payable days
-    const b = r2(n(w.dailyBasic)*payableDays), d = r2(n(w.dailyDA)*payableDays), h = r2(n(w.dailyHRA)*payableDays);
+    const {from,to} = monthWindow(ym);
+    const effFrom = (w.doj && w.doj>from) ? w.doj : from;
+    if(effFrom>to) return { present:0,absent:0,paidLeave:0,payableDays:0,basic:0,da:0,hra:0,
+      gross:0,basicDaShareOk:true,pfWage:0,pfEmployee:0,pfEmployer:0,eps:0,edli:0,
+      esiApplicable:false,esiEmployee:0,esiEmployer:0,pt:0,bonusAccrual:0,gratuityAccrual:0,netPay:0 };
+    const att = attendanceIn(w.id, effFrom, to);
+    const b=r2(n(w.dailyBasic)*att.payableDays), d=r2(n(w.dailyDA)*att.payableDays), h=r2(n(w.dailyHRA)*att.payableDays);
     const mIdx = parseInt(ym.split("-")[1],10)-1;
     const stat = computeStatutory(b, d, h, 0, mIdx, settings.minWage);
-    return { present, paidLeave, payableDays, totalDays, basic:b, da:d, hra:h, ...stat };
+    return { ...att, basic:b, da:d, hra:h, ...stat };
   };
 
   const monthRows = activeWorkers.map(w=>({ w, pay: payFor(w, curMonth) }));
@@ -1250,21 +1277,29 @@ function PayrollTracker({onClose}){
     pt:s.pt+r.pay.pt, bonus:s.bonus+r.pay.bonusAccrual, gratuity:s.gratuity+r.pay.gratuityAccrual, net:s.net+r.pay.netPay
   }),{gross:0,pfEmployee:0,pfEmployer:0,esiEmployee:0,esiEmployer:0,pt:0,bonus:0,gratuity:0,net:0});
 
-  // ---- leave balances (cumulative across all recorded months) -----------
-  const leaveBalance = (workerId)=>{
-    let daysCounted=0, paidLeaveTaken=0;
-    Object.keys(months).sort().forEach(ym=>{
-      const rec=(months[ym]||{})[workerId]; if(!rec) return;
-      daysCounted += n(rec.daysPresent) + n(rec.paidLeave);
-      paidLeaveTaken += n(rec.paidLeave);
-    });
-    const earned = Math.floor(daysCounted / Math.max(1,n(settings.earnedLeavePerDays)));
-    return { earnedAccrued: earned, paidLeaveTaken, earnedBalance: Math.max(0, earned-paidLeaveTaken) };
+  const leaveBalance = (w)=>{
+    if(!w.doj || w.doj>todayStr) return { earnedAccrued:0, paidLeaveTaken:0, earnedBalance:0 };
+    const att = attendanceIn(w.id, w.doj, todayStr);
+    const earned = Math.floor(att.payableDays / Math.max(1,n(settings.earnedLeavePerDays)));
+    return { earnedAccrued: earned, paidLeaveTaken: att.paidLeave, earnedBalance: Math.max(0, earned-att.paidLeave) };
   };
+
+  // today's roll counts, for the summary strip at the top of the roll screen
+  const rollWorkers = activeWorkers.filter(w=>!w.doj || w.doj<=rollDate);
+  const rollCounts = rollWorkers.reduce((s,w)=>{
+    const st=statusOn(rollDate,w.id);
+    if(st==="A") s.absent++; else if(st==="L") s.leave++; else s.present++;
+    return s;
+  },{present:0,absent:0,leave:0});
 
   const card = {background:"#fff",border:"1px solid #eee",borderRadius:10,padding:12,marginBottom:10};
   const inp = {width:"100%",padding:8,borderRadius:7,border:"1px solid #ddd",fontSize:13,marginBottom:6};
   const btn = {padding:"9px 12px",borderRadius:8,border:"none",fontWeight:700,fontSize:12.5,cursor:"pointer"};
+  const STATUS_STYLE = {
+    P: {bg:"#e8f5e9",fg:"#2e7d32",label:"Present"},
+    A: {bg:"#ffebee",fg:"#c62828",label:"Absent"},
+    L: {bg:"#fff8e1",fg:"#a5720a",label:"Paid leave"},
+  };
 
   return <div style={{maxHeight:"85vh",overflowY:"auto"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -1273,18 +1308,63 @@ function PayrollTracker({onClose}){
     </div>
 
     <div style={{fontSize:10.5,color:"#a05a1a",background:"#fff6e8",border:"1px solid #f0d8a8",borderRadius:8,padding:8,marginBottom:10,lineHeight:1.5}}>
-      Cross-check tool, not a filer. Your auditor's Tally-generated challans stay the record of truth —
-      this exists to catch a mismatch before it becomes one. Rates verified current as of Aug 2026;
-      recheck ceilings each financial year.
+      Cross-check tool, not a filer. Your auditor's Tally-generated challans stay the record of truth.
+      Rates verified current as of Aug 2026 — recheck ceilings each financial year.
     </div>
 
     <div style={{display:"flex",gap:5,marginBottom:10,flexWrap:"wrap"}}>
-      {[["workers","👷 Workers"],["pay","💰 Attendance & Pay"],["leave","🗓 Leave"],["summary","📊 Summary"],["settings","⚙ Settings"]].map(([k,l])=>
+      {[["roll","✅ Daily Roll"],["workers","👷 Workers"],["pay","💰 Monthly Pay"],["leave","🗓 Leave"],["summary","📊 Summary"],["settings","⚙ Settings"]].map(([k,l])=>
         <button key={k} onClick={()=>setTab(k)} style={{...btn,padding:"7px 10px",fontSize:11.5,
           background:tab===k?"#5a3a1a":"#f0f0f0",color:tab===k?"#fff":"#555"}}>{l}</button>)}
     </div>
 
     {msg && <div style={{padding:"7px 10px",borderRadius:7,marginBottom:8,fontSize:12,fontWeight:700,background:"#ffebee",color:"#c62828"}}>{msg}</div>}
+
+    {/* ============================= DAILY ROLL ============================ */}
+    {tab==="roll" && <>
+      <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:10}}>
+        <button onClick={()=>{const d=new Date(rollDate+"T00:00:00");d.setDate(d.getDate()-1);setRollDate(d.toISOString().slice(0,10));}}
+          style={{...btn,background:"#eee",color:"#333",padding:"8px 12px"}}>‹</button>
+        <input type="date" value={rollDate} max={todayStr} onChange={e=>setRollDate(e.target.value)} style={{...inp,marginBottom:0,flex:1}}/>
+        <button disabled={rollDate>=todayStr}
+          onClick={()=>{const d=new Date(rollDate+"T00:00:00");d.setDate(d.getDate()+1);setRollDate(d.toISOString().slice(0,10));}}
+          style={{...btn,background:rollDate>=todayStr?"#f5f5f5":"#eee",color:rollDate>=todayStr?"#ccc":"#333",padding:"8px 12px"}}>›</button>
+        {rollDate!==todayStr && <button onClick={()=>setRollDate(todayStr)} style={{...btn,background:"#eee",color:"#333",padding:"8px 10px",fontSize:11}}>Today</button>}
+      </div>
+
+      <div style={{display:"flex",gap:8,marginBottom:10}}>
+        <div style={{flex:1,textAlign:"center",background:"#e8f5e9",borderRadius:8,padding:8}}>
+          <div style={{fontSize:18,fontWeight:800,color:"#2e7d32"}}>{rollCounts.present}</div>
+          <div style={{fontSize:10,color:"#2e7d32",fontWeight:700}}>PRESENT</div>
+        </div>
+        <div style={{flex:1,textAlign:"center",background:"#ffebee",borderRadius:8,padding:8}}>
+          <div style={{fontSize:18,fontWeight:800,color:"#c62828"}}>{rollCounts.absent}</div>
+          <div style={{fontSize:10,color:"#c62828",fontWeight:700}}>ABSENT</div>
+        </div>
+        <div style={{flex:1,textAlign:"center",background:"#fff8e1",borderRadius:8,padding:8}}>
+          <div style={{fontSize:18,fontWeight:800,color:"#a5720a"}}>{rollCounts.leave}</div>
+          <div style={{fontSize:10,color:"#a5720a",fontWeight:700}}>ON LEAVE</div>
+        </div>
+      </div>
+
+      <div style={{fontSize:10.5,color:"#888",marginBottom:8,lineHeight:1.5}}>
+        Everyone starts marked present. Tap a name once for absent, tap again for paid leave, a third
+        tap clears it back to present. Most days you should be tapping only a couple of names.
+      </div>
+
+      {rollWorkers.length===0 && <div style={{color:"#999",fontSize:13}}>No workers had joined by this date.</div>}
+      <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+        {rollWorkers.map(w=>{
+          const st = statusOn(rollDate, w.id);
+          const sty = STATUS_STYLE[st];
+          return <button key={w.id} onClick={()=>cycleStatus(rollDate,w.id)}
+            style={{padding:"9px 13px",borderRadius:20,border:"1px solid "+sty.fg+"33",
+              background:sty.bg,color:sty.fg,fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
+            {w.name}{st!=="P" && <span style={{fontWeight:800}}> · {sty.label}</span>}
+          </button>;
+        })}
+      </div>
+    </>}
 
     {/* ============================= WORKERS ============================= */}
     {tab==="workers" && <>
@@ -1341,8 +1421,11 @@ function PayrollTracker({onClose}){
       </div>}
     </>}
 
-    {/* =========================== ATTENDANCE & PAY ======================= */}
+    {/* ============================ MONTHLY PAY =========================== */}
     {tab==="pay" && <>
+      <div style={{fontSize:10.5,color:"#888",marginBottom:8}}>
+        Computed entirely from the Daily Roll — nothing to enter here.
+      </div>
       <input type="month" value={curMonth} onChange={e=>setCurMonth(e.target.value)} style={{...inp,marginBottom:10}}/>
       {activeWorkers.length===0 && <div style={{color:"#999",fontSize:13}}>Add workers first.</div>}
       {monthRows.map(({w,pay})=>
@@ -1351,13 +1434,9 @@ function PayrollTracker({onClose}){
             <b style={{fontSize:13}}>{w.name}</b>
             <span style={{fontSize:12,fontWeight:800,color:"#2e7d32"}}>{cur0(pay.gross)} gross</span>
           </div>
-          <div style={{display:"flex",gap:6,marginBottom:6}}>
-            <input style={{...inp,marginBottom:0}} placeholder="Days present" inputMode="numeric"
-              value={(monthData[w.id]||{}).daysPresent||""} onChange={e=>setDay(w.id,"daysPresent",e.target.value)}/>
-            <input style={{...inp,marginBottom:0}} placeholder="Paid leave days" inputMode="numeric"
-              value={(monthData[w.id]||{}).paidLeave||""} onChange={e=>setDay(w.id,"paidLeave",e.target.value)}/>
-          </div>
           <div style={{fontSize:11,color:"#666",lineHeight:1.7}}>
+            {pay.present} present + {pay.paidLeave} paid leave = {pay.payableDays} payable days
+            {pay.absent>0 && <span style={{color:"#c62828",fontWeight:700}}> · {pay.absent} absent</span>}<br/>
             Basic {cur0(pay.basic)} + DA {cur0(pay.da)} + HRA {cur0(pay.hra)}<br/>
             PF: employee {cur0(pay.pfEmployee)} · employer {cur0(pay.pfEmployer+pay.eps)} (incl. EPS {cur0(pay.eps)}, EDLI {cur0(pay.edli)} extra)<br/>
             ESI: {pay.esiApplicable ? ("employee "+cur0(pay.esiEmployee)+" · employer "+cur0(pay.esiEmployer)) : "not applicable — gross over ₹21,000"}<br/>
@@ -1387,12 +1466,12 @@ function PayrollTracker({onClose}){
     {/* =============================== LEAVE ============================== */}
     {tab==="leave" && <>
       <div style={{fontSize:11,color:"#888",marginBottom:8}}>
-        Earned leave accrues at 1 day per {settings.earnedLeavePerDays||"—"} days worked (set this from your
-        Factories Act register in Settings — it varies, and I won't guess it). Casual and sick leave are
-        tracked against the annual entitlement you set.
+        Earned leave accrues at 1 day per {settings.earnedLeavePerDays||"—"} payable days worked (set this
+        from your Factories Act register in Settings — it varies, and I won't guess it). Counted from each
+        worker's join date to today, straight off the Daily Roll.
       </div>
       {activeWorkers.map(w=>{
-        const lb = leaveBalance(w.id);
+        const lb = leaveBalance(w);
         return <div key={w.id} style={card}>
           <b style={{fontSize:13}}>{w.name}</b>
           <div style={{fontSize:12,color:"#555",marginTop:4,lineHeight:1.7}}>
