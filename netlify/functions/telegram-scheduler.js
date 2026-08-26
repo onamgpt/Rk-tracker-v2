@@ -59,21 +59,56 @@ exports.handler = async () => {
     if (!list.length) return { statusCode: 200, body: JSON.stringify({ ok: true, sent: 0, note: "nothing scheduled" }) };
 
     const remaining = [];
+    // Cache "is this entry done" lookups per run — several occurrences of the
+    // same repeating reminder can be due in one pass, and each is a live read
+    // against Supabase, so there is no reason to ask the same question twice.
+    const doneCache = {};
+    async function isEntryDone(ownerName, entryId) {
+      const key = ownerName + "|" + entryId;
+      if (key in doneCache) return doneCache[key];
+      let done = false;
+      try {
+        const rows = await sb("GET", "/rest/v1/entries?owner=eq." + encodeURIComponent(ownerName) +
+          "&id=eq." + encodeURIComponent(entryId) + "&select=data");
+        if (Array.isArray(rows) && rows[0]) {
+          const d = rows[0].data || {};
+          // Gone entirely, or ticked done in the app — either way, stop nagging.
+          done = !!d.remindDone;
+        } else {
+          done = true; // entry no longer exists — nothing left to remind about
+        }
+      } catch (e) { /* on lookup failure, err toward still sending — a missed
+                        reminder is worse than one extra */ }
+      doneCache[key] = done;
+      return done;
+    }
+
     for (const m of list) {
       const due = Date.parse(m.when);
       if (!isNaN(due) && due <= now) {
+        // A reminder tied to an entry gets cancelled the moment that entry is
+        // marked done — a scheduled Telegram alarm should not keep firing
+        // after the person has already dealt with the thing in the app.
+        if (m.entryId && m.owner && await isEntryDone(m.owner, m.entryId)) {
+          continue; // drop silently, don't send, don't reschedule
+        }
         for (const id of (m.chatIds || [])) {
           await tg("sendMessage", { chat_id: String(id), text: m.text || "", parse_mode: "HTML" });
           sent++;
         }
+        let next = null;
         if (m.repeat === "daily") {
-          const d = new Date(due); d.setDate(d.getDate() + 1);
-          remaining.push({ ...m, when: d.toISOString() });
+          const d = new Date(due); d.setDate(d.getDate() + 1); next = d;
         } else if (m.repeat === "weekly") {
-          const d = new Date(due); d.setDate(d.getDate() + 7);
-          remaining.push({ ...m, when: d.toISOString() });
+          const d = new Date(due); d.setDate(d.getDate() + 7); next = d;
         }
-        // one-off: drop
+        // "Keep reminding for N days" carries an end date — once the next
+        // occurrence would fall past it, the window is over, so stop rather
+        // than repeat indefinitely.
+        if (next && (!m.until || next.getTime() <= Date.parse(m.until))) {
+          remaining.push({ ...m, when: next.toISOString() });
+        }
+        // one-off, or repeat past its window: drop
       } else {
         remaining.push(m);
       }
