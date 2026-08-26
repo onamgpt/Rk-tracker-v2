@@ -1117,6 +1117,345 @@ function getLogisticsStageIdx(entry){
   return idx; // -1 means not yet despatched
 }
 
+// ============================================================================
+//  PAYROLL — Karnataka factory workers: attendance -> wages -> statutory dues
+//
+//  This is a cross-check tool, not a filer. The auditor's Tally-generated ECR
+//  and ESI/PT challans remain the system of record; this exists to catch a
+//  mismatch before it becomes a notice, not to replace what's already working.
+//
+//  Rates hardcoded below (verified current as of Aug 2026 — recheck before
+//  relying on this in a future financial year, since ceilings move):
+//    EPF     12% employee + 12% employer, on Basic+DA capped at Rs.15,000
+//            employer's 12% splits: 8.33% EPS (capped Rs.1,250) + rest EPF
+//            EDLI 0.5% (capped Rs.75), borne by employer only
+//    ESI     3.25% employer + 0.75% employee, on GROSS, only if gross <= Rs.21,000
+//    PT      Karnataka: nil below Rs.25,000 gross, else Rs.200/mo (Rs.300 in Feb)
+//    Bonus   8.33% minimum, on wages capped at Rs.7,000 or the applicable
+//            state minimum wage (whichever higher) — accrued monthly,
+//            paid once a year; this tool shows the accrual, not the payout
+//    Gratuity (Basic+DA) x 15/26, accrued monthly for information; only
+//            becomes a real liability after 5 years' continuous service
+//
+//  IMPORTANT — the Nov 2025 Labour Codes require Basic+DA to be at least 50%
+//  of gross for these calculations. If a worker's actual split is below that,
+//  this tool flags it rather than silently using the understated figure.
+// ============================================================================
+
+const PAYROLL_RATES = {
+  pfWageCeiling: 15000, pfEmployeeRate: 0.12, pfEmployerRate: 0.12,
+  epsRate: 0.0833, epsCap: 1250, edliRate: 0.005, edliCap: 75,
+  esiWageCeiling: 21000, esiEmployeeRate: 0.0075, esiEmployerRate: 0.0325,
+  ptExemptBelow: 25000, ptMonthly: 200, ptFeb: 300,
+  bonusMin: 0.0833, bonusWageCap: 7000,
+  gratuityDivisor: 26, gratuityDays: 15, gratuityMinYears: 5,
+};
+
+function computeStatutory(basic, da, hra, other, monthIdx, minWage){
+  const bd = n(basic) + n(da);
+  const gross = bd + n(hra) + n(other);
+  const R = PAYROLL_RATES;
+
+  const basicDaShareOk = gross > 0 ? (bd / gross) >= 0.499 : true; // 50% floor, small tolerance
+  const pfWage = Math.min(bd, R.pfWageCeiling);
+  const pfEmployee = r2(pfWage * R.pfEmployeeRate);
+  const eps = Math.min(r2(pfWage * R.epsRate), R.epsCap);
+  const pfEmployer = r2(pfWage * R.pfEmployerRate - eps);
+  const edli = Math.min(r2(pfWage * R.edliRate), R.edliCap);
+
+  const esiApplicable = gross > 0 && gross <= R.esiWageCeiling;
+  const esiEmployee = esiApplicable ? r2(gross * R.esiEmployeeRate) : 0;
+  const esiEmployer = esiApplicable ? r2(gross * R.esiEmployerRate) : 0;
+
+  const pt = gross < R.ptExemptBelow ? 0 : (monthIdx === 1 ? R.ptFeb : R.ptMonthly); // monthIdx 1 = Feb
+
+  const bonusBase = Math.min(bd, Math.max(R.bonusWageCap, n(minWage) || 0));
+  const bonusAccrual = r2(bonusBase * R.bonusMin);
+
+  const gratuityAccrual = r2((bd / R.gratuityDivisor) * R.gratuityDays / 12);
+
+  const netPay = r2(gross - pfEmployee - esiEmployee - pt);
+
+  return { gross:r2(gross), basicDaShareOk, pfWage:r2(pfWage), pfEmployee, pfEmployer, eps, edli,
+    esiApplicable, esiEmployee, esiEmployer, pt, bonusAccrual, gratuityAccrual, netPay };
+}
+
+function PayrollTracker({onClose}){
+  const [tab,setTab]=useState("workers");
+  const [workers,setWorkers]=useState(null);
+  const [months,setMonths]=useState(null);   // { "YYYY-MM": { workerId: {daysPresent,paidLeave,...} } }
+  const [settings,setSettings]=useState({earnedLeavePerDays:20, casualLeavePerYear:12, sickLeavePerYear:12, minWage:""});
+  const [loading,setLoading]=useState(true);
+  const [msg,setMsg]=useState("");
+  const [editW,setEditW]=useState(null);
+  const [curMonth,setCurMonth]=useState(()=>new Date().toISOString().slice(0,7));
+  const [auditorFig,setAuditorFig]=useState({pf:"",esi:"",pt:""});
+
+  useEffect(()=>{ (async()=>{
+    setLoading(true);
+    try{
+      const [w,m,s] = await Promise.all([
+        sheetsAPI("getPortfolio",{key:"payroll_workers"}),
+        sheetsAPI("getPortfolio",{key:"payroll_months"}),
+        sheetsAPI("getPortfolio",{key:"payroll_settings"}),
+      ]);
+      setWorkers((w&&w.data&&Array.isArray(w.data))?w.data:[]);
+      setMonths((m&&m.data&&typeof m.data==="object")?m.data:{});
+      if(s&&s.data) setSettings(prev=>({...prev,...s.data}));
+    }catch(e){ setMsg("✗ "+String(e.message||e)); setWorkers([]); setMonths({}); }
+    setLoading(false);
+  })(); },[]);
+
+  const saveWorkers=async(list)=>{ setWorkers(list); try{ await sheetsAPI("savePortfolio",{key:"payroll_workers",data:list}); }catch(e){} };
+  const saveMonths=async(obj)=>{ setMonths(obj); try{ await sheetsAPI("savePortfolio",{key:"payroll_months",data:obj}); }catch(e){} };
+  const saveSettings=async(obj)=>{ setSettings(obj); try{ await sheetsAPI("savePortfolio",{key:"payroll_settings",data:obj}); }catch(e){} };
+
+  if(loading) return <div style={{padding:20,textAlign:"center",color:"#888"}}>Loading…</div>;
+
+  const activeWorkers = workers.filter(w=>w.active!==false);
+  const monthIdx = parseInt(curMonth.split("-")[1],10)-1;
+  const monthData = months[curMonth] || {};
+
+  // ---- attendance / pay entry -------------------------------------------
+  const setDay=(workerId, field, val)=>{
+    const rec = {...(monthData[workerId]||{daysPresent:"",paidLeave:"",unpaidAbsent:""})};
+    rec[field]=val;
+    const next = {...months, [curMonth]: {...monthData, [workerId]: rec}};
+    saveMonths(next);
+  };
+
+  const totalWorkingDays = (ym)=>{
+    const [y,m]=ym.split("-").map(Number);
+    return new Date(y, m, 0).getDate();
+  };
+
+  const payFor = (w, ym)=>{
+    const rec = (months[ym]||{})[w.id] || {};
+    const totalDays = totalWorkingDays(ym);
+    const present = n(rec.daysPresent), paidLeave = n(rec.paidLeave);
+    const payableDays = present + paidLeave;
+    const factor = totalDays>0 ? payableDays/totalDays : 0;
+    const basic = r2(n(w.dailyBasic)*totalDays*factor/ (totalDays>0?1:1)); // dailyBasic is a per-day rate already
+    // dailyBasic/DA/HRA are RATES PER DAY WORKED, so pay is simply rate x payable days
+    const b = r2(n(w.dailyBasic)*payableDays), d = r2(n(w.dailyDA)*payableDays), h = r2(n(w.dailyHRA)*payableDays);
+    const mIdx = parseInt(ym.split("-")[1],10)-1;
+    const stat = computeStatutory(b, d, h, 0, mIdx, settings.minWage);
+    return { present, paidLeave, payableDays, totalDays, basic:b, da:d, hra:h, ...stat };
+  };
+
+  const monthRows = activeWorkers.map(w=>({ w, pay: payFor(w, curMonth) }));
+  const monthTotals = monthRows.reduce((s,r)=>({
+    gross:s.gross+r.pay.gross, pfEmployee:s.pfEmployee+r.pay.pfEmployee, pfEmployer:s.pfEmployer+r.pay.pfEmployer+r.pay.eps,
+    esiEmployee:s.esiEmployee+r.pay.esiEmployee, esiEmployer:s.esiEmployer+r.pay.esiEmployer,
+    pt:s.pt+r.pay.pt, bonus:s.bonus+r.pay.bonusAccrual, gratuity:s.gratuity+r.pay.gratuityAccrual, net:s.net+r.pay.netPay
+  }),{gross:0,pfEmployee:0,pfEmployer:0,esiEmployee:0,esiEmployer:0,pt:0,bonus:0,gratuity:0,net:0});
+
+  // ---- leave balances (cumulative across all recorded months) -----------
+  const leaveBalance = (workerId)=>{
+    let daysCounted=0, paidLeaveTaken=0;
+    Object.keys(months).sort().forEach(ym=>{
+      const rec=(months[ym]||{})[workerId]; if(!rec) return;
+      daysCounted += n(rec.daysPresent) + n(rec.paidLeave);
+      paidLeaveTaken += n(rec.paidLeave);
+    });
+    const earned = Math.floor(daysCounted / Math.max(1,n(settings.earnedLeavePerDays)));
+    return { earnedAccrued: earned, paidLeaveTaken, earnedBalance: Math.max(0, earned-paidLeaveTaken) };
+  };
+
+  const card = {background:"#fff",border:"1px solid #eee",borderRadius:10,padding:12,marginBottom:10};
+  const inp = {width:"100%",padding:8,borderRadius:7,border:"1px solid #ddd",fontSize:13,marginBottom:6};
+  const btn = {padding:"9px 12px",borderRadius:8,border:"none",fontWeight:700,fontSize:12.5,cursor:"pointer"};
+
+  return <div style={{maxHeight:"85vh",overflowY:"auto"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+      <h2 style={{margin:0,fontSize:17,color:"#2a1800"}}>💼 Payroll — Karnataka</h2>
+      <button onClick={onClose} style={{...btn,background:"#eee",color:"#333"}}>✕</button>
+    </div>
+
+    <div style={{fontSize:10.5,color:"#a05a1a",background:"#fff6e8",border:"1px solid #f0d8a8",borderRadius:8,padding:8,marginBottom:10,lineHeight:1.5}}>
+      Cross-check tool, not a filer. Your auditor's Tally-generated challans stay the record of truth —
+      this exists to catch a mismatch before it becomes one. Rates verified current as of Aug 2026;
+      recheck ceilings each financial year.
+    </div>
+
+    <div style={{display:"flex",gap:5,marginBottom:10,flexWrap:"wrap"}}>
+      {[["workers","👷 Workers"],["pay","💰 Attendance & Pay"],["leave","🗓 Leave"],["summary","📊 Summary"],["settings","⚙ Settings"]].map(([k,l])=>
+        <button key={k} onClick={()=>setTab(k)} style={{...btn,padding:"7px 10px",fontSize:11.5,
+          background:tab===k?"#5a3a1a":"#f0f0f0",color:tab===k?"#fff":"#555"}}>{l}</button>)}
+    </div>
+
+    {msg && <div style={{padding:"7px 10px",borderRadius:7,marginBottom:8,fontSize:12,fontWeight:700,background:"#ffebee",color:"#c62828"}}>{msg}</div>}
+
+    {/* ============================= WORKERS ============================= */}
+    {tab==="workers" && <>
+      {activeWorkers.length===0 && <div style={{color:"#999",fontSize:13,marginBottom:10}}>No workers added yet.</div>}
+      {activeWorkers.map(w=>{
+        const testStat = computeStatutory(n(w.dailyBasic)*26, n(w.dailyDA)*26, n(w.dailyHRA)*26, 0, 0, settings.minWage);
+        return <div key={w.id} style={card}>
+          <div style={{display:"flex",justifyContent:"space-between"}}>
+            <b style={{fontSize:14}}>{w.name}</b>
+            <button onClick={()=>setEditW({...w})} style={{...btn,padding:"4px 10px",fontSize:11,background:"#eee",color:"#333"}}>Edit</button>
+          </div>
+          <div style={{fontSize:11.5,color:"#666",marginTop:3}}>
+            Joined {w.doj||"—"} · {w.category||"unskilled"} · daily Basic {cur0(w.dailyBasic)} + DA {cur0(w.dailyDA)} + HRA {cur0(w.dailyHRA)}
+          </div>
+          {!testStat.basicDaShareOk && <div style={{fontSize:10.5,color:"#c62828",marginTop:4,fontWeight:700}}>
+            ⚠ Basic+DA is under 50% of gross — the Nov 2025 Labour Code floor. PF/gratuity may be understated.</div>}
+          {(w.pfNumber||w.esiNumber) && <div style={{fontSize:10.5,color:"#999",marginTop:3}}>
+            {w.pfNumber?("UAN "+w.pfNumber):""} {w.esiNumber?(" · ESI "+w.esiNumber):""}</div>}
+        </div>;
+      })}
+      <button onClick={()=>setEditW({id:"w_"+Date.now(),name:"",doj:"",category:"unskilled",dailyBasic:"",dailyDA:"",dailyHRA:"",pfNumber:"",esiNumber:"",active:true})}
+        style={{...btn,width:"100%",background:"#eee",color:"#333",padding:11}}>+ Add worker</button>
+
+      {editW && <div style={{...card,background:"#fafafa",marginTop:10}}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:8}}>{workers.find(x=>x.id===editW.id)?"Edit":"New"} worker</div>
+        <input style={inp} placeholder="Name" value={editW.name} onChange={e=>setEditW({...editW,name:e.target.value})}/>
+        <div style={{display:"flex",gap:6}}>
+          <input style={inp} type="date" placeholder="Date joined" value={editW.doj} onChange={e=>setEditW({...editW,doj:e.target.value})}/>
+          <select style={inp} value={editW.category} onChange={e=>setEditW({...editW,category:e.target.value})}>
+            <option value="unskilled">Unskilled</option><option value="semiskilled">Semi-skilled</option>
+            <option value="skilled">Skilled</option><option value="highlyskilled">Highly skilled</option>
+          </select>
+        </div>
+        <div style={{fontSize:10.5,color:"#888",marginBottom:4}}>Per-day rate for each component (what one day's wage actually splits into):</div>
+        <div style={{display:"flex",gap:6}}>
+          <input style={inp} placeholder="Basic/day" inputMode="decimal" value={editW.dailyBasic} onChange={e=>setEditW({...editW,dailyBasic:e.target.value})}/>
+          <input style={inp} placeholder="DA/day" inputMode="decimal" value={editW.dailyDA} onChange={e=>setEditW({...editW,dailyDA:e.target.value})}/>
+          <input style={inp} placeholder="HRA/day" inputMode="decimal" value={editW.dailyHRA} onChange={e=>setEditW({...editW,dailyHRA:e.target.value})}/>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          <input style={inp} placeholder="UAN (if allotted)" value={editW.pfNumber} onChange={e=>setEditW({...editW,pfNumber:e.target.value})}/>
+          <input style={inp} placeholder="ESI number (if allotted)" value={editW.esiNumber} onChange={e=>setEditW({...editW,esiNumber:e.target.value})}/>
+        </div>
+        <div style={{display:"flex",gap:6,marginTop:4}}>
+          <button onClick={()=>{
+              const exists=workers.some(x=>x.id===editW.id);
+              const list = exists ? workers.map(x=>x.id===editW.id?editW:x) : [...workers, editW];
+              saveWorkers(list); setEditW(null);
+            }} style={{...btn,background:"#2a4a7a",color:"#fff",flex:1}}>Save</button>
+          {workers.some(x=>x.id===editW.id) && <button onClick={()=>{ saveWorkers(workers.map(x=>x.id===editW.id?{...x,active:false}:x)); setEditW(null); }}
+            style={{...btn,background:"#fff",color:"#c62828",border:"1px solid #e0a0a0"}}>Remove</button>}
+          <button onClick={()=>setEditW(null)} style={{...btn,background:"#eee",color:"#555"}}>Cancel</button>
+        </div>
+      </div>}
+    </>}
+
+    {/* =========================== ATTENDANCE & PAY ======================= */}
+    {tab==="pay" && <>
+      <input type="month" value={curMonth} onChange={e=>setCurMonth(e.target.value)} style={{...inp,marginBottom:10}}/>
+      {activeWorkers.length===0 && <div style={{color:"#999",fontSize:13}}>Add workers first.</div>}
+      {monthRows.map(({w,pay})=>
+        <div key={w.id} style={card}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+            <b style={{fontSize:13}}>{w.name}</b>
+            <span style={{fontSize:12,fontWeight:800,color:"#2e7d32"}}>{cur0(pay.gross)} gross</span>
+          </div>
+          <div style={{display:"flex",gap:6,marginBottom:6}}>
+            <input style={{...inp,marginBottom:0}} placeholder="Days present" inputMode="numeric"
+              value={(monthData[w.id]||{}).daysPresent||""} onChange={e=>setDay(w.id,"daysPresent",e.target.value)}/>
+            <input style={{...inp,marginBottom:0}} placeholder="Paid leave days" inputMode="numeric"
+              value={(monthData[w.id]||{}).paidLeave||""} onChange={e=>setDay(w.id,"paidLeave",e.target.value)}/>
+          </div>
+          <div style={{fontSize:11,color:"#666",lineHeight:1.7}}>
+            Basic {cur0(pay.basic)} + DA {cur0(pay.da)} + HRA {cur0(pay.hra)}<br/>
+            PF: employee {cur0(pay.pfEmployee)} · employer {cur0(pay.pfEmployer+pay.eps)} (incl. EPS {cur0(pay.eps)}, EDLI {cur0(pay.edli)} extra)<br/>
+            ESI: {pay.esiApplicable ? ("employee "+cur0(pay.esiEmployee)+" · employer "+cur0(pay.esiEmployer)) : "not applicable — gross over ₹21,000"}<br/>
+            PT: {cur0(pay.pt)} {pay.pt===0 && pay.gross>0 ? "(exempt, gross under ₹25,000)" : ""}<br/>
+            Bonus accrual: {cur0(pay.bonusAccrual)} · Gratuity accrual: {cur0(pay.gratuityAccrual)}
+          </div>
+          {!pay.basicDaShareOk && pay.gross>0 && <div style={{fontSize:10.5,color:"#c62828",fontWeight:700,marginTop:4}}>
+            ⚠ Basic+DA under 50% of gross this month</div>}
+          <div style={{fontSize:12.5,fontWeight:800,marginTop:6,paddingTop:6,borderTop:"1px solid #f0f0f0"}}>
+            Net pay: {cur0(pay.netPay)}
+          </div>
+        </div>
+      )}
+      {activeWorkers.length>0 && <div style={{...card,background:"#f5f8ff",borderColor:"#b8c8e0"}}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:6}}>{curMonth} — totals across {activeWorkers.length} worker(s)</div>
+        <div style={{fontSize:12,lineHeight:1.8}}>
+          Gross wages: <b>{cur0(monthTotals.gross)}</b><br/>
+          PF payable: employee {cur0(monthTotals.pfEmployee)} + employer {cur0(monthTotals.pfEmployer)} = <b>{cur0(monthTotals.pfEmployee+monthTotals.pfEmployer)}</b><br/>
+          ESI payable: employee {cur0(monthTotals.esiEmployee)} + employer {cur0(monthTotals.esiEmployer)} = <b>{cur0(monthTotals.esiEmployee+monthTotals.esiEmployer)}</b><br/>
+          PT payable: <b>{cur0(monthTotals.pt)}</b><br/>
+          Bonus accrued this month: {cur0(monthTotals.bonus)} · Gratuity accrued: {cur0(monthTotals.gratuity)}<br/>
+          <b>Total net pay to workers: {cur0(monthTotals.net)}</b>
+        </div>
+      </div>}
+    </>}
+
+    {/* =============================== LEAVE ============================== */}
+    {tab==="leave" && <>
+      <div style={{fontSize:11,color:"#888",marginBottom:8}}>
+        Earned leave accrues at 1 day per {settings.earnedLeavePerDays||"—"} days worked (set this from your
+        Factories Act register in Settings — it varies, and I won't guess it). Casual and sick leave are
+        tracked against the annual entitlement you set.
+      </div>
+      {activeWorkers.map(w=>{
+        const lb = leaveBalance(w.id);
+        return <div key={w.id} style={card}>
+          <b style={{fontSize:13}}>{w.name}</b>
+          <div style={{fontSize:12,color:"#555",marginTop:4,lineHeight:1.7}}>
+            Earned leave accrued: {lb.earnedAccrued} days · taken: {lb.paidLeaveTaken} days<br/>
+            <b>Balance: {lb.earnedBalance} days</b>
+          </div>
+        </div>;
+      })}
+    </>}
+
+    {/* ============================== SUMMARY ============================= */}
+    {tab==="summary" && <>
+      <div style={{fontSize:11,color:"#888",marginBottom:8}}>
+        Paste in what your auditor actually filed for {curMonth} and see whether it matches what the tracker computed.
+      </div>
+      <input type="month" value={curMonth} onChange={e=>setCurMonth(e.target.value)} style={{...inp,marginBottom:10}}/>
+      <div style={card}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:8}}>Tracker computed</div>
+        <div style={{fontSize:12,lineHeight:1.8}}>
+          PF total: <b>{cur0(monthTotals.pfEmployee+monthTotals.pfEmployer)}</b><br/>
+          ESI total: <b>{cur0(monthTotals.esiEmployee+monthTotals.esiEmployer)}</b><br/>
+          PT total: <b>{cur0(monthTotals.pt)}</b>
+        </div>
+      </div>
+      <div style={card}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:8}}>What the auditor actually filed</div>
+        <input style={inp} placeholder="PF filed (₹)" inputMode="decimal" value={auditorFig.pf} onChange={e=>setAuditorFig({...auditorFig,pf:e.target.value})}/>
+        <input style={inp} placeholder="ESI filed (₹)" inputMode="decimal" value={auditorFig.esi} onChange={e=>setAuditorFig({...auditorFig,esi:e.target.value})}/>
+        <input style={inp} placeholder="PT filed (₹)" inputMode="decimal" value={auditorFig.pt} onChange={e=>setAuditorFig({...auditorFig,pt:e.target.value})}/>
+      </div>
+      {(auditorFig.pf||auditorFig.esi||auditorFig.pt) && <div style={{...card,background:"#fafafa"}}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:6}}>Difference</div>
+        {[["PF",monthTotals.pfEmployee+monthTotals.pfEmployer,auditorFig.pf],
+          ["ESI",monthTotals.esiEmployee+monthTotals.esiEmployer,auditorFig.esi],
+          ["PT",monthTotals.pt,auditorFig.pt]].map(([label,mine,theirs])=>{
+            if(theirs==="") return null;
+            const diff=r2(mine-n(theirs));
+            return <div key={label} style={{fontSize:12,color:Math.abs(diff)<1?"#2e7d32":"#c62828",fontWeight:700}}>
+              {label}: {Math.abs(diff)<1?"✓ matches":("✗ differs by "+cur0(Math.abs(diff)))}</div>;
+          })}
+      </div>}
+    </>}
+
+    {/* ============================== SETTINGS ============================= */}
+    {tab==="settings" && <div style={card}>
+      <div style={{fontSize:11,color:"#888",marginBottom:8,lineHeight:1.5}}>
+        These aren't guessed — pull the earned-leave ratio from your Factories Act register,
+        and the minimum wage figure from the current Karnataka notification for each category.
+      </div>
+      <div style={{fontSize:11,fontWeight:700,marginBottom:3}}>Earned leave: 1 day per how many days worked?</div>
+      <input style={inp} inputMode="numeric" value={settings.earnedLeavePerDays}
+        onChange={e=>setSettings({...settings,earnedLeavePerDays:e.target.value})}/>
+      <div style={{fontSize:11,fontWeight:700,marginBottom:3}}>Applicable minimum wage per day (for Bonus Act floor, if higher than ₹7,000/month)</div>
+      <input style={inp} inputMode="decimal" placeholder="Monthly minimum wage, e.g. 12000" value={settings.minWage}
+        onChange={e=>setSettings({...settings,minWage:e.target.value})}/>
+      <button onClick={()=>saveSettings(settings)} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%"}}>Save settings</button>
+    </div>}
+  </div>;
+}
+
+function cur0(v){ return "₹"+Math.round(n(v)).toLocaleString("en-IN"); }
+
+
 function LogisticsTracker({entries,onClose,onUpdateEntry,onNewSalesOrder}){
   const [selectedId,setSelectedId]=useState(null);
   const [uploading,setUploading]=useState(false);
@@ -15418,6 +15757,7 @@ function App(){
   const [showAgeing,setShowAgeing]=useState(false);
   const [showMatcher,setShowMatcher]=useState(false);
   const [showLogistics,setShowLogistics]=useState(false);
+  const [showPayroll,setShowPayroll]=useState(false);
   const [showLedger,setShowLedger]=useState(false);
   const [showEmailScan,setShowEmailScan]=useState(false);
   const [showTally,setShowTally]=useState(false);
@@ -15889,6 +16229,7 @@ function App(){
                 {l:"💬 Remind",fn:()=>setShowPaymentReminders(true), ownerOnly:true},
                 {l:"🚚 Logistics",fn:()=>setShowLogistics(true), logisticsOnly:true},
                 {l:"🩺 Gut Log",fn:()=>{window.location.href="/gut.html";}, personalOnly:true},
+                {l:"💼 Payroll",fn:()=>setShowPayroll(true), ownerOnly:true},
                 {l:"📧 Email Scan",fn:()=>setShowEmailScan(true), ownerOnly:true},
                 {l:"🔗 Share",fn:()=>setShowShare(true), notSales:true},
                 {l:"⚙️ Settings",fn:()=>setShowDD(true), notSales:true}
@@ -16133,6 +16474,7 @@ function App(){
     <Modal open={showAgeing} onClose={()=>setShowAgeing(false)} wide><AgeingReport entries={entries} onClose={()=>setShowAgeing(false)} onMarkPaid={markPaid}/></Modal>
     <Modal open={showMatcher} onClose={()=>setShowMatcher(false)} wide><PaymentMatcher entries={entries} onClose={()=>setShowMatcher(false)} onMarkPaid={markPaid}/></Modal>
     <Modal open={showLogistics && IS_LOGISTICS_USER} onClose={()=>setShowLogistics(false)} wide><LogisticsTracker entries={entries} onClose={()=>setShowLogistics(false)} onUpdateEntry={(e)=>saveEntry(e,{silent:true})} onNewSalesOrder={()=>{setEditE({category:"",paymentStatus:""});setShowForm(true);}}/></Modal>
+    <Modal open={showPayroll && IS_OWNER} onClose={()=>setShowPayroll(false)} wide><PayrollTracker onClose={()=>setShowPayroll(false)}/></Modal>
     <Modal open={showLedger} onClose={()=>setShowLedger(false)} wide><LedgerUpload entries={entries} onClose={()=>setShowLedger(false)} onSaveEntry={(e)=>saveEntry(e,{silent:true})}/></Modal>
     <Modal open={showLocation && IS_OWNER} onClose={()=>setShowLocation(false)} wide><LocationTracker onClose={()=>setShowLocation(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showDayBook} onClose={()=>setShowDayBook(false)} wide><DayBook onClose={()=>setShowDayBook(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
