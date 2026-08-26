@@ -1183,71 +1183,105 @@ function computeStatutory(basic, da, hra, other, monthIdx, minWage){
 function PayrollTracker({onClose}){
   const [tab,setTab]=useState("roll");
   const [workers,setWorkers]=useState(null);
-  // Sparse by design: a date only gets an entry in here for the workers who
-  // were NOT present that day. Everyone else, every day, is present unless
-  // this says otherwise — that's the whole point of "mark the exception."
-  const [muster,setMuster]=useState(null);   // { "YYYY-MM-DD": { workerId: "A"|"L" } }
+  // Sparse by design: a date only gets an entry for a worker who was NOT a
+  // plain present day for them — absent, on paid leave, or just carrying a
+  // note (e.g. came in late). No entry, on an ordinary working day, means
+  // present. That is the entire point of "mark the exception."
+  const [muster,setMuster]=useState(null);   // { "YYYY-MM-DD": { workerId: {status?, note?, timeIn?, timeOut?} } }
+  // Company-wide paid holidays — approved once, applied to everyone, never
+  // typed in per worker. Sunday is handled the same way without needing an
+  // entry here at all: it's just always off.
+  const [holidays,setHolidays]=useState(null); // [{date,label}]
   const [settings,setSettings]=useState({earnedLeavePerDays:20, casualLeavePerYear:12, sickLeavePerYear:12, minWage:""});
   const [loading,setLoading]=useState(true);
   const [msg,setMsg]=useState("");
   const [editW,setEditW]=useState(null);
   const [rollDate,setRollDate]=useState(()=>new Date().toISOString().slice(0,10));
+  const [noteFor,setNoteFor]=useState(null);   // workerId currently showing its note editor
+  const [noteDraft,setNoteDraft]=useState({note:"",timeIn:"",timeOut:""});
   const [curMonth,setCurMonth]=useState(()=>new Date().toISOString().slice(0,7));
   const [auditorFig,setAuditorFig]=useState({pf:"",esi:"",pt:""});
+  const [holDraft,setHolDraft]=useState({date:"",label:""});
+  const [holPaste,setHolPaste]=useState("");
 
   useEffect(()=>{ (async()=>{
     setLoading(true);
     try{
-      const [w,mu,s] = await Promise.all([
+      const [w,mu,h,s] = await Promise.all([
         sheetsAPI("getPortfolio",{key:"payroll_workers"}),
         sheetsAPI("getPortfolio",{key:"payroll_muster"}),
+        sheetsAPI("getPortfolio",{key:"payroll_holidays"}),
         sheetsAPI("getPortfolio",{key:"payroll_settings"}),
       ]);
       setWorkers((w&&w.data&&Array.isArray(w.data))?w.data:[]);
       setMuster((mu&&mu.data&&typeof mu.data==="object")?mu.data:{});
+      setHolidays((h&&h.data&&Array.isArray(h.data))?h.data:[]);
       if(s&&s.data) setSettings(prev=>({...prev,...s.data}));
-    }catch(e){ setMsg("✗ "+String(e.message||e)); setWorkers([]); setMuster({}); }
+    }catch(e){ setMsg("✗ "+String(e.message||e)); setWorkers([]); setMuster({}); setHolidays([]); }
     setLoading(false);
   })(); },[]);
 
   const saveWorkers=async(list)=>{ setWorkers(list); try{ await sheetsAPI("savePortfolio",{key:"payroll_workers",data:list}); }catch(e){} };
   const saveMuster=async(obj)=>{ setMuster(obj); try{ await sheetsAPI("savePortfolio",{key:"payroll_muster",data:obj}); }catch(e){ setMsg("✗ Could not save — check connection"); } };
+  const saveHolidays=async(list)=>{ setHolidays(list); try{ await sheetsAPI("savePortfolio",{key:"payroll_holidays",data:list}); }catch(e){} };
   const saveSettings=async(obj)=>{ setSettings(obj); try{ await sheetsAPI("savePortfolio",{key:"payroll_settings",data:obj}); }catch(e){} };
 
   if(loading) return <div style={{padding:20,textAlign:"center",color:"#888"}}>Loading…</div>;
 
   const activeWorkers = workers.filter(w=>w.active!==false);
   const todayStr = new Date().toISOString().slice(0,10);
+  const holidayMap = {}; holidays.forEach(h=>{ holidayMap[h.date]=h.label; });
+  const isSunday = (ds)=> new Date(ds+"T00:00:00").getDay()===0;
+  const isOffDay = (ds)=> isSunday(ds) || !!holidayMap[ds];
+  const offLabel = (ds)=> holidayMap[ds] ? holidayMap[ds] : (isSunday(ds) ? "Sunday — weekly off" : "");
 
-  // ---- daily roll: cycle Present -> Absent -> Paid Leave -> Present -------
-  const statusOn = (dateStr, workerId) => (muster[dateStr]||{})[workerId] || "P";
-  const cycleStatus = (dateStr, workerId) => {
-    const cur = statusOn(dateStr, workerId);
-    const next = cur==="P" ? "A" : cur==="A" ? "L" : "P";
+  // ---- daily roll -----------------------------------------------------
+  const entryOn = (dateStr, workerId) => (muster[dateStr]||{})[workerId] || {};
+  const statusOn = (dateStr, workerId) => entryOn(dateStr,workerId).status || "P";
+
+  const writeEntry = (dateStr, workerId, patch) => {
     const dayRec = {...(muster[dateStr]||{})};
-    if(next==="P") delete dayRec[workerId]; else dayRec[workerId]=next;
+    const merged = {...dayRec[workerId], ...patch};
+    // Clean up: an entry that has gone back to plain "present, nothing to say"
+    // is removed entirely rather than kept as an empty object — the sparse
+    // model only means something if truly-default days leave no trace.
+    const isEmpty = (!merged.status || merged.status==="P") && !merged.note && !merged.timeIn && !merged.timeOut;
+    if(isEmpty) delete dayRec[workerId]; else dayRec[workerId]=merged;
     const nextMuster = {...muster};
     if(Object.keys(dayRec).length===0) delete nextMuster[dateStr]; else nextMuster[dateStr]=dayRec;
     saveMuster(nextMuster);
   };
+  const cycleStatus = (dateStr, workerId) => {
+    const cur = statusOn(dateStr, workerId);
+    const next = cur==="P" ? "A" : cur==="A" ? "L" : "P";
+    writeEntry(dateStr, workerId, {status: next==="P"?undefined:next});
+  };
+  const openNote = (workerId) => {
+    const e = entryOn(rollDate, workerId);
+    setNoteDraft({note:e.note||"", timeIn:e.timeIn||"", timeOut:e.timeOut||""});
+    setNoteFor(workerId);
+  };
+  const saveNote = () => {
+    writeEntry(rollDate, noteFor, {note:noteDraft.note||undefined, timeIn:noteDraft.timeIn||undefined, timeOut:noteDraft.timeOut||undefined});
+    setNoteFor(null);
+  };
 
-  // ---- derive attendance for any date range purely from the sparse log ----
-  // No day ever needs to be "closed" or confirmed — every date between join
-  // and today is present by default, so the count falls straight out of the
-  // exceptions on record. This is what makes "only mark absences" possible.
+  // ---- derive attendance for any date range, Sundays and holidays folded in
   const dateRange=(from,to)=>{
-    const out=[]; let d=new Date(from+"T00:00:00");
-    const end=new Date(to+"T00:00:00");
+    const out=[]; let d=new Date(from+"T00:00:00"); const end=new Date(to+"T00:00:00");
     while(d<=end){ out.push(d.toISOString().slice(0,10)); d.setDate(d.getDate()+1); }
     return out;
   };
   const attendanceIn = (workerId, from, to) => {
-    let present=0, absent=0, paidLeave=0;
+    let present=0, absent=0, paidLeave=0, off=0;
     dateRange(from,to).forEach(ds=>{
       const st = statusOn(ds, workerId);
-      if(st==="A") absent++; else if(st==="L") paidLeave++; else present++;
+      if(st==="A") absent++;
+      else if(st==="L") paidLeave++;
+      else if(isOffDay(ds)) off++;          // Sunday or an approved holiday — paid, not "present"
+      else present++;
     });
-    return { present, absent, paidLeave, payableDays: present+paidLeave };
+    return { present, absent, paidLeave, off, payableDays: present+paidLeave+off };
   };
 
   const monthWindow=(ym)=>{
@@ -1260,7 +1294,7 @@ function PayrollTracker({onClose}){
   const payFor = (w, ym)=>{
     const {from,to} = monthWindow(ym);
     const effFrom = (w.doj && w.doj>from) ? w.doj : from;
-    if(effFrom>to) return { present:0,absent:0,paidLeave:0,payableDays:0,basic:0,da:0,hra:0,
+    if(effFrom>to) return { present:0,absent:0,paidLeave:0,off:0,payableDays:0,basic:0,da:0,hra:0,
       gross:0,basicDaShareOk:true,pfWage:0,pfEmployee:0,pfEmployer:0,eps:0,edli:0,
       esiApplicable:false,esiEmployee:0,esiEmployer:0,pt:0,bonusAccrual:0,gratuityAccrual:0,netPay:0 };
     const att = attendanceIn(w.id, effFrom, to);
@@ -1284,8 +1318,8 @@ function PayrollTracker({onClose}){
     return { earnedAccrued: earned, paidLeaveTaken: att.paidLeave, earnedBalance: Math.max(0, earned-att.paidLeave) };
   };
 
-  // today's roll counts, for the summary strip at the top of the roll screen
   const rollWorkers = activeWorkers.filter(w=>!w.doj || w.doj<=rollDate);
+  const rollIsOff = isOffDay(rollDate);
   const rollCounts = rollWorkers.reduce((s,w)=>{
     const st=statusOn(rollDate,w.id);
     if(st==="A") s.absent++; else if(st==="L") s.leave++; else s.present++;
@@ -1313,7 +1347,7 @@ function PayrollTracker({onClose}){
     </div>
 
     <div style={{display:"flex",gap:5,marginBottom:10,flexWrap:"wrap"}}>
-      {[["roll","✅ Daily Roll"],["workers","👷 Workers"],["pay","💰 Monthly Pay"],["leave","🗓 Leave"],["summary","📊 Summary"],["settings","⚙ Settings"]].map(([k,l])=>
+      {[["roll","✅ Daily Roll"],["holidays","🎉 Holidays"],["workers","👷 Workers"],["pay","💰 Monthly Pay"],["leave","🗓 Leave"],["summary","📊 Summary"],["settings","⚙ Settings"]].map(([k,l])=>
         <button key={k} onClick={()=>setTab(k)} style={{...btn,padding:"7px 10px",fontSize:11.5,
           background:tab===k?"#5a3a1a":"#f0f0f0",color:tab===k?"#fff":"#555"}}>{l}</button>)}
     </div>
@@ -1323,19 +1357,24 @@ function PayrollTracker({onClose}){
     {/* ============================= DAILY ROLL ============================ */}
     {tab==="roll" && <>
       <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:10}}>
-        <button onClick={()=>{const d=new Date(rollDate+"T00:00:00");d.setDate(d.getDate()-1);setRollDate(d.toISOString().slice(0,10));}}
+        <button onClick={()=>{const d=new Date(rollDate+"T00:00:00");d.setDate(d.getDate()-1);setRollDate(d.toISOString().slice(0,10));setNoteFor(null);}}
           style={{...btn,background:"#eee",color:"#333",padding:"8px 12px"}}>‹</button>
-        <input type="date" value={rollDate} max={todayStr} onChange={e=>setRollDate(e.target.value)} style={{...inp,marginBottom:0,flex:1}}/>
+        <input type="date" value={rollDate} max={todayStr} onChange={e=>{setRollDate(e.target.value);setNoteFor(null);}} style={{...inp,marginBottom:0,flex:1}}/>
         <button disabled={rollDate>=todayStr}
-          onClick={()=>{const d=new Date(rollDate+"T00:00:00");d.setDate(d.getDate()+1);setRollDate(d.toISOString().slice(0,10));}}
+          onClick={()=>{const d=new Date(rollDate+"T00:00:00");d.setDate(d.getDate()+1);setRollDate(d.toISOString().slice(0,10));setNoteFor(null);}}
           style={{...btn,background:rollDate>=todayStr?"#f5f5f5":"#eee",color:rollDate>=todayStr?"#ccc":"#333",padding:"8px 12px"}}>›</button>
         {rollDate!==todayStr && <button onClick={()=>setRollDate(todayStr)} style={{...btn,background:"#eee",color:"#333",padding:"8px 10px",fontSize:11}}>Today</button>}
       </div>
 
+      {rollIsOff && <div style={{padding:"9px 12px",borderRadius:8,background:"#eef4ff",border:"1px solid #c8d8f0",
+        color:"#2a4a7a",fontSize:12.5,fontWeight:700,marginBottom:10}}>
+        🎉 {offLabel(rollDate)} — paid day off for everyone. No marking needed unless someone actually worked.
+      </div>}
+
       <div style={{display:"flex",gap:8,marginBottom:10}}>
         <div style={{flex:1,textAlign:"center",background:"#e8f5e9",borderRadius:8,padding:8}}>
           <div style={{fontSize:18,fontWeight:800,color:"#2e7d32"}}>{rollCounts.present}</div>
-          <div style={{fontSize:10,color:"#2e7d32",fontWeight:700}}>PRESENT</div>
+          <div style={{fontSize:10,color:"#2e7d32",fontWeight:700}}>{rollIsOff?"OFF (PAID)":"PRESENT"}</div>
         </div>
         <div style={{flex:1,textAlign:"center",background:"#ffebee",borderRadius:8,padding:8}}>
           <div style={{fontSize:18,fontWeight:800,color:"#c62828"}}>{rollCounts.absent}</div>
@@ -1348,22 +1387,93 @@ function PayrollTracker({onClose}){
       </div>
 
       <div style={{fontSize:10.5,color:"#888",marginBottom:8,lineHeight:1.5}}>
-        Everyone starts marked present. Tap a name once for absent, tap again for paid leave, a third
-        tap clears it back to present. Most days you should be tapping only a couple of names.
+        Tap a name for absent, tap again for paid leave, a third tap clears it. The ✎ opens a small
+        note — time in, time out, a remark — for someone who came late or left early but still worked.
+        A note never changes their pay; it's just on record.
       </div>
 
       {rollWorkers.length===0 && <div style={{color:"#999",fontSize:13}}>No workers had joined by this date.</div>}
-      <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
-        {rollWorkers.map(w=>{
-          const st = statusOn(rollDate, w.id);
-          const sty = STATUS_STYLE[st];
-          return <button key={w.id} onClick={()=>cycleStatus(rollDate,w.id)}
-            style={{padding:"9px 13px",borderRadius:20,border:"1px solid "+sty.fg+"33",
-              background:sty.bg,color:sty.fg,fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
-            {w.name}{st!=="P" && <span style={{fontWeight:800}}> · {sty.label}</span>}
-          </button>;
-        })}
+      {rollWorkers.map(w=>{
+        const st = statusOn(rollDate, w.id);
+        const sty = STATUS_STYLE[st];
+        const e = entryOn(rollDate, w.id);
+        const hasNote = !!(e.note||e.timeIn||e.timeOut);
+        return <div key={w.id} style={{marginBottom:6}}>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            <button onClick={()=>cycleStatus(rollDate,w.id)}
+              style={{flex:1,textAlign:"left",padding:"9px 13px",borderRadius:10,border:"1px solid "+sty.fg+"33",
+                background:sty.bg,color:sty.fg,fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
+              {w.name}{st!=="P" && <span> · {sty.label}</span>}
+            </button>
+            <button onClick={()=>noteFor===w.id?setNoteFor(null):openNote(w.id)}
+              style={{padding:"9px 11px",borderRadius:10,border:"1px solid #ddd",
+                background:hasNote?"#fff3d6":"#f5f5f5",color:hasNote?"#a5720a":"#999",fontSize:13,cursor:"pointer"}}>
+              ✎{hasNote?"•":""}</button>
+          </div>
+          {noteFor===w.id && <div style={{marginTop:5,padding:9,borderRadius:9,background:"#fafafa",border:"1px solid #eee"}}>
+            <div style={{display:"flex",gap:6,marginBottom:6}}>
+              <input type="time" value={noteDraft.timeIn} onChange={e=>setNoteDraft({...noteDraft,timeIn:e.target.value})}
+                placeholder="Time in" style={{...inp,marginBottom:0,flex:1}}/>
+              <input type="time" value={noteDraft.timeOut} onChange={e=>setNoteDraft({...noteDraft,timeOut:e.target.value})}
+                placeholder="Time out" style={{...inp,marginBottom:0,flex:1}}/>
+            </div>
+            <input value={noteDraft.note} onChange={e=>setNoteDraft({...noteDraft,note:e.target.value})}
+              placeholder="Remark, e.g. came in at 10:30" style={{...inp,marginBottom:6}}/>
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={saveNote} style={{...btn,background:"#2a4a7a",color:"#fff",flex:1,padding:7}}>Save note</button>
+              <button onClick={()=>setNoteFor(null)} style={{...btn,background:"#eee",color:"#555",padding:7}}>Cancel</button>
+            </div>
+          </div>}
+        </div>;
+      })}
+    </>}
+
+    {/* ============================== HOLIDAYS ============================= */}
+    {tab==="holidays" && <>
+      <div style={{fontSize:11,color:"#888",marginBottom:10,lineHeight:1.5}}>
+        Sunday is already handled automatically — you don't need to add it here. This list is for the
+        approved festival/national holidays on top of that. Add them one at a time, or paste your whole
+        year's list at once.
       </div>
+
+      <div style={card}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:6}}>Add one</div>
+        <div style={{display:"flex",gap:6}}>
+          <input type="date" style={{...inp,flex:1}} value={holDraft.date} onChange={e=>setHolDraft({...holDraft,date:e.target.value})}/>
+          <input placeholder="Label, e.g. Onam" style={{...inp,flex:1.4}} value={holDraft.label} onChange={e=>setHolDraft({...holDraft,label:e.target.value})}/>
+        </div>
+        <button onClick={()=>{
+            if(!holDraft.date) return;
+            const list=[...holidays.filter(h=>h.date!==holDraft.date), {date:holDraft.date,label:holDraft.label||"Holiday"}];
+            saveHolidays(list.sort((a,b)=>a.date.localeCompare(b.date))); setHolDraft({date:"",label:""});
+          }} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%"}}>Add</button>
+      </div>
+
+      <div style={card}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:6}}>Paste your approved list</div>
+        <div style={{fontSize:10.5,color:"#888",marginBottom:6}}>One per line: <code>YYYY-MM-DD, Label</code></div>
+        <textarea value={holPaste} onChange={e=>setHolPaste(e.target.value)} rows={5}
+          placeholder={"2026-01-26, Republic Day\n2026-09-05, Onam\n2026-10-20, Deepavali"} style={{...inp,fontFamily:"monospace",fontSize:12}}/>
+        <button onClick={()=>{
+            const added=holPaste.split("\n").map(l=>l.trim()).filter(Boolean).map(l=>{
+              const [d,...rest]=l.split(",");
+              return { date:d.trim(), label:(rest.join(",").trim())||"Holiday" };
+            }).filter(h=>/^\d{4}-\d{2}-\d{2}$/.test(h.date));
+            if(!added.length){ setMsg("✗ No valid YYYY-MM-DD dates found in that paste"); return; }
+            const byDate={}; [...holidays,...added].forEach(h=>byDate[h.date]=h);
+            saveHolidays(Object.values(byDate).sort((a,b)=>a.date.localeCompare(b.date)));
+            setHolPaste(""); setMsg("✓ Added "+added.length+" holiday(s)");
+          }} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%"}}>Add all</button>
+      </div>
+
+      <div style={{fontWeight:800,fontSize:13,marginBottom:6}}>Approved so far ({holidays.length})</div>
+      {holidays.length===0 && <div style={{color:"#999",fontSize:13}}>None added yet.</div>}
+      {holidays.map(h=>
+        <div key={h.date} style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px"}}>
+          <div><b style={{fontSize:13}}>{h.date}</b><span style={{fontSize:12,color:"#666"}}> — {h.label}</span></div>
+          <button onClick={()=>saveHolidays(holidays.filter(x=>x.date!==h.date))}
+            style={{background:"none",border:"none",color:"#c62828",fontSize:16,cursor:"pointer"}}>×</button>
+        </div>)}
     </>}
 
     {/* ============================= WORKERS ============================= */}
@@ -1424,7 +1534,7 @@ function PayrollTracker({onClose}){
     {/* ============================ MONTHLY PAY =========================== */}
     {tab==="pay" && <>
       <div style={{fontSize:10.5,color:"#888",marginBottom:8}}>
-        Computed entirely from the Daily Roll — nothing to enter here.
+        Computed entirely from the Daily Roll and the Holidays list — nothing to enter here.
       </div>
       <input type="month" value={curMonth} onChange={e=>setCurMonth(e.target.value)} style={{...inp,marginBottom:10}}/>
       {activeWorkers.length===0 && <div style={{color:"#999",fontSize:13}}>Add workers first.</div>}
@@ -1435,7 +1545,7 @@ function PayrollTracker({onClose}){
             <span style={{fontSize:12,fontWeight:800,color:"#2e7d32"}}>{cur0(pay.gross)} gross</span>
           </div>
           <div style={{fontSize:11,color:"#666",lineHeight:1.7}}>
-            {pay.present} present + {pay.paidLeave} paid leave = {pay.payableDays} payable days
+            {pay.present} worked + {pay.off} Sunday/holiday + {pay.paidLeave} paid leave = {pay.payableDays} payable days
             {pay.absent>0 && <span style={{color:"#c62828",fontWeight:700}}> · {pay.absent} absent</span>}<br/>
             Basic {cur0(pay.basic)} + DA {cur0(pay.da)} + HRA {cur0(pay.hra)}<br/>
             PF: employee {cur0(pay.pfEmployee)} · employer {cur0(pay.pfEmployer+pay.eps)} (incl. EPS {cur0(pay.eps)}, EDLI {cur0(pay.edli)} extra)<br/>
@@ -1465,10 +1575,11 @@ function PayrollTracker({onClose}){
 
     {/* =============================== LEAVE ============================== */}
     {tab==="leave" && <>
-      <div style={{fontSize:11,color:"#888",marginBottom:8}}>
-        Earned leave accrues at 1 day per {settings.earnedLeavePerDays||"—"} payable days worked (set this
-        from your Factories Act register in Settings — it varies, and I won't guess it). Counted from each
-        worker's join date to today, straight off the Daily Roll.
+      <div style={{fontSize:11,color:"#888",marginBottom:8,lineHeight:1.5}}>
+        Earned leave accrues at 1 day per {settings.earnedLeavePerDays||"—"} payable days (worked days plus
+        Sundays and approved holidays) — set the ratio from your Factories Act register in Settings.
+        Sundays and holidays are excluded from the count of "days worked" everywhere else, but this
+        accrual base is worth confirming against your register too; the exact denominator varies.
       </div>
       {activeWorkers.map(w=>{
         const lb = leaveBalance(w);
@@ -1521,7 +1632,7 @@ function PayrollTracker({onClose}){
         These aren't guessed — pull the earned-leave ratio from your Factories Act register,
         and the minimum wage figure from the current Karnataka notification for each category.
       </div>
-      <div style={{fontSize:11,fontWeight:700,marginBottom:3}}>Earned leave: 1 day per how many days worked?</div>
+      <div style={{fontSize:11,fontWeight:700,marginBottom:3}}>Earned leave: 1 day per how many payable days?</div>
       <input style={inp} inputMode="numeric" value={settings.earnedLeavePerDays}
         onChange={e=>setSettings({...settings,earnedLeavePerDays:e.target.value})}/>
       <div style={{fontSize:11,fontWeight:700,marginBottom:3}}>Applicable minimum wage per day (for Bonus Act floor, if higher than ₹7,000/month)</div>
