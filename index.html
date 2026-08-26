@@ -13779,6 +13779,8 @@ function AIMTrading({ onClose }) {
   const [tradeFor,setTradeFor]=useState(null);
   const [f,setF]=useState({symbol:"",name:"",shares:"",price:"",costs:""});
   const [tf,setTf]=useState({action:"BUY",shares:"",price:"",costs:"",note:""});
+  const [corpFor,setCorpFor]=useState(null);
+  const [cf,setCf]=useState({factor:"",note:""});
   const [cashEdit,setCashEdit]=useState("");
   const [g,setG]=useState({profitableYears:"",opMargin:"",bestRoe:"",debtEquity:"",interestCover:"",cashFlow:"",marketCap:"",price:"",turnover:"",yearsListed:"",drawdown:"",pledge:"",auditorResigned:false,qualifiedOpinion:false,regulatoryAction:false});
   const [gRes,setGRes]=useState(null);
@@ -13972,6 +13974,20 @@ function AIMTrading({ onClose }) {
       if(!r.ok) throw new Error(r.error);
       setMsg("✓ "+tf.action+" recorded · PC "+cur+r.pcBefore+" → "+cur+r.pcAfter);
       setTradeFor(null);setTf({action:"BUY",shares:"",price:"",costs:"",note:""});load();
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const doCorpAction=async()=>{
+    if(!corpFor) return;
+    const factor=parseFloat(cf.factor);
+    if(!factor||factor<=0){ setMsg("✗ Enter the multiplier — 2 for a 1:2 split or a 1:1 bonus, 1.5 for 2:3"); return; }
+    setBusy("corp");setMsg("");
+    try{
+      const r=await api({action:"corporateAction",symbol:corpFor.symbol,factor,note:cf.note});
+      if(!r.ok) throw new Error(r.error);
+      setMsg("✓ "+corpFor.symbol+" adjusted \u00d7"+factor+" — "+r.sharesBefore+" \u2192 "+r.sharesAfter+" shares, no cash moved");
+      setCorpFor(null);setCf({factor:"",note:""});load();
     }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
@@ -14722,9 +14738,35 @@ function AIMTrading({ onClose }) {
               style={{...inp,marginBottom:0,flex:1}}/>
             <button onClick={()=>{setTradeFor(h);setTf({action:s.action==="SELL"?"SELL":"BUY",shares:String(s.qty||""),price:String(h.last_price||""),costs:"",note:""});}}
               style={{...btn,background:"#5a3a1a",color:"#fff",flexShrink:0}}>Record trade</button>
+            <button onClick={()=>{setCorpFor(h);setCf({factor:"",note:""});}}
+              title="Split or bonus — shares change, no cash moves"
+              style={{...btn,background:"#eee",color:"#5a5a3a",flexShrink:0,padding:"9px 10px"}}>⚙️</button>
           </div>
         </div>;
       })}
+
+      {corpFor&&<div style={{...card,background:"#f5f8ff",borderColor:"#b8c8e0"}}>
+        <div style={{fontSize:12,fontWeight:800,marginBottom:4}}>Split / bonus \u00b7 {corpFor.symbol}</div>
+        <div style={{fontSize:10.5,color:"#666",marginBottom:8,lineHeight:1.5}}>
+          No cash moves. Shares multiply by this number, cost and the reference line divide by it.
+          A 1:2 split or a 1:1 bonus both double the holding \u2014 enter 2. A 2:3 split \u2014 enter 1.5.
+        </div>
+        <div style={{display:"flex",gap:6,marginBottom:6}}>
+          <input value={cf.factor} onChange={e=>setCf({...cf,factor:e.target.value})}
+            placeholder="Multiplier, e.g. 2" inputMode="decimal" style={inp}/>
+        </div>
+        <input value={cf.note} onChange={e=>setCf({...cf,note:e.target.value})}
+          placeholder="Note (optional) \u2014 e.g. record date 24-Aug-26" style={{...inp,marginBottom:8}}/>
+        <div style={{fontSize:10.5,color:"#888",marginBottom:8}}>
+          Currently {fmtN(corpFor.shares)} shares \u00b7 PC {cur}{fmtN(corpFor.portfolio_control)}
+          {cf.factor&&parseFloat(cf.factor)>0&&<><br/>After: {fmtN(corpFor.shares*parseFloat(cf.factor))} shares \u00b7 PC {cur}{fmtN(corpFor.portfolio_control/parseFloat(cf.factor))}</>}
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          <button onClick={doCorpAction} disabled={!!busy}
+            style={{...btn,background:"#2a4a7a",color:"#fff",flex:1}}>{busy==="corp"?"\u2026":"Apply"}</button>
+          <button onClick={()=>setCorpFor(null)} style={{...btn,background:"#eee",color:"#555",flex:1}}>Cancel</button>
+        </div>
+      </div>}
 
       {!openForm&&<button onClick={()=>setOpenForm(true)} style={{...btn,background:"#eee",color:"#333",width:"100%",padding:"10px"}}>
         + Open a new position
