@@ -1192,7 +1192,8 @@ function PayrollTracker({onClose}){
   // typed in per worker. Sunday is handled the same way without needing an
   // entry here at all: it's just always off.
   const [holidays,setHolidays]=useState(null); // [{date,label}]
-  const [settings,setSettings]=useState({earnedLeavePerDays:20, casualLeavePerYear:12, sickLeavePerYear:12, minWage:""});
+  const [settings,setSettings]=useState({earnedLeavePerDays:20, casualLeavePerYear:12, sickLeavePerYear:12, minWage:"",
+    minWageByCat:{unskilled:"",semiskilled:"",skilled:"",highlyskilled:""}});
   const [loading,setLoading]=useState(true);
   const [msg,setMsg]=useState("");
   const [editW,setEditW]=useState(null);
@@ -1203,30 +1204,64 @@ function PayrollTracker({onClose}){
   const [auditorFig,setAuditorFig]=useState({pf:"",esi:"",pt:""});
   const [holDraft,setHolDraft]=useState({date:"",label:""});
   const [holPaste,setHolPaste]=useState("");
+  const [exits,setExits]=useState(null);   // append-only gratuity/F&F register
+  const [exitFor,setExitFor]=useState(null);
+  const [exitDate,setExitDate]=useState("");
 
   useEffect(()=>{ (async()=>{
     setLoading(true);
     try{
-      const [w,mu,h,s] = await Promise.all([
+      const [w,mu,h,s,ex] = await Promise.all([
         sheetsAPI("getPortfolio",{key:"payroll_workers"}),
         sheetsAPI("getPortfolio",{key:"payroll_muster"}),
         sheetsAPI("getPortfolio",{key:"payroll_holidays"}),
         sheetsAPI("getPortfolio",{key:"payroll_settings"}),
+        sheetsAPI("getPortfolio",{key:"payroll_exits"}),
       ]);
       setWorkers((w&&w.data&&Array.isArray(w.data))?w.data:[]);
       setMuster((mu&&mu.data&&typeof mu.data==="object")?mu.data:{});
       setHolidays((h&&h.data&&Array.isArray(h.data))?h.data:[]);
       if(s&&s.data) setSettings(prev=>({...prev,...s.data}));
-    }catch(e){ setMsg("✗ "+String(e.message||e)); setWorkers([]); setMuster({}); setHolidays([]); }
+      setExits((ex&&ex.data&&Array.isArray(ex.data))?ex.data:[]);
+    }catch(e){ setMsg("✗ "+String(e.message||e)); setWorkers([]); setMuster({}); setHolidays([]); setExits([]); }
     setLoading(false);
   })(); },[]);
 
   const saveWorkers=async(list)=>{ setWorkers(list); try{ await sheetsAPI("savePortfolio",{key:"payroll_workers",data:list}); }catch(e){} };
   const saveMuster=async(obj)=>{ setMuster(obj); try{ await sheetsAPI("savePortfolio",{key:"payroll_muster",data:obj}); }catch(e){ setMsg("✗ Could not save — check connection"); } };
   const saveHolidays=async(list)=>{ setHolidays(list); try{ await sheetsAPI("savePortfolio",{key:"payroll_holidays",data:list}); }catch(e){} };
+  const saveExits=async(list)=>{ setExits(list); try{ await sheetsAPI("savePortfolio",{key:"payroll_exits",data:list}); }catch(e){} };
   const saveSettings=async(obj)=>{ setSettings(obj); try{ await sheetsAPI("savePortfolio",{key:"payroll_settings",data:obj}); }catch(e){} };
 
   if(loading) return <div style={{padding:20,textAlign:"center",color:"#888"}}>Loading…</div>;
+
+  const CAT_LABEL = {unskilled:"Unskilled",semiskilled:"Semi-skilled",skilled:"Skilled",highlyskilled:"Highly skilled"};
+
+  // Completed years of service, with the standard rounding rule: more than
+  // 6 months into the final year rounds up to the next full year.
+  const completedYears = (doj, uptoDate)=>{
+    if(!doj) return 0;
+    const a=new Date(doj+"T00:00:00"), b=new Date(uptoDate+"T00:00:00");
+    let months = (b.getFullYear()-a.getFullYear())*12 + (b.getMonth()-a.getMonth());
+    if(b.getDate()<a.getDate()) months--;
+    if(months<0) return 0;
+    const years = Math.floor(months/12);
+    const remMonths = months%12;
+    return remMonths>=6 ? years+1 : years;
+  };
+
+  const computeExit = (w, exitDateStr)=>{
+    const years = completedYears(w.doj, exitDateStr);
+    const eligible = years>=5;
+    const bd = r2((n(w.dailyBasic)+n(w.dailyDA))*26);      // last drawn, monthly-equivalent
+    const gratuityRaw = eligible ? (bd/26)*15*years : 0;
+    const gratuityAmount = Math.min(2000000, r2(gratuityRaw));
+    const lb = leaveBalance({...w}); // uses today's accrual as a proxy for balance at exit
+    const dailyGross = n(w.dailyBasic)+n(w.dailyDA)+n(w.dailyHRA);
+    const leaveEncashment = r2(lb.earnedBalance * dailyGross);
+    return { years, eligible, lastDrawnBasicDA:bd, gratuityAmount, leaveDays:lb.earnedBalance, leaveEncashment,
+      total: r2(gratuityAmount+leaveEncashment) };
+  };
 
   const activeWorkers = workers.filter(w=>w.active!==false);
   const todayStr = new Date().toISOString().slice(0,10);
@@ -1347,7 +1382,7 @@ function PayrollTracker({onClose}){
     </div>
 
     <div style={{display:"flex",gap:5,marginBottom:10,flexWrap:"wrap"}}>
-      {[["roll","✅ Daily Roll"],["holidays","🎉 Holidays"],["workers","👷 Workers"],["pay","💰 Monthly Pay"],["leave","🗓 Leave"],["summary","📊 Summary"],["settings","⚙ Settings"]].map(([k,l])=>
+      {[["roll","✅ Daily Roll"],["holidays","🎉 Holidays"],["workers","👷 Workers"],["pay","💰 Monthly Pay"],["leave","🗓 Leave"],["reports","📄 Reports"],["summary","📊 Summary"],["settings","⚙ Settings"]].map(([k,l])=>
         <button key={k} onClick={()=>setTab(k)} style={{...btn,padding:"7px 10px",fontSize:11.5,
           background:tab===k?"#5a3a1a":"#f0f0f0",color:tab===k?"#fff":"#555"}}>{l}</button>)}
     </div>
@@ -1481,22 +1516,57 @@ function PayrollTracker({onClose}){
       {activeWorkers.length===0 && <div style={{color:"#999",fontSize:13,marginBottom:10}}>No workers added yet.</div>}
       {activeWorkers.map(w=>{
         const testStat = computeStatutory(n(w.dailyBasic)*26, n(w.dailyDA)*26, n(w.dailyHRA)*26, 0, 0, settings.minWage);
+        const catFloor = n(settings.minWageByCat && settings.minWageByCat[w.category||"unskilled"]);
+        const belowMinWage = catFloor>0 && testStat.gross < catFloor;
         return <div key={w.id} style={card}>
           <div style={{display:"flex",justifyContent:"space-between"}}>
             <b style={{fontSize:14}}>{w.name}</b>
-            <button onClick={()=>setEditW({...w})} style={{...btn,padding:"4px 10px",fontSize:11,background:"#eee",color:"#333"}}>Edit</button>
+            <div style={{display:"flex",gap:5}}>
+              <button onClick={()=>setEditW({...w})} style={{...btn,padding:"4px 10px",fontSize:11,background:"#eee",color:"#333"}}>Edit</button>
+              <button onClick={()=>{setExitFor(w);setExitDate(todayStr);}} style={{...btn,padding:"4px 10px",fontSize:11,background:"#fff",color:"#8a5a1a",border:"1px solid #e0c090"}}>Exit</button>
+            </div>
           </div>
           <div style={{fontSize:11.5,color:"#666",marginTop:3}}>
-            Joined {w.doj||"—"} · {w.category||"unskilled"} · daily Basic {cur0(w.dailyBasic)} + DA {cur0(w.dailyDA)} + HRA {cur0(w.dailyHRA)}
+            Joined {w.doj||"—"} · {CAT_LABEL[w.category]||w.category} · daily Basic {cur0(w.dailyBasic)} + DA {cur0(w.dailyDA)} + HRA {cur0(w.dailyHRA)}
           </div>
           {!testStat.basicDaShareOk && <div style={{fontSize:10.5,color:"#c62828",marginTop:4,fontWeight:700}}>
             ⚠ Basic+DA is under 50% of gross — the Nov 2025 Labour Code floor. PF/gratuity may be understated.</div>}
+          {belowMinWage && <div style={{fontSize:10.5,color:"#c62828",marginTop:4,fontWeight:700}}>
+            ⚠ Monthly gross ({cur0(testStat.gross)}) is under the {CAT_LABEL[w.category]} minimum wage you set ({cur0(catFloor)})</div>}
           {(w.pfNumber||w.esiNumber) && <div style={{fontSize:10.5,color:"#999",marginTop:3}}>
             {w.pfNumber?("UAN "+w.pfNumber):""} {w.esiNumber?(" · ESI "+w.esiNumber):""}</div>}
         </div>;
       })}
       <button onClick={()=>setEditW({id:"w_"+Date.now(),name:"",doj:"",category:"unskilled",dailyBasic:"",dailyDA:"",dailyHRA:"",pfNumber:"",esiNumber:"",active:true})}
         style={{...btn,width:"100%",background:"#eee",color:"#333",padding:11}}>+ Add worker</button>
+
+      {exitFor && <div style={{...card,background:"#fff8f0",borderColor:"#e0c090",marginTop:10}}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:6}}>Exit — {exitFor.name}</div>
+        <div style={{fontSize:10.5,color:"#888",marginBottom:8}}>
+          Computes gratuity (if eligible) and unused earned-leave encashment as of the last working day.
+          This is an estimate for your records, not a filing — have your auditor confirm before payout.
+        </div>
+        <input type="date" style={inp} value={exitDate} max={todayStr} onChange={e=>setExitDate(e.target.value)}/>
+        {exitDate && (()=>{ const calc=computeExit(exitFor, exitDate); return <div style={{fontSize:12,lineHeight:1.8,marginBottom:8}}>
+          Completed service: <b>{calc.years} year(s)</b><br/>
+          Gratuity: {calc.eligible
+            ? <b>{cur0(calc.gratuityAmount)}</b>
+            : <span style={{color:"#c62828"}}>not eligible — under 5 years (check the 4-years-240-days exception manually if this was a tight call)</span>}<br/>
+          Unused earned leave: {calc.leaveDays} day(s) → encashment <b>{cur0(calc.leaveEncashment)}</b><br/>
+          <b style={{fontSize:13.5}}>Total: {cur0(calc.total)}</b>
+        </div>; })()}
+        <div style={{display:"flex",gap:6}}>
+          <button onClick={()=>{
+              const calc=computeExit(exitFor, exitDate);
+              const rec={id:"exit_"+Date.now(), workerId:exitFor.id, name:exitFor.name, doj:exitFor.doj,
+                exitDate, ...calc, recordedOn:todayStr};
+              saveExits([...(exits||[]), rec]);
+              saveWorkers(workers.map(x=>x.id===exitFor.id?{...x,active:false,exitDate}:x));
+              setExitFor(null); setMsg("✓ "+exitFor.name+" moved to the Gratuity Register in Reports");
+            }} style={{...btn,background:"#2a4a7a",color:"#fff",flex:1}}>Record exit</button>
+          <button onClick={()=>setExitFor(null)} style={{...btn,background:"#eee",color:"#555"}}>Cancel</button>
+        </div>
+      </div>}
 
       {editW && <div style={{...card,background:"#fafafa",marginTop:10}}>
         <div style={{fontWeight:800,fontSize:13,marginBottom:8}}>{workers.find(x=>x.id===editW.id)?"Edit":"New"} worker</div>
@@ -1593,6 +1663,76 @@ function PayrollTracker({onClose}){
       })}
     </>}
 
+    {/* ============================== REPORTS ============================= */}
+    {tab==="reports" && <>
+      <input type="month" value={curMonth} onChange={e=>setCurMonth(e.target.value)} style={{...inp,marginBottom:10}}/>
+
+      <div style={card}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:4}}>Wage register — {curMonth}</div>
+        <div style={{fontSize:10.5,color:"#888",marginBottom:8}}>One row per worker: days, gross, PF, ESI, PT, net.</div>
+        <button onClick={()=>{
+            const rows=[["Name","DOJ","Category","Worked","Sunday/Holiday","Paid Leave","Absent","Basic","DA","HRA","Gross",
+              "PF Employee","PF Employer","ESI Employee","ESI Employer","PT","Net Pay"]];
+            monthRows.forEach(({w,pay})=>rows.push([w.name,w.doj,CAT_LABEL[w.category]||w.category,
+              pay.present,pay.off,pay.paidLeave,pay.absent,pay.basic,pay.da,pay.hra,pay.gross,
+              pay.pfEmployee,r2(pay.pfEmployer+pay.eps),pay.esiEmployee,pay.esiEmployer,pay.pt,pay.netPay]));
+            downloadCSV("wage-register-"+curMonth+".csv", rows);
+          }} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%"}}>Download wage register (CSV)</button>
+      </div>
+
+      <div style={card}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:4}}>Muster roll — {curMonth}</div>
+        <div style={{fontSize:10.5,color:"#888",marginBottom:8}}>One row per worker, one column per day — P / A / L / O (Sunday or holiday).</div>
+        <button onClick={()=>{
+            const {from,to}=monthWindow(curMonth);
+            const days=dateRange(from,to);
+            const rows=[["Name",...days.map(d=>d.slice(8,10))]];
+            activeWorkers.forEach(w=>{
+              const row=[w.name];
+              days.forEach(ds=>{
+                const st=statusOn(ds,w.id);
+                row.push(st==="A"?"A":st==="L"?"L":isOffDay(ds)?"O":"P");
+              });
+              rows.push(row);
+            });
+            downloadCSV("muster-roll-"+curMonth+".csv", rows);
+          }} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%"}}>Download muster roll (CSV)</button>
+      </div>
+
+      <div style={card}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:4}}>Leave register — as of today</div>
+        <button onClick={()=>{
+            const rows=[["Name","DOJ","Earned Leave Accrued","Taken","Balance"]];
+            activeWorkers.forEach(w=>{ const lb=leaveBalance(w); rows.push([w.name,w.doj,lb.earnedAccrued,lb.paidLeaveTaken,lb.earnedBalance]); });
+            downloadCSV("leave-register-"+todayStr+".csv", rows);
+          }} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%"}}>Download leave register (CSV)</button>
+      </div>
+
+      <div style={card}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:6}}>Gratuity register ({(exits||[]).length} exit{(exits||[]).length===1?"":"s"})</div>
+        {(!exits||exits.length===0) && <div style={{color:"#999",fontSize:13}}>Nobody recorded as exited yet — use Exit on a worker's row.</div>}
+        {(exits||[]).slice().reverse().map(ex=>
+          <div key={ex.id} style={{padding:"8px 0",borderBottom:"1px solid #f0f0f0",fontSize:12,lineHeight:1.7}}>
+            <b>{ex.name}</b> — joined {ex.doj}, exited {ex.exitDate} ({ex.years} yr{ex.years===1?"":"s"})<br/>
+            Gratuity: {ex.eligible?cur0(ex.gratuityAmount):"not eligible"} · Leave encashment: {cur0(ex.leaveEncashment)} ({ex.leaveDays} days)<br/>
+            <b>Total: {cur0(ex.total)}</b>
+          </div>)}
+        {exits&&exits.length>0 && <button onClick={()=>{
+            const rows=[["Name","DOJ","Exit Date","Years of Service","Gratuity Eligible","Gratuity Amount",
+              "Leave Balance Days","Leave Encashment","Total Payable","Recorded On"]];
+            exits.forEach(ex=>rows.push([ex.name,ex.doj,ex.exitDate,ex.years,ex.eligible?"Yes":"No",
+              ex.gratuityAmount,ex.leaveDays,ex.leaveEncashment,ex.total,ex.recordedOn]));
+            downloadCSV("gratuity-register.csv", rows);
+          }} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%",marginTop:8}}>Download gratuity register (CSV)</button>}
+      </div>
+
+      <div style={{fontSize:10.5,color:"#888",lineHeight:1.6,marginTop:4}}>
+        Worth adding once this is proven out: an overtime register (Factories Act requires double-rate pay
+        beyond statutory hours — not tracked here yet) and a fines/deductions register under the Payment
+        of Wages Act, if either applies to how you run the floor. Say the word if you want them built.
+      </div>
+    </>}
+
     {/* ============================== SUMMARY ============================= */}
     {tab==="summary" && <>
       <div style={{fontSize:11,color:"#888",marginBottom:8}}>
@@ -1638,12 +1778,33 @@ function PayrollTracker({onClose}){
       <div style={{fontSize:11,fontWeight:700,marginBottom:3}}>Applicable minimum wage per day (for Bonus Act floor, if higher than ₹7,000/month)</div>
       <input style={inp} inputMode="decimal" placeholder="Monthly minimum wage, e.g. 12000" value={settings.minWage}
         onChange={e=>setSettings({...settings,minWage:e.target.value})}/>
-      <button onClick={()=>saveSettings(settings)} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%"}}>Save settings</button>
+
+      <div style={{fontSize:11,fontWeight:700,marginBottom:3,marginTop:6}}>
+        Karnataka minimum monthly wage per category (from the current VDA notification — leave blank to skip the check)
+      </div>
+      {["unskilled","semiskilled","skilled","highlyskilled"].map(cat=>
+        <div key={cat} style={{display:"flex",gap:6,alignItems:"center",marginBottom:5}}>
+          <span style={{fontSize:11.5,width:100,flexShrink:0}}>{CAT_LABEL[cat]}</span>
+          <input style={{...inp,marginBottom:0}} inputMode="decimal" placeholder="e.g. 15000"
+            value={(settings.minWageByCat||{})[cat]||""}
+            onChange={e=>setSettings({...settings,minWageByCat:{...(settings.minWageByCat||{}),[cat]:e.target.value}})}/>
+        </div>)}
+
+      <button onClick={()=>saveSettings(settings)} style={{...btn,background:"#2a4a7a",color:"#fff",width:"100%",marginTop:6}}>Save settings</button>
     </div>}
   </div>;
 }
 
 function cur0(v){ return "₹"+Math.round(n(v)).toLocaleString("en-IN"); }
+
+function downloadCSV(filename, rows){
+  const esc = v => { const s=String(v==null?"":v); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; };
+  const csv = rows.map(r=>r.map(esc).join(",")).join("\n");
+  const blob = new Blob([csv], {type:"text/csv"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
 
 
 function LogisticsTracker({entries,onClose,onUpdateEntry,onNewSalesOrder}){
