@@ -355,6 +355,50 @@ exports.handler = async (event) => {
       });
     }
 
+    // ------------------------------------------------------ CORPORATE ACTION
+    // Splits and bonuses move no cash and are not a trade. Shares multiply by
+    // a factor, cost basis and the Portfolio Control line divide by the same
+    // factor, so total value and every signal stay exactly as they were the
+    // moment before the record date.
+    if (action === "corporateAction") {
+      const symbol = String(body.symbol || "").trim().toUpperCase();
+      const id = bookKey + "|" + symbol;
+      const factor = n(body.factor);
+      if (!factor || factor <= 0) return FAIL("factor must be a positive number — e.g. 2 for a 1:2 split or a 1:1 bonus", 400);
+
+      const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&id=eq." + encodeURIComponent(id));
+      if (hr.status >= 300 || !hr.body || !hr.body.length) return FAIL("no open position for " + symbol, 400);
+      const h = hr.body[0];
+
+      const sharesBefore = n(h.shares), pcBefore = n(h.portfolio_control);
+      const sharesAfter  = r2(sharesBefore * factor);
+      const avgAfter     = n(h.avg_cost) / factor;
+      const pcAfter      = r2(pcBefore / factor);
+      const priceAfter   = h.last_price ? r2(n(h.last_price) / factor) : h.last_price;
+
+      const cr = await sb("GET", "/rest/v1/aim_cash?select=*&book=eq." + encodeURIComponent(bookKey));
+      const cashNow = (cr.status < 300 && cr.body && cr.body.length) ? n(cr.body[0].cash) : 0;
+
+      await sb("PATCH", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(id), {
+        shares: sharesAfter, avg_cost: r2(avgAfter), portfolio_control: pcAfter,
+        last_price: priceAfter, updated_at: new Date().toISOString()
+      });
+
+      await sb("POST", "/rest/v1/aim_transactions", {
+        book: bookKey, symbol, txn_date: body.date || new Date().toISOString().slice(0, 10),
+        action: "SPLIT", shares: r2(sharesAfter - sharesBefore), price: 0, amount: 0, costs: 0,
+        pc_before: r2(pcBefore), pc_after: pcAfter, cash_after: r2(cashNow),
+        note: body.note || ("Corporate action \u00d7" + factor + " — no cash movement")
+      });
+
+      return OK({
+        ok: true, symbol, factor,
+        sharesBefore: r2(sharesBefore), sharesAfter,
+        pcBefore: r2(pcBefore), pcAfter,
+        signal: aimSignal(sharesAfter, priceAfter || 0, pcAfter, { fractional: book === "USA" })
+      });
+    }
+
     // ---------------------------------------------------------------- LEDGER
     if (action === "ledger") {
       let q = "/rest/v1/aim_transactions?select=*&book=eq." + encodeURIComponent(bookKey);
