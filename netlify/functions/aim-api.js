@@ -20,6 +20,8 @@ const https = require("https");
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_KEY || "";
+const BOT_TOKEN_ENV     = process.env.TELEGRAM_BOT_TOKEN || "";
+const OWNER_CHAT_ID_ENV = "8632288596"; // same chat the rest of the app notifies
 
 const H = {
   "Access-Control-Allow-Origin": "*",
@@ -353,6 +355,104 @@ exports.handler = async (event) => {
         shares: r2(newShares), cash: r2(cashAfter),
         signal: aimSignal(newShares, price, pcAfter, { fractional: book === "USA" })
       });
+    }
+
+    // ------------------------------------------------- AUTO CORPORATE ACTIONS
+    // Runs every time prices are refreshed. Asks Yahoo whether any held stock
+    // has gone through a split or bonus in the last 10 days and, if so, adjusts
+    // shares and the Portfolio Control line the same way the manual gear-icon
+    // button does — but automatically, which is the actual point of this.
+    //
+    // Dividends are found but never auto-applied: a cash credit is a real money
+    // event with tax and TDS questions attached to it, and guessing at those
+    // silently is worse than asking. It gets reported, not booked.
+    //
+    // Honesty about coverage: Yahoo tracks true stock splits reliably and most
+    // Indian bonus issues fold into the same "splits" event with the right
+    // ratio, but not every NSE corporate action is guaranteed to show up here.
+    // This closes most of the gap the manual button existed for — it does not
+    // replace checking your contract notes.
+    if (action === "checkCorporateActions") {
+      const hr = await sb("GET", "/rest/v1/aim_holdings?select=*&book=eq." + encodeURIComponent(bookKey));
+      const holdings = (hr.status < 300 && hr.body) ? hr.body : [];
+      const applied = [], dividends = [], errors = [];
+      const cutoff = Date.now() - 10 * 86400000; // a 10-day lookback per refresh
+
+      for (const h of holdings) {
+        const sym = h.symbol;
+        const candidates = (book === "INDIA" && !/\.(NS|BO)$/.test(sym)) ? [sym + ".NS", sym + ".BO"] : [sym];
+        let evt = null;
+        for (const c of candidates) {
+          try {
+            const url = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(c) +
+              "?interval=1d&range=1mo&events=div,splits";
+            const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+            if (!r.ok) continue;
+            const j = await r.json();
+            const res = j && j.chart && j.chart.result && j.chart.result[0];
+            if (res && res.events && (res.events.splits || res.events.dividends)) { evt = res.events; break; }
+          } catch (e) { /* try the next suffix */ }
+        }
+        if (!evt) continue;
+
+        for (const key of Object.keys(evt.splits || {})) {
+          const sp = evt.splits[key];
+          const ts = sp.date * 1000;
+          if (ts < cutoff) continue;
+          const txnDate = new Date(ts).toISOString().slice(0, 10);
+          const dup = await sb("GET", "/rest/v1/aim_transactions?select=id&book=eq." + encodeURIComponent(bookKey) +
+            "&symbol=eq." + encodeURIComponent(sym) + "&action=eq.SPLIT&txn_date=eq." + txnDate);
+          if (dup.status < 300 && dup.body && dup.body.length) continue; // already applied on an earlier refresh
+
+          const factor = n(sp.numerator) / n(sp.denominator);
+          if (!factor || factor <= 0) continue;
+          const sharesBefore = n(h.shares), pcBefore = n(h.portfolio_control);
+          const sharesAfter = r2(sharesBefore * factor);
+          const pcAfter = r2(pcBefore / factor);
+          const priceAfter = h.last_price ? r2(n(h.last_price) / factor) : h.last_price;
+
+          await sb("PATCH", "/rest/v1/aim_holdings?id=eq." + encodeURIComponent(h.id), {
+            shares: sharesAfter, avg_cost: r2(n(h.avg_cost) / factor), portfolio_control: pcAfter,
+            last_price: priceAfter, updated_at: new Date().toISOString()
+          });
+          await sb("POST", "/rest/v1/aim_transactions", {
+            book: bookKey, symbol: sym, txn_date: txnDate, action: "SPLIT",
+            shares: r2(sharesAfter - sharesBefore), price: 0, amount: 0, costs: 0,
+            pc_before: r2(pcBefore), pc_after: pcAfter, cash_after: 0,
+            note: "Auto-detected \u00d7" + factor + " (" + (sp.splitRatio || "") + ") \u2014 Yahoo Finance, no cash movement"
+          });
+          h.shares = sharesAfter; h.portfolio_control = pcAfter; h.last_price = priceAfter; // keep local copy current
+          applied.push({ symbol: sym, factor, sharesBefore: r2(sharesBefore), sharesAfter, date: txnDate });
+        }
+
+        for (const key of Object.keys(evt.dividends || {})) {
+          const dv = evt.dividends[key];
+          const ts = dv.date * 1000;
+          if (ts < cutoff) continue;
+          dividends.push({ symbol: sym, amount: n(dv.amount), date: new Date(ts).toISOString().slice(0, 10) });
+        }
+      }
+
+      if ((applied.length || dividends.length) && OWNER_CHAT_ID_ENV) {
+        const lines = [];
+        if (applied.length) {
+          lines.push("\ud83d\udd04 <b>Corporate actions applied automatically \u2014 " + book + "</b>");
+          applied.forEach(a => lines.push(a.symbol + ": \u00d7" + a.factor + " \u2014 " + a.sharesBefore + " \u2192 " + a.sharesAfter + " shares (" + a.date + ")"));
+        }
+        if (dividends.length) {
+          if (lines.length) lines.push("");
+          lines.push("\ud83d\udcb0 <b>Dividends seen, not auto-booked \u2014 " + book + "</b>");
+          dividends.forEach(d => lines.push(d.symbol + ": \u20b9" + d.amount + "/share on " + d.date + " \u2014 log the cash received yourself"));
+        }
+        try {
+          await fetch("https://api.telegram.org/bot" + BOT_TOKEN_ENV + "/sendMessage", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: OWNER_CHAT_ID_ENV, text: lines.join("\n"), parse_mode: "HTML" })
+          });
+        } catch (e) { /* the adjustment already happened; a failed ping shouldn't undo it */ }
+      }
+
+      return OK({ ok: true, applied, dividends, checked: holdings.length });
     }
 
     // ------------------------------------------------------ CORPORATE ACTION
