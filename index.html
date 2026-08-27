@@ -14275,7 +14275,7 @@ function AIMScreener({ book }) {
   const csv=()=>{
     if(!rows||!rows.length) return;
     let s="Rank,Symbol,LTP,PctBelow52wHigh,PosInRange,AnnVolPct,BounceBackPct,DrawdownsSeen,TurnoverCr,Above200DMA,MarketCapCr,ROE,DebtEquity,OPM,PledgePct,Score,"+
-      "Movement,Oscillation,Recovery,Tradeable,BeatsHolding,SuitedNotLucky,Agreement,Spread,Votes,SingleRank,"+
+      "Movement,Oscillation,Recovery,Tradeable,BeatsHolding,RoomToWork,SuitedNotLucky,Agreement,Spread,Votes,SingleRank,"+
       "EdgeVsHoldPct,RKReturnPct,HoldReturnPct,SimTrades,WinRatePct,EdgeSpread,TravelRatio,"+
       "SwingMedianPct,SwingBiggestPct,SwingsPerYear,RangeRatio,HarvestCeilingPctYr,RKAnnualPct,HoldAnnualPct\n";
     rows.forEach((r,i)=>{
