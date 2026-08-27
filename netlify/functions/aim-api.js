@@ -455,6 +455,52 @@ exports.handler = async (event) => {
       return OK({ ok: true, applied, dividends, checked: holdings.length });
     }
 
+    // -------------------------------------------------------- GATE AUTOFILL
+    // Pulls trailing EPS and the 6-month high/low straight from Yahoo, so the
+    // two numbers that actually matter for surveillance-style risk don't
+    // depend on someone typing a remembered figure into the gate by hand —
+    // which is exactly the gap that let a stock through this gate undetected
+    // right up until Zerodha's own Nudge caught it at the point of buying.
+    if (action === "gateAutofill") {
+      const symbol = String(body.symbol || "").trim().toUpperCase();
+      if (!symbol) return FAIL("symbol required", 400);
+      const candidates = (book === "INDIA" && !/\.(NS|BO)$/.test(symbol)) ? [symbol + ".NS", symbol + ".BO"] : [symbol];
+
+      let eps = null, sixMonthRange = null, price = null, lastErr = "";
+      for (const c of candidates) {
+        try {
+          const [chartR, statsR] = await Promise.all([
+            fetch("https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(c) + "?interval=1d&range=6mo",
+              { headers: { "User-Agent": "Mozilla/5.0" } }),
+            fetch("https://query1.finance.yahoo.com/v10/finance/quoteSummary/" + encodeURIComponent(c) + "?modules=defaultKeyStatistics",
+              { headers: { "User-Agent": "Mozilla/5.0" } })
+          ]);
+          if (chartR.ok) {
+            const cj = await chartR.json();
+            const res = cj && cj.chart && cj.chart.result && cj.chart.result[0];
+            const highs = res && res.indicators && res.indicators.quote && res.indicators.quote[0] && res.indicators.quote[0].high;
+            const lows  = res && res.indicators && res.indicators.quote && res.indicators.quote[0] && res.indicators.quote[0].low;
+            if (highs && lows) {
+              const hi = Math.max(...highs.filter(x => x != null));
+              const lo = Math.min(...lows.filter(x => x != null));
+              if (hi > 0 && lo > 0) sixMonthRange = r2(((hi - lo) / lo) * 100);
+              price = res.meta && res.meta.regularMarketPrice;
+            }
+          }
+          if (statsR.ok) {
+            const sj = await statsR.json();
+            const stats = sj && sj.quoteSummary && sj.quoteSummary.result && sj.quoteSummary.result[0] && sj.quoteSummary.result[0].defaultKeyStatistics;
+            const raw = stats && stats.trailingEps && stats.trailingEps.raw;
+            if (raw != null) eps = r2(raw);
+          }
+          if (sixMonthRange != null || eps != null) break;
+        } catch (e) { lastErr = String(e.message || e); }
+      }
+
+      if (sixMonthRange == null && eps == null) return FAIL("Could not fetch data for " + symbol + (lastErr ? (" — " + lastErr) : ""), 400);
+      return OK({ ok: true, symbol, eps, sixMonthRange, price });
+    }
+
     // ------------------------------------------------------ CORPORATE ACTION
     // Splits and bonuses move no cash and are not a trade. Shares multiply by
     // a factor, cost basis and the Portfolio Control line divide by the same
@@ -691,6 +737,18 @@ exports.handler = async (event) => {
 
       const dd = n(d.drawdown);
       add("Not more than 40% below 52-week high", dd <= 40, dd + "% below high");
+
+      // Both added after a stock reached a Zerodha exchange-surveillance Nudge
+      // (zero EPS, 100% high-low swing in 6 months) that this gate had no rule
+      // for at all. "Profitable 2 of 3 years" can pass on old results while the
+      // most recent trailing EPS is deeply negative — this checks the current
+      // number directly instead of leaning on a lagging multi-year average.
+      add("Latest trailing EPS is positive", n(d.eps) > 0, "EPS " + n(d.eps));
+      // Kept stricter than the exchange's own 100% trigger on purpose — the
+      // point is to reject before a stock reaches surveillance territory,
+      // not to match the threshold that put it there.
+      add("High-low range over 6 months under 80%", n(d.sixMonthRange) > 0 && n(d.sixMonthRange) <= 80,
+          n(d.sixMonthRange) + "%");
 
       if (isIndia) {
         add("Promoter pledge under 25%", n(d.pledge) < 25, n(d.pledge) + "%");
