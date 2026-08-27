@@ -14602,7 +14602,7 @@ function AIMTrading({ onClose }) {
   const [corpFor,setCorpFor]=useState(null);
   const [cf,setCf]=useState({factor:"",note:""});
   const [cashEdit,setCashEdit]=useState("");
-  const [g,setG]=useState({profitableYears:"",opMargin:"",bestRoe:"",debtEquity:"",interestCover:"",cashFlow:"",marketCap:"",price:"",turnover:"",yearsListed:"",drawdown:"",pledge:"",auditorResigned:false,qualifiedOpinion:false,regulatoryAction:false});
+  const [g,setG]=useState({symbol:"",profitableYears:"",opMargin:"",bestRoe:"",debtEquity:"",interestCover:"",cashFlow:"",marketCap:"",price:"",turnover:"",yearsListed:"",drawdown:"",pledge:"",auditorResigned:false,qualifiedOpinion:false,regulatoryAction:false,eps:"",sixMonthRange:""});
   const [gRes,setGRes]=useState(null);
   const [cmp,setCmp]=useState(null);
   const [taxCalc,setTaxCalc]=useState({proceeds:"",costBasis:""});
@@ -15208,6 +15208,21 @@ function AIMTrading({ onClose }) {
     try{
       const r=await api({action:"cryptoTax",proceeds:parseFloat(taxCalc.proceeds)||0,costBasis:parseFloat(taxCalc.costBasis)||0});
       if(r.ok) setTaxRes(r);
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const autofillGate=async()=>{
+    if(!g.symbol){ setMsg("✗ Enter a symbol first"); return; }
+    setBusy("gateFill");
+    try{
+      const r=await api({action:"gateAutofill",symbol:g.symbol});
+      if(!r.ok) throw new Error(r.error);
+      setG(prev=>({...prev,
+        eps: r.eps!=null?String(r.eps):prev.eps,
+        sixMonthRange: r.sixMonthRange!=null?String(r.sixMonthRange):prev.sixMonthRange,
+        price: r.price!=null?String(r.price):prev.price}));
+      setMsg("✓ Pulled from Yahoo — cross-check against your broker before relying on it");
     }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
@@ -16112,7 +16127,21 @@ function AIMTrading({ onClose }) {
         Stage 1 of the manual. Every rule must pass — a strong number never compensates for a failure.
       </div>
       <div style={card}>
-        {[["profitableYears","Profitable years, of last 3"],["opMargin","Operating margin %"],
+        <div style={{fontSize:10.5,color:"#888",marginBottom:2}}>Symbol</div>
+        <div style={{display:"flex",gap:6,marginBottom:6}}>
+          <input value={g.symbol} onChange={e=>setG({...g,symbol:e.target.value.toUpperCase()})}
+            placeholder={book==="INDIA"?"e.g. TDPOWERSYS":"e.g. AAPL"} style={{...inp,marginBottom:0,flex:1}}/>
+          <button onClick={autofillGate} disabled={!!busy}
+            style={{...btn,background:"#2a5a8a",color:"#fff",flexShrink:0,padding:"9px 12px",fontSize:11.5}}>
+            {busy==="gateFill"?"…":"Pull EPS & range"}</button>
+        </div>
+        <div style={{fontSize:10,color:"#a08a5a",marginBottom:8,lineHeight:1.4}}>
+          Fills EPS and the 6-month high-low range from Yahoo — everything else on this
+          gate still needs your own judgement, this just removes the two numbers most
+          likely to be typed from memory and gotten wrong.
+        </div>
+        {[["eps","Latest trailing EPS"],["sixMonthRange","High-low range, last 6 months (%)"],
+          ["profitableYears","Profitable years, of last 3"],["opMargin","Operating margin %"],
           ["bestRoe","Best ROE in last 4 years %"],["debtEquity","Debt to equity"],
           ["interestCover","Interest cover (x)"],["cashFlow","Operating cash flow"],
           ["marketCap",book==="INDIA"?"Market cap (Rs. crore)":"Market cap ($ million)"],
