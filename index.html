@@ -15216,13 +15216,31 @@ function AIMTrading({ onClose }) {
     if(!g.symbol){ setMsg("✗ Enter a symbol first"); return; }
     setBusy("gateFill");
     try{
+      // The 6-month range comes from Kite Connect when you have a live token —
+      // real exchange data from your own subscription, better than a scrape.
+      // EPS never can, on any Kite plan — Zerodha's own API doesn't carry
+      // fundamentals at all, so that half always comes from Yahoo regardless.
+      let rangeFromKite = null, rangeSource = "Yahoo (unofficial)";
+      if(book==="INDIA" && kite){
+        try{
+          const kr = await fetch("/.netlify/functions/kite",{method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({action:"historicalRange",access_token:kite,tradingsymbol:g.symbol})});
+          const kj = await kr.json();
+          if(kj.ok){ rangeFromKite = kj.sixMonthRange; rangeSource = "Kite Connect (your own subscription)"; }
+        }catch(e){ /* fall through to Yahoo below */ }
+      }
+
       const r=await api({action:"gateAutofill",symbol:g.symbol});
-      if(!r.ok) throw new Error(r.error);
+      if(!r.ok && rangeFromKite==null) throw new Error(r.error);
+
       setG(prev=>({...prev,
-        eps: r.eps!=null?String(r.eps):prev.eps,
-        sixMonthRange: r.sixMonthRange!=null?String(r.sixMonthRange):prev.sixMonthRange,
-        price: r.price!=null?String(r.price):prev.price}));
-      setMsg("✓ Pulled from Yahoo — cross-check against your broker before relying on it");
+        eps: (r&&r.eps!=null)?String(r.eps):prev.eps,
+        sixMonthRange: rangeFromKite!=null?String(rangeFromKite):((r&&r.sixMonthRange!=null)?String(r.sixMonthRange):prev.sixMonthRange),
+        price: rangeFromKite!=null?prev.price:((r&&r.price!=null)?String(r.price):prev.price)}));
+
+      setMsg("✓ Range from "+rangeSource+". EPS from Yahoo — Kite Connect doesn't carry fundamentals on any plan, so that part can't come from your subscription."
+        + (book==="INDIA"&&!kite?" Log into Kite (top of Trading) for exchange-sourced range instead of Yahoo's.":""));
     }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
