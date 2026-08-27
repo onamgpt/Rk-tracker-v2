@@ -200,6 +200,44 @@ exports.handler = async (event) => {
       return {statusCode:200, headers:h, body:JSON.stringify({symbols:syms, count:syms.length})};
     }
 
+    // Real 6-month high/low, sourced from the exchange via your own Kite
+    // subscription rather than an unofficial scrape. This is the one piece
+    // of the gate check that Kite Connect can actually provide — fundamentals
+    // like EPS are not part of this API at any subscription tier; Zerodha's
+    // own developer forum confirms that even paid Kite Connect access does
+    // not expose them, so that half of the gate still has to come from
+    // elsewhere. Not overselling what ₹500/month buys here.
+    if (action === "historicalRange") {
+      var tsym = String(body.tradingsymbol || "").toUpperCase();
+      if (!tsym) return {statusCode:400, headers:h, body:JSON.stringify({error:"tradingsymbol required"})};
+
+      var rawList2 = await kiteGet("/instruments/NSE", body.access_token);
+      var lines2 = rawList2.split("\n");
+      var token = null;
+      for (var lj = 1; lj < lines2.length; lj++) {
+        var cols2 = lines2[lj].split(",");
+        if (cols2.length > 11 && cols2[9] === "EQ" && cols2[10] === "NSE" && cols2[2] === tsym) {
+          token = cols2[0]; break;
+        }
+      }
+      if (!token) return {statusCode:400, headers:h, body:JSON.stringify({error:"symbol not found on NSE — check the spelling"})};
+
+      var to = new Date();
+      var from = new Date(); from.setMonth(from.getMonth() - 6);
+      var fmt = function(d){ return d.toISOString().slice(0,10); };
+      var histPath = "/instruments/historical/" + token + "/day?from=" + fmt(from) + "&to=" + fmt(to);
+      var rawHist = await kiteGet(histPath, body.access_token);
+      var hist;
+      try { hist = JSON.parse(rawHist); } catch(e) { return {statusCode:502, headers:h, body:JSON.stringify({error:"could not read Kite's historical response"})}; }
+      var candles = hist && hist.data && hist.data.candles;
+      if (!candles || !candles.length) return {statusCode:400, headers:h, body:JSON.stringify({error:hist.message||"no historical data returned"})};
+
+      var hi = -Infinity, lo = Infinity, lastClose = candles[candles.length-1][4];
+      candles.forEach(function(c){ if(c[2]>hi) hi=c[2]; if(c[3]<lo) lo=c[3]; });
+      var rangePct = lo>0 ? Math.round(((hi-lo)/lo)*10000)/100 : null;
+      return {statusCode:200, headers:h, body:JSON.stringify({ok:true, symbol:tsym, high:hi, low:lo, price:lastClose, sixMonthRange:rangePct, source:"Kite Connect (official exchange data)"})};
+    }
+
     // Today's order book (to auto-apply executed trades)
     if (action === "orders") {
       var rawOrders = await kiteGet("/orders", body.access_token);
