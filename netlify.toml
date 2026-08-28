@@ -22,3 +22,7 @@
 # Run the Telegram scheduler every 5 minutes
 [functions."telegram-scheduler"]
   schedule = "*/5 * * * *"
+
+# Run the reorder nudge check daily at 10:00 AM IST (04:30 UTC)
+[functions."reorder-nudge-background"]
+  schedule = "30 4 * * *"
