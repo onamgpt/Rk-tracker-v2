@@ -12,7 +12,8 @@
 //   - Opt-outs (wa_optouts, populated by whatsapp-webhook.js on "STOP") are
 //     always skipped
 //
-// Requires the SQL in wa-tables.sql to have been run once in Supabase.
+// Storage: both wa_optouts and wa_marketing_log are single JSON objects in the
+// existing kv table (owner='main'), keyed by phone. No new tables required.
 
 const REORDER_MIN_DAYS = 45;
 const REORDER_MAX_DAYS = 60;
@@ -50,15 +51,22 @@ export default async (req) => {
     const repeatCustomers = Object.values(byPhone).filter(c => c.orders.length >= 2);
     summary.checked = repeatCustomers.length;
 
-    // 2. Opt-outs and recent marketing sends, fetched once up front.
-    const optOutRes = await fetch(SUPABASE_URL + "/rest/v1/wa_optouts?select=phone", { headers: sbHeaders });
-    const optOuts = new Set((await optOutRes.json() || []).map(r => r.phone));
+    // 2. Opt-outs and recent marketing sends, fetched once up front. Both live
+    //    in the existing kv table as single JSON objects keyed by phone —
+    //    no dedicated tables, same store the rest of the tracker uses.
+    const kvRead = async (key) => {
+      try {
+        const r = await fetch(SUPABASE_URL + "/rest/v1/kv?owner=eq.main&k=eq." + key + "&select=v", { headers: sbHeaders });
+        const j = await r.json();
+        return (Array.isArray(j) && j[0] && j[0].v) ? j[0].v : {};
+      } catch (e) { return {}; }
+    };
 
-    const marketingRes = await fetch(SUPABASE_URL + "/rest/v1/wa_marketing_log?select=phone,last_marketing_sent_at", { headers: sbHeaders });
-    const marketingLog = {};
-    (await marketingRes.json() || []).forEach(r => { marketingLog[r.phone] = r.last_marketing_sent_at; });
+    const optOuts = await kvRead("wa_optouts");
+    const marketingLog = await kvRead("wa_marketing_log");
 
     const now = Date.now();
+    const sentPhones = [];
     const formatPhone = (p) => { let d = String(p).replace(/[^\d]/g, ""); if (d.length === 10) d = "91" + d; return d; };
 
     for (const c of repeatCustomers) {
@@ -69,7 +77,7 @@ export default async (req) => {
         summary.skippedOutOfWindow++;
         continue;
       }
-      if (optOuts.has(c.phone)) {
+      if (optOuts[c.phone]) {
         summary.skippedOptOut++;
         continue;
       }
@@ -103,15 +111,21 @@ export default async (req) => {
           continue;
         }
         summary.sent++;
-        // Log the send so the 30-day cap holds even across a festival greeting later.
-        await fetch(SUPABASE_URL + "/rest/v1/wa_marketing_log", {
-          method: "POST",
-          headers: { ...sbHeaders, "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates" },
-          body: JSON.stringify([{ phone: c.phone, last_marketing_sent_at: new Date().toISOString() }])
-        });
+        sentPhones.push(c.phone);
       } catch (e) {
         summary.errors.push({ phone: c.phone, error: String(e && e.message ? e.message : e) });
       }
+    }
+    // One write for the whole run, so the 30-day cap holds without N racing
+    // read-modify-write cycles against the same kv row.
+    if (sentPhones.length) {
+      const stamp = new Date().toISOString();
+      sentPhones.forEach(p => { marketingLog[p] = stamp; });
+      await fetch(SUPABASE_URL + "/rest/v1/kv?on_conflict=owner,k", {
+        method: "POST",
+        headers: { ...sbHeaders, "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates" },
+        body: JSON.stringify({ owner: "main", k: "wa_marketing_log", v: marketingLog })
+      });
     }
   } catch (e) {
     summary.errors.push({ fatal: String(e && e.message ? e.message : e) });
