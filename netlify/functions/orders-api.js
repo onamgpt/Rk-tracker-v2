@@ -13,6 +13,8 @@ const SERVICE_KEY  = process.env.SUPABASE_SERVICE_KEY || "";
 const BOT          = process.env.TELEGRAM_BOT_TOKEN || "";
 const OWNER_CHAT   = process.env.TELEGRAM_OWNER_CHAT_ID || "-5372910186";
 const WEBSITE_ORDERS_CHAT = process.env.TELEGRAM_WEBSITE_ORDERS_ID || "-5479964253";
+const WA_PHONE_ID  = process.env.WHATSAPP_PHONE_NUMBER_ID || "";
+const WA_TOKEN     = process.env.WHATSAPP_ACCESS_TOKEN || "";
 
 const H = {
   "Access-Control-Allow-Origin": "*",
@@ -80,6 +82,46 @@ function tgSend(text) {
     });
     req.on("error", (e) => resolve({ ok: false, error: String(e) }));
     req.setTimeout(10000, () => { req.destroy(); resolve({ ok: false, error: "telegram timeout" }); });
+    req.write(payload);
+    req.end();
+  });
+}
+
+// ---------- WhatsApp helper (never throws; transactional, so no opt-out gate —
+// opt-out only applies to marketing/festival/reorder messages, not order updates) ----------
+function formatWaPhone(phone) {
+  let p = String(phone || "").replace(/[^\d]/g, "");
+  if (p.length === 10) p = "91" + p;
+  return p;
+}
+
+function waSendTemplate(to, templateName, params) {
+  return new Promise((resolve) => {
+    if (!WA_PHONE_ID || !WA_TOKEN || !to) return resolve({ ok: false, error: "WhatsApp not configured or no phone" });
+    const components = (params && params.length > 0) ? [{
+      type: "body", parameters: params.map(p => ({ type: "text", text: String(p) }))
+    }] : [];
+    const payload = JSON.stringify({
+      messaging_product: "whatsapp",
+      to: formatWaPhone(to),
+      type: "template",
+      template: { name: templateName, language: { code: "en" }, components }
+    });
+    const req = https.request({
+      hostname: "graph.facebook.com",
+      path: "/v21.0/" + WA_PHONE_ID + "/messages",
+      method: "POST",
+      headers: { "Authorization": "Bearer " + WA_TOKEN, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }
+    }, (res) => {
+      let d = "";
+      res.on("data", c => d += c);
+      res.on("end", () => {
+        try { const j = JSON.parse(d); resolve({ ok: !j.error, result: j }); }
+        catch (e) { resolve({ ok: false, raw: d }); }
+      });
+    });
+    req.on("error", (e) => resolve({ ok: false, error: String(e) }));
+    req.setTimeout(10000, () => { req.destroy(); resolve({ ok: false, error: "whatsapp timeout" }); });
     req.write(payload);
     req.end();
   });
@@ -170,10 +212,27 @@ exports.handler = async (event) => {
         tgResult = await tgSend(lines.join("\n"));
       }
 
+      // WhatsApp order-status message — transactional (utility template),
+      // fires alongside Telegram, never blocks the status update if it fails.
+      let waResult = null;
+      if (row && row.customer_phone) {
+        if (body.status === "Dispatched") {
+          const courierText = row.courier ? row.courier : "our courier partner";
+          waResult = await waSendTemplate(row.customer_phone, "order_shipped", [
+            row.customer_name || "there", row.id, courierText
+          ]);
+        } else if (body.status === "Delivered") {
+          waResult = await waSendTemplate(row.customer_phone, "order_delivered", [
+            row.customer_name || "there", row.id
+          ]);
+        }
+      }
+
       return OK({
         ok: true,
         order: row,
-        telegram: tgResult ? (tgResult.ok ? "sent" : ("failed: " + (tgResult.description || tgResult.error || "unknown"))) : null
+        telegram: tgResult ? (tgResult.ok ? "sent" : ("failed: " + (tgResult.description || tgResult.error || "unknown"))) : null,
+        whatsapp: waResult ? (waResult.ok ? "sent" : ("failed: " + JSON.stringify(waResult.result || waResult.error || "unknown"))) : null
       });
     }
 
