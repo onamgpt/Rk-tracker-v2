@@ -15061,6 +15061,8 @@ function AIMTrading({ onClose }) {
       setMsg("TOTP secret: "+s.length+" chars, "+(s.validBase32?"valid base32":"NOT valid base32")+
         (s.contains&&s.contains.length?(" — contains "+s.contains.join(" and ")):"")+
         " · client code "+(r.client||{}).length+" chars · MPIN "+(r.password||{}).length+" digits"+
+        " · API key "+(r.apiKey||{}).length+" chars"+
+        ((r.apiKey||{}).length>20?" ⚠️ TOO LONG — that looks like the Secret Key, not the API Key":"")+
         " · server time "+r.serverTimeUTC+"\n"+(r.note||""));
     }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
