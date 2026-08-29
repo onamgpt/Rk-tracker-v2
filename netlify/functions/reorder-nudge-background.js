@@ -145,6 +145,9 @@ export default async (req) => {
   return new Response(JSON.stringify({ ok: true, summary }), { status: 200, headers: { "Content-Type": "application/json" } });
 };
 
+// Netlify rejects a custom "path" on a scheduled function, so the schedule is
+// declared here instead of in netlify.toml — the same shape as
+// invoice-reminders-background.js. 04:30 UTC = 10:00 AM IST.
 export const config = {
-  path: "/.netlify/functions/reorder-nudge-background"
+  schedule: "30 4 * * *"
 };
