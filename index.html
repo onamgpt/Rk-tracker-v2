@@ -15049,6 +15049,23 @@ function AIMTrading({ onClose }) {
     setBusy("");
   };
 
+  // Angel returns the same message for a wrong secret and a wrong client code.
+  // This asks our own function what shape the stored values have, so we can
+  // tell the two apart without regenerating anything.
+  const angelDiag=async()=>{
+    setBusy("diag"); setMsg("");
+    try{
+      const r=await angelCall({action:"diag"});
+      if(!r||!r.ok) throw new Error(r&&r.error||"diagnostic failed");
+      const s=r.secret||{};
+      setMsg("TOTP secret: "+s.length+" chars, "+(s.validBase32?"valid base32":"NOT valid base32")+
+        (s.contains&&s.contains.length?(" — contains "+s.contains.join(" and ")):"")+
+        " · client code "+(r.client||{}).length+" chars · MPIN "+(r.password||{}).length+" digits"+
+        " · server time "+r.serverTimeUTC+"\n"+(r.note||""));
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
   const angelLoadFunds=async()=>{
     setBusy("funds"); setMsg("");
     try{
@@ -15476,6 +15493,9 @@ function AIMTrading({ onClose }) {
         <button onClick={angelStatus} disabled={!!busy}
           style={{...btn,background:"#eee",color:"#333",width:"100%",marginTop:6,fontSize:12}}>
           {busy==="angel"?"…":"🔌 Check connection"}</button>
+        <button onClick={angelDiag} disabled={!!busy}
+          style={{...btn,background:"#f4f4f4",color:"#666",width:"100%",marginTop:5,fontSize:12}}>
+          {busy==="diag"?"…":"🩺 Diagnose credentials"}</button>
         {angel&&angel.configured===false&&
           <div style={{fontSize:10.5,color:"#c62828",marginTop:5,lineHeight:1.45}}>
             Set {(angel.missing||[]).join(", ")} in Netlify → Site settings → Environment variables, then redeploy.

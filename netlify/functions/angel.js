@@ -268,6 +268,43 @@ exports.handler = async (event) => {
                   placed: out.filter(x => x.ok).length, failed: out.filter(x => !x.ok).length });
     }
 
+    // Angel answers a bad secret and a bad client code with the same message,
+    // so this reports the *shape* of what we hold without ever returning the
+    // values themselves. A TOTP secret is base32: A-Z and 2-7 only. If the
+    // string carries 0, 1, 8, 9 or lowercase, it is the app secret from the
+    // API key page, not the TOTP secret from the enable-TOTP page.
+    if (action === "diag") {
+      const s = String(SECRET || "");
+      const stripped = s.replace(/=+$/, "").replace(/\s+/g, "");
+      const illegal = stripped.split("").filter(c => !/[A-Z2-7]/.test(c));
+      const classes = [];
+      if (/[a-z]/.test(stripped)) classes.push("lowercase letters");
+      if (/[0189]/.test(stripped)) classes.push("the digits 0/1/8/9");
+      if (/[^A-Za-z0-9]/.test(stripped)) classes.push("punctuation");
+      let code = "", codeErr = "";
+      try { code = totpAt(SECRET, Date.now()); } catch (e) { codeErr = String(e.message || e); }
+      return OK({
+        ok: true,
+        secret: {
+          length: stripped.length,
+          validBase32: illegal.length === 0 && stripped.length > 0,
+          illegalCount: illegal.length,
+          contains: classes,
+          // The code itself is never returned — only whether one could be
+          // derived at all. This endpoint is public.
+          canGenerateCode: !!code,
+          generateError: codeErr
+        },
+        client: { length: String(CLIENT || "").length, set: !!CLIENT },
+        password: { length: String(PASSWORD || "").length, set: !!PASSWORD },
+        apiKey: { length: String(API_KEY || "").length, set: !!API_KEY },
+        serverTimeUTC: new Date().toISOString(),
+        note: illegal.length
+          ? "This is NOT a valid TOTP secret — it contains " + classes.join(" and ") + ", which base32 does not allow."
+          : "Secret is well-formed base32. If login still fails, the client code or MPIN is the mismatch."
+      });
+    }
+
     return ERR("unknown action: " + action);
 
   } catch (e) {
