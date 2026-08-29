@@ -2,6 +2,16 @@
   command = ""
   functions = "netlify/functions"
 
+  [build.environment]
+    # An Angel One MPIN is only four digits, so that exact run of digits turns
+    # up by coincidence inside unrelated dependency files (caniuse region data,
+    # a TypeScript scanner table). Netlify's secret scanner cannot tell those
+    # apart from a real leak and fails the build. Nothing in this repo ever
+    # writes the MPIN — angel.js reads it from process.env at request time —
+    # so the scan is excluded for this one key only. Every other secret is
+    # still scanned.
+    SECRETS_SCAN_OMIT_KEYS = "ANGEL_PASSWORD"
+
 [[headers]]
   for = "/*"
   [headers.values]
