@@ -14611,6 +14611,12 @@ function AIMTrading({ onClose }) {
   const [reqTok,setReqTok]=useState("");
   const [fills,setFills]=useState(null);
   const [zh,setZh]=useState(null);
+  // Angel One holds its own session server side, so there is no token to keep
+  // here — only what the last status check said, and the symbol tokens needed
+  // to place an order (Angel addresses instruments by number, not by name).
+  const [angel,setAngel]=useState(null);
+  const [angelTok,setAngelTok]=useState({});
+  const [angelFunds,setAngelFunds]=useState(null);
   const [openSym,setOpenSym]=useState(null);
   const [ledgerSym,setLedgerSym]=useState("");
   // Cleared whenever prices refresh, so the box never sits holding a figure
@@ -14983,6 +14989,101 @@ function AIMTrading({ onClose }) {
   const kiteCall=(payload)=>fetch("/.netlify/functions/kite",{method:"POST",
     headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(r=>r.json());
 
+  // ---- Angel One -----------------------------------------------------------
+  const angelCall=(payload)=>fetch("/.netlify/functions/angel",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(r=>r.json());
+
+  const angelStatus=async()=>{
+    setBusy("angel"); setMsg("");
+    try{
+      const r=await angelCall({action:"status"});
+      setAngel(r);
+      if(r.ok) setMsg("✓ Angel One connected · client "+r.client);
+      else if(r.configured===false) setMsg("✗ Not configured — missing "+(r.missing||[]).join(", "));
+      else setMsg("✗ "+(r.error||"could not connect"));
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  // getAllHolding carries the live LTP for everything held, so one call both
+  // prices the book and refreshes it. Nothing to reconnect first.
+  const angelRefresh=async()=>{
+    if(!data||!data.holdings.length){ setMsg("✗ No holdings to price"); return; }
+    setBusy("prices"); setMsg("");
+    try{
+      const r=await angelCall({action:"holdings"});
+      if(!r||!r.ok) throw new Error(r&&r.error||"could not read Angel One holdings");
+      const px={}, tok={};
+      (r.holdings||[]).forEach(x=>{ px[x.symbol]=x.last_price; tok[x.symbol]={tradingsymbol:x.tradingsymbol,symboltoken:x.symboltoken,exchange:x.exchange}; });
+      setAngelTok(tok);
+      let n=0; const miss=[];
+      for(const hh of data.holdings){
+        const p=px[String(hh.symbol).toUpperCase()];
+        if(p){ await api({action:"updatePrice",symbol:hh.symbol,price:p}); n++; }
+        else miss.push(hh.symbol);
+      }
+      setMsg("✓ "+n+" price(s) updated"+(miss.length?(" · not held at Angel One: "+miss.join(", ")):" · signals recomputed"));
+      setPriceStamp(Date.now());
+      load();
+      api({action:"checkCorporateActions"}).catch(()=>{});
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const angelLoadHoldings=async()=>{
+    setBusy("zh"); setMsg(""); setZh(null);
+    try{
+      const r=await angelCall({action:"holdings"});
+      if(!r||!r.ok) throw new Error(r&&r.error||"could not read Angel One holdings");
+      const live=r.holdings||[];
+      const tok={}; live.forEach(x=>tok[x.symbol]={tradingsymbol:x.tradingsymbol,symboltoken:x.symboltoken,exchange:x.exchange});
+      setAngelTok(tok);
+      const have={}; (data?data.holdings:[]).forEach(hh=>have[hh.symbol]=1);
+      const fresh=live.filter(x=>!have[x.symbol]);
+      setZh(fresh);
+      const s={}; fresh.forEach((x,i)=>s[i]=true);
+      setZhPick(s);
+      setMsg(fresh.length?("Found "+fresh.length+" holding(s) not yet in this book"):
+        (live.length?("All "+live.length+" Angel One holding(s) are already in this book"):"No holdings in your Angel One account"));
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  const angelLoadFunds=async()=>{
+    setBusy("funds"); setMsg("");
+    try{
+      const r=await angelCall({action:"funds"});
+      if(!r||!r.ok) throw new Error(r&&r.error||"could not read funds");
+      setAngelFunds(r);
+      setMsg("Angel One cash available: Rs."+Math.round(r.available).toLocaleString("en-IN"));
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
+  // Signals go to Angel as real orders — there is no basket screen to review
+  // them on, so this confirms first and reports each fill or rejection.
+  const angelSendOrders=async(acts)=>{
+    if(!acts||!acts.length) return;
+    const unknown=acts.filter(a=>!angelTok[String(a.symbol).toUpperCase()]);
+    if(unknown.length){ setMsg("✗ No Angel One instrument token for "+unknown.map(u=>u.symbol).join(", ")+" — tap Refresh prices first"); return; }
+    const lines=acts.map(a=>a.side+" "+Math.round(a.qty)+" "+a.symbol).join("\n");
+    if(!window.confirm("Place these orders at Angel One now?\n\n"+lines+"\n\nThese go straight to the exchange as limit orders."))return;
+    setBusy("angelorders"); setMsg("");
+    try{
+      const orders=acts.map(a=>{
+        const t=angelTok[String(a.symbol).toUpperCase()];
+        const lim=Number(a.price)*(a.side==="SELL"?0.9975:1.0025);
+        return {symbol:a.symbol,tradingsymbol:t.tradingsymbol,symboltoken:t.symboltoken,
+          exchange:t.exchange,side:a.side,qty:Math.round(a.qty),price:Number(lim.toFixed(2))};
+      });
+      const r=await angelCall({action:"placeOrder",orders});
+      const bad=(r.results||[]).filter(x=>!x.ok);
+      setMsg((r.placed||0)+" order(s) placed"+(bad.length?(" · rejected: "+bad.map(b=>b.symbol+" ("+b.error+")").join(", ")):"")+
+        " · record the fills before the signals will move");
+    }catch(e){ setMsg("✗ "+String(e.message||e)); }
+    setBusy("");
+  };
+
   const kiteLogin=async()=>{
     setMsg("Opening Zerodha…");
     const d=await kiteCall({action:"loginUrl"});
@@ -15064,6 +15165,7 @@ function AIMTrading({ onClose }) {
       }catch(e){ setMsg("✗ "+String(e.message||e)); }
       setBusy(""); return;
     }
+    if(book==="ANGEL"){ return await angelRefresh(); }
     if(book!=="INDIA"){ setMsg("✗ No price source for this book"); return; }
     if(!kite){ setMsg("✗ Connect Zerodha first"); return; }
     setBusy("prices"); setMsg("");
@@ -15130,9 +15232,12 @@ function AIMTrading({ onClose }) {
         if(!zhPick[i]) continue;
         const h=zh[i];
         const px=Number(h.last_price)||Number(h.average_price);
-        const r=await api({action:"openPosition",symbol:String(h.tradingsymbol).toUpperCase(),
+        // Angel appends "-EQ" to its trading symbols; the book stores the plain
+        // NSE name so both brokers land on the same row.
+        const sym=String(h.symbol||h.tradingsymbol).replace(/-EQ$/i,"").toUpperCase();
+        const r=await api({action:"openPosition",symbol:sym,
           shares:Number(h.quantity),price:px,costs:0,adopt:true,
-          name:String(h.tradingsymbol).toUpperCase()});
+          name:sym});
         if(r.ok) n++;
       }
       setMsg("✓ "+n+" holding(s) adopted · cash untouched — these were already yours");
@@ -15269,6 +15374,7 @@ function AIMTrading({ onClose }) {
       <button onClick={()=>setBook("USA")} style={{...btn,background:book==="USA"?"#5a3a1a":"#eee",color:book==="USA"?"#fff":"#555"}}>🇺🇸 USA</button>
       {!IS_TRADER&&<button onClick={()=>setBook("CRYPTO")} style={{...btn,background:isCrypto?"#5a3a1a":"#eee",color:isCrypto?"#fff":"#555"}}>₿ Crypto</button>}
       {!IS_TRADER&&<button onClick={()=>setBook("HOLD")} style={{...btn,background:book==="HOLD"?"#5a3a1a":"#eee",color:book==="HOLD"?"#fff":"#555"}}>🏦 Indiabulls</button>}
+      {!IS_TRADER&&<button onClick={()=>setBook("ANGEL")} style={{...btn,background:book==="ANGEL"?"#5a3a1a":"#eee",color:book==="ANGEL"?"#fff":"#555"}}>😇 Angel One</button>}
       {IS_TRADER&&<span style={{marginLeft:"auto",fontSize:11,color:"#8a7a5a",fontWeight:700}}>
         {URL_USER.charAt(0).toUpperCase()+URL_USER.slice(1)}</span>}
       {!IS_TRADER&&<button onClick={onClose} style={{...btn,background:"#eee",color:"#333",marginLeft:"auto"}}>✕</button>}
@@ -15357,6 +15463,64 @@ function AIMTrading({ onClose }) {
         </div>
       </div>}
 
+      {book==="ANGEL"&&!IS_TRADER&&<div style={card}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontSize:11,color:"#888",fontWeight:700}}>ANGEL ONE</div>
+          <span style={{fontSize:10.5,fontWeight:700,color:angel&&angel.ok?"#2e7d32":angel?"#c62828":"#999"}}>
+            {angel?(angel.ok?"connected":"not connected"):"not checked"}</span>
+        </div>
+        <div style={{fontSize:10.5,color:"#8a8a80",marginTop:5,lineHeight:1.5}}>
+          This session renews itself — Angel logs in with a stored one-time-password
+          secret, so there is no daily reconnect the way Zerodha needs.
+        </div>
+        <button onClick={angelStatus} disabled={!!busy}
+          style={{...btn,background:"#eee",color:"#333",width:"100%",marginTop:6,fontSize:12}}>
+          {busy==="angel"?"…":"🔌 Check connection"}</button>
+        {angel&&angel.configured===false&&
+          <div style={{fontSize:10.5,color:"#c62828",marginTop:5,lineHeight:1.45}}>
+            Set {(angel.missing||[]).join(", ")} in Netlify → Site settings → Environment variables, then redeploy.
+          </div>}
+        <div style={{display:"flex",gap:5,marginTop:5}}>
+          <button onClick={angelRefresh} disabled={!!busy} style={{...btn,background:"#1a3a6a",color:"#fff",flex:1}}>
+            {busy==="prices"?"…":"🔄 Live prices"}</button>
+          <button onClick={angelLoadFunds} disabled={!!busy} style={{...btn,background:"#eee",color:"#333",flex:1}}>
+            {busy==="funds"?"…":"💰 Cash"}</button>
+        </div>
+        <button onClick={angelLoadHoldings} disabled={!!busy} style={{...btn,background:"#eee",color:"#333",width:"100%",marginTop:5}}>
+          {busy==="zh"?"…":"📥 Import holdings from Angel One"}</button>
+        {angelFunds&&<div style={{fontSize:11,color:"#5a6a5a",marginTop:6}}>
+          Cash available Rs.{Math.round(angelFunds.available).toLocaleString("en-IN")}
+          {data&&data.holdings&&data.holdings.length?(()=>{
+            const mv=data.holdings.reduce((s,x)=>s+(Number(x.shares)||0)*(Number(x.last_price)||0),0);
+            const pct=mv>0?(angelFunds.available/mv*100):0;
+            return <span style={{color:pct<15?"#c62828":"#5a6a5a"}}>
+              {" · "+pct.toFixed(0)+"% of holdings value"}
+              {pct<15?" — buy signals may not be fundable":""}</span>;
+          })():null}
+        </div>}
+        {(()=>{
+          const acts=(data&&data.holdings||[])
+            .map(hh=>({hh,s:hh.signal||{}}))
+            .filter(x=>x.s.action&&x.s.action!=="HOLD"&&Math.round(x.s.qty)>=1)
+            .sort((a,b)=>(a.s.action==="SELL"?0:1)-(b.s.action==="SELL"?0:1));
+          if(!acts.length) return null;
+          const sells=acts.filter(x=>x.s.action==="SELL").length;
+          const buys=acts.length-sells;
+          return <button onClick={()=>angelSendOrders(acts.map(x=>
+              ({symbol:x.hh.symbol,side:x.s.action,qty:x.s.qty,price:x.hh.last_price})))}
+            disabled={!!busy}
+            style={{...btn,background:"#8a2a2a",color:"#fff",width:"100%",marginTop:5,fontSize:12.5}}>
+            {busy==="angelorders"?"Placing…"
+              :"⚡ Place all "+acts.length+" signals at Angel One"+
+                (sells&&buys?(" ("+sells+" sell, "+buys+" buy)"):"")}</button>;
+        })()}
+        <div style={{fontSize:10,color:"#a0661a",marginTop:6,lineHeight:1.45}}>
+          Orders here go straight to the exchange — there is no Kite-style basket
+          screen to review them on first. You are asked to confirm, and that is the
+          only stop between the button and a live order.
+        </div>
+      </div>}
+
       {book==="INDIA"&&!IS_TRADER&&<div style={card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div style={{fontSize:11,color:"#888",fontWeight:700}}>ZERODHA</div>
@@ -15419,7 +15583,7 @@ function AIMTrading({ onClose }) {
 
       {zh&&zh.length>0&&<div style={{...card,background:"#fffdf5",borderColor:"#e0c080"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-          <div style={{fontSize:12,fontWeight:800}}>Your Zerodha holdings</div>
+          <div style={{fontSize:12,fontWeight:800}}>{book==="ANGEL"?"Your Angel One holdings":"Your Zerodha holdings"}</div>
           <span style={{fontSize:11,color:"#5a3a1a",fontWeight:700,cursor:"pointer"}}
             onClick={()=>{const all=Object.values(zhPick).every(Boolean);
               const s={}; zh.forEach((h,i)=>s[i]=!all); setZhPick(s);}}>
