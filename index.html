@@ -15079,30 +15079,6 @@ function AIMTrading({ onClose }) {
     setBusy("");
   };
 
-  // Signals go to Angel as real orders — there is no basket screen to review
-  // them on, so this confirms first and reports each fill or rejection.
-  const angelSendOrders=async(acts)=>{
-    if(!acts||!acts.length) return;
-    const unknown=acts.filter(a=>!angelTok[String(a.symbol).toUpperCase()]);
-    if(unknown.length){ setMsg("✗ No Angel One instrument token for "+unknown.map(u=>u.symbol).join(", ")+" — tap Refresh prices first"); return; }
-    const lines=acts.map(a=>a.side+" "+Math.round(a.qty)+" "+a.symbol).join("\n");
-    if(!window.confirm("Place these orders at Angel One now?\n\n"+lines+"\n\nThese go straight to the exchange as limit orders."))return;
-    setBusy("angelorders"); setMsg("");
-    try{
-      const orders=acts.map(a=>{
-        const t=angelTok[String(a.symbol).toUpperCase()];
-        const lim=Number(a.price)*(a.side==="SELL"?0.9975:1.0025);
-        return {symbol:a.symbol,tradingsymbol:t.tradingsymbol,symboltoken:t.symboltoken,
-          exchange:t.exchange,side:a.side,qty:Math.round(a.qty),price:Number(lim.toFixed(2))};
-      });
-      const r=await angelCall({action:"placeOrder",orders});
-      const bad=(r.results||[]).filter(x=>!x.ok);
-      setMsg((r.placed||0)+" order(s) placed"+(bad.length?(" · rejected: "+bad.map(b=>b.symbol+" ("+b.error+")").join(", ")):"")+
-        " · record the fills before the signals will move");
-    }catch(e){ setMsg("✗ "+String(e.message||e)); }
-    setBusy("");
-  };
-
   const kiteLogin=async()=>{
     setMsg("Opening Zerodha…");
     const d=await kiteCall({action:"loginUrl"});
@@ -15520,26 +15496,10 @@ function AIMTrading({ onClose }) {
               {pct<15?" — buy signals may not be fundable":""}</span>;
           })():null}
         </div>}
-        {(()=>{
-          const acts=(data&&data.holdings||[])
-            .map(hh=>({hh,s:hh.signal||{}}))
-            .filter(x=>x.s.action&&x.s.action!=="HOLD"&&Math.round(x.s.qty)>=1)
-            .sort((a,b)=>(a.s.action==="SELL"?0:1)-(b.s.action==="SELL"?0:1));
-          if(!acts.length) return null;
-          const sells=acts.filter(x=>x.s.action==="SELL").length;
-          const buys=acts.length-sells;
-          return <button onClick={()=>angelSendOrders(acts.map(x=>
-              ({symbol:x.hh.symbol,side:x.s.action,qty:x.s.qty,price:x.hh.last_price})))}
-            disabled={!!busy}
-            style={{...btn,background:"#8a2a2a",color:"#fff",width:"100%",marginTop:5,fontSize:12.5}}>
-            {busy==="angelorders"?"Placing…"
-              :"⚡ Place all "+acts.length+" signals at Angel One"+
-                (sells&&buys?(" ("+sells+" sell, "+buys+" buy)"):"")}</button>;
-        })()}
-        <div style={{fontSize:10,color:"#a0661a",marginTop:6,lineHeight:1.45}}>
-          Orders here go straight to the exchange — there is no Kite-style basket
-          screen to review them on first. You are asked to confirm, and that is the
-          only stop between the button and a live order.
+        <div style={{fontSize:10,color:"#8a8a80",marginTop:6,lineHeight:1.45}}>
+          Angel One requires a registered static IP for order placement, which this
+          tracker does not have — so signals are shown for you to act on in the
+          Angel app yourself. Prices and holdings sync freely; only order entry is manual.
         </div>
       </div>}
 

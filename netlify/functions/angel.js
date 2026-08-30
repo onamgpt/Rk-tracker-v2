@@ -221,52 +221,12 @@ exports.handler = async (event) => {
       return OK({ ok: true, trades: r.data || [] });
     }
 
-    // Angel needs the numeric symboltoken, not just the name. Holdings carry
-    // their own token, so a search is only needed for something not yet held.
-    if (action === "search") {
-      const r = await authed("POST", "/rest/secure/angelbroking/order/v1/searchScrip", {
-        exchange: body.exchange || "NSE",
-        searchscrip: String(body.symbol || "").toUpperCase()
-      });
-      if (!r || r.status !== true) return ERR((r && r.message) || "no match");
-      return OK({ ok: true, matches: r.data || [] });
-    }
-
-    // Orders go out one at a time and each result is reported separately. A
-    // partial batch is the normal outcome when funds or limits run out, and
-    // hiding that behind a single success flag would be misleading.
-    if (action === "placeOrder") {
-      const list = Array.isArray(body.orders) ? body.orders : [body];
-      const out = [];
-      for (const o of list) {
-        const qty = Math.floor(Number(o.qty) || 0);
-        if (!o.symboltoken || !o.tradingsymbol || qty < 1) {
-          out.push({ symbol: o.symbol || o.tradingsymbol, ok: false, error: "needs tradingsymbol, symboltoken and a whole quantity" });
-          continue;
-        }
-        const price = Number(o.price) || 0;
-        const r = await authed("POST", "/rest/secure/angelbroking/order/v1/placeOrder", {
-          variety: "NORMAL",
-          tradingsymbol: o.tradingsymbol,
-          symboltoken: String(o.symboltoken),
-          transactiontype: String(o.side || "").toUpperCase() === "SELL" ? "SELL" : "BUY",
-          exchange: o.exchange || "NSE",
-          ordertype: price > 0 ? "LIMIT" : "MARKET",
-          producttype: "DELIVERY",
-          duration: "DAY",
-          price: price > 0 ? String(price.toFixed(2)) : "0",
-          squareoff: "0",
-          stoploss: "0",
-          quantity: String(qty),
-          ordertag: "RK-AIM"
-        });
-        out.push(r && r.status === true
-          ? { symbol: o.symbol || o.tradingsymbol, ok: true, orderid: (r.data || {}).orderid, uniqueorderid: (r.data || {}).uniqueorderid }
-          : { symbol: o.symbol || o.tradingsymbol, ok: false, error: (r && (r.message || r.errorcode)) || "rejected" });
-      }
-      return OK({ ok: out.some(x => x.ok), results: out,
-                  placed: out.filter(x => x.ok).length, failed: out.filter(x => !x.ok).length });
-    }
+    // Order placement deliberately isn't implemented here. Since April 2026
+    // Angel only executes API orders from a registered static IP, and Netlify
+    // functions run on shared, rotating IPs with nothing fixed to register.
+    // Holdings, funds and prices all work without a static IP — only Orders
+    // and GTT need one — so this book is read-only by design: the tracker
+    // shows the AIM signal, and orders are entered by hand in the Angel app.
 
     // Angel answers a bad secret and a bad client code with the same message,
     // so this reports the *shape* of what we hold without ever returning the
