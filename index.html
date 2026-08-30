@@ -15015,13 +15015,38 @@ function AIMTrading({ onClose }) {
       "All of these are already in this book");
   };
 
-  // Yahoo Finance's public quote feed, via the same usquote function the
-  // India book already uses for non-Zerodha prices. No key, no login, no
-  // static IP — just the NSE symbol with .NS/.BO resolution.
+  // Prices for this book don't care which broker actually holds the shares —
+  // a quote is public market data either way. If Zerodha is already connected
+  // (the same session the India book uses), that's a faster, sharper feed
+  // than the free Yahoo one and it's already paid for. Falls back to Yahoo
+  // automatically if Zerodha isn't connected — nothing extra to set up here.
   const manualRefreshPrices=async()=>{
     if(!data||!data.holdings.length){ setMsg("✗ No holdings to price"); return; }
     setBusy("prices"); setMsg("");
     try{
+      if(kite){
+        const syms=data.holdings.map(h=>h.symbol);
+        const q=await kiteCall({action:"quote",symbols:syms,access_token:kite});
+        const d=q&&q.data;
+        if(d){
+          let n=0;
+          for(const h of data.holdings){
+            const row=d["NSE:"+h.symbol];
+            const p=row&&row.last_price;
+            if(p){ await api({action:"updatePrice",symbol:h.symbol,price:p}); n++; }
+          }
+          if(!(q&&q.authError)){
+            setMsg("✓ "+n+" price(s) updated via Zerodha"+(n<syms.length?(" · "+(syms.length-n)+" had no quote"):"")+" · signals recomputed");
+            setPriceStamp(Date.now()); load();
+            api({action:"checkCorporateActions"}).catch(()=>{});
+            setBusy(""); return;
+          }
+          // Zerodha session lapsed mid-call — same wording check the India
+          // book uses, then fall through to Yahoo below so this still finishes.
+          const raw=String(q.authError);
+          if(/token|session|expired|invalid/i.test(raw)) clearKite();
+        }
+      }
       const symbols=data.holdings.map(hh=>hh.symbol);
       const r=await fetch("/.netlify/functions/usquote",{method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -15033,7 +15058,8 @@ function AIMTrading({ onClose }) {
         if(p>0){ await api({action:"updatePrice",symbol:hh.symbol,price:p}); n++; }
       }
       const miss=(r.failed||[]).filter(s=>symbols.includes(s));
-      setMsg("✓ "+n+" price(s) updated from Yahoo Finance"+(miss.length?(" · no quote for "+miss.join(", ")):" · signals recomputed"));
+      setMsg("✓ "+n+" price(s) updated from Yahoo Finance"+(miss.length?(" · no quote for "+miss.join(", ")):"")+
+        (kite?" · Zerodha quote failed, used Yahoo instead":" · signals recomputed"));
       setPriceStamp(Date.now());
       load();
       api({action:"checkCorporateActions"}).catch(()=>{});
@@ -15423,8 +15449,7 @@ function AIMTrading({ onClose }) {
       {book==="ANGEL"&&!IS_TRADER&&<div style={card}>
         <div style={{fontSize:11,color:"#888",fontWeight:700}}>MANUAL HOLDINGS</div>
         <div style={{fontSize:10.5,color:"#8a8a80",marginTop:5,lineHeight:1.5}}>
-          No broker connected here — these 12 shares are entered by hand, and prices
-          come from Yahoo Finance's public feed, so nothing needs an API key.
+          No broker connected here — these 12 shares are entered by hand.
           AIM still runs on them normally: signals, Portfolio Control, the lot.
           Orders are placed wherever you actually hold these shares, and recorded
           back here once filled.
@@ -15435,7 +15460,11 @@ function AIMTrading({ onClose }) {
         </button>
         <button onClick={manualRefreshPrices} disabled={!!busy}
           style={{...btn,background:"#1a3a6a",color:"#fff",width:"100%",marginTop:5}}>
-          {busy==="prices"?"…":"🔄 Live prices (Yahoo Finance)"}</button>
+          {busy==="prices"?"…":"🔄 Live prices"}</button>
+        <div style={{fontSize:10,color:"#8a8a80",marginTop:5,lineHeight:1.45}}>
+          {kite?"Uses your connected Zerodha session — same quotes as the India book, falls back to Yahoo Finance if that call fails."
+               :"Uses Yahoo Finance's free quote feed. Connect Zerodha in the India book to use its sharper quotes here too."}
+        </div>
       </div>}
 
       {manualPaste!==null&&<div style={{...card,background:"#fffdf5",borderColor:"#e0c080"}}>
