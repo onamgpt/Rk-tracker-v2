@@ -14611,12 +14611,9 @@ function AIMTrading({ onClose }) {
   const [reqTok,setReqTok]=useState("");
   const [fills,setFills]=useState(null);
   const [zh,setZh]=useState(null);
-  // Angel One holds its own session server side, so there is no token to keep
-  // here — only what the last status check said, and the symbol tokens needed
-  // to place an order (Angel addresses instruments by number, not by name).
-  const [angel,setAngel]=useState(null);
-  const [angelTok,setAngelTok]=useState({});
-  const [angelFunds,setAngelFunds]=useState(null);
+  // No broker session to hold for this book — it's typed in by hand. Only the
+  // paste-box text needs state, and null means the box is closed.
+  const [manualPaste,setManualPaste]=useState(null);
   const [openSym,setOpenSym]=useState(null);
   const [ledgerSym,setLedgerSym]=useState("");
   // Cleared whenever prices refresh, so the box never sits holding a figure
@@ -14989,92 +14986,57 @@ function AIMTrading({ onClose }) {
   const kiteCall=(payload)=>fetch("/.netlify/functions/kite",{method:"POST",
     headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(r=>r.json());
 
-  // ---- Angel One -----------------------------------------------------------
-  const angelCall=(payload)=>fetch("/.netlify/functions/angel",{method:"POST",
-    headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(r=>r.json());
+  // ---- Manual holdings (no broker) -----------------------------------------
+  const manualLoadPasteBox=()=>{ setManualPaste(""); setMsg(""); };
 
-  const angelStatus=async()=>{
-    setBusy("angel"); setMsg("");
-    try{
-      const r=await angelCall({action:"status"});
-      setAngel(r);
-      if(r.ok) setMsg("✓ Angel One connected · client "+r.client);
-      else if(r.configured===false) setMsg("✗ Not configured — missing "+(r.missing||[]).join(", "));
-      else setMsg("✗ "+(r.error||"could not connect"));
-    }catch(e){ setMsg("✗ "+String(e.message||e)); }
-    setBusy("");
+  // Same shape as CustodyBook's paste importer: symbol, quantity, average
+  // price, tab/comma/multi-space separated. Reuses the existing Zerodha
+  // holdings-picker card (zh/zhPick/importHoldings) so nothing new is needed
+  // to review and adopt what was typed in.
+  const manualImportPaste=()=>{
+    const lines=String(manualPaste||"").split("\n").map(l=>l.trim()).filter(Boolean);
+    const rows=[];
+    lines.forEach(l=>{
+      const parts=l.split(/[\t,;]+|\s{2,}|\s+/).map(x=>x.trim()).filter(Boolean);
+      if(parts.length<3) return;
+      const sym=parts[0].toUpperCase().replace(/-EQ$/i,"").replace(/\.(NS|BO)$/i,"");
+      const qty=parseFloat(parts[1]), avg=parseFloat(parts[2]);
+      if(!sym||!(qty>0)||!(avg>0)) return;
+      rows.push({tradingsymbol:sym,quantity:qty,average_price:avg,last_price:Number(parts[3])||avg});
+    });
+    if(!rows.length){ setMsg("✗ Nothing recognised — one line per share: SYMBOL  quantity  average price"); return; }
+    const have={}; (data?data.holdings:[]).forEach(hh=>have[hh.symbol]=1);
+    const fresh=rows.filter(x=>!have[x.tradingsymbol]);
+    setZh(fresh);
+    const s={}; fresh.forEach((x,i)=>s[i]=true);
+    setZhPick(s);
+    setManualPaste(null);
+    setMsg(fresh.length?("Found "+fresh.length+" new holding(s) to review below"):
+      "All of these are already in this book");
   };
 
-  // getAllHolding carries the live LTP for everything held, so one call both
-  // prices the book and refreshes it. Nothing to reconnect first.
-  const angelRefresh=async()=>{
+  // Yahoo Finance's public quote feed, via the same usquote function the
+  // India book already uses for non-Zerodha prices. No key, no login, no
+  // static IP — just the NSE symbol with .NS/.BO resolution.
+  const manualRefreshPrices=async()=>{
     if(!data||!data.holdings.length){ setMsg("✗ No holdings to price"); return; }
     setBusy("prices"); setMsg("");
     try{
-      const r=await angelCall({action:"holdings"});
-      if(!r||!r.ok) throw new Error(r&&r.error||"could not read Angel One holdings");
-      const px={}, tok={};
-      (r.holdings||[]).forEach(x=>{ px[x.symbol]=x.last_price; tok[x.symbol]={tradingsymbol:x.tradingsymbol,symboltoken:x.symboltoken,exchange:x.exchange}; });
-      setAngelTok(tok);
-      let n=0; const miss=[];
+      const symbols=data.holdings.map(hh=>hh.symbol);
+      const r=await fetch("/.netlify/functions/usquote",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({symbols,market:"INDIA"})}).then(x=>x.json());
+      if(!r||!r.ok) throw new Error(r&&r.note||"could not read prices");
+      let n=0;
       for(const hh of data.holdings){
-        const p=px[String(hh.symbol).toUpperCase()];
-        if(p){ await api({action:"updatePrice",symbol:hh.symbol,price:p}); n++; }
-        else miss.push(hh.symbol);
+        const p=r.prices&&r.prices[hh.symbol]&&r.prices[hh.symbol].price;
+        if(p>0){ await api({action:"updatePrice",symbol:hh.symbol,price:p}); n++; }
       }
-      setMsg("✓ "+n+" price(s) updated"+(miss.length?(" · not held at Angel One: "+miss.join(", ")):" · signals recomputed"));
+      const miss=(r.failed||[]).filter(s=>symbols.includes(s));
+      setMsg("✓ "+n+" price(s) updated from Yahoo Finance"+(miss.length?(" · no quote for "+miss.join(", ")):" · signals recomputed"));
       setPriceStamp(Date.now());
       load();
       api({action:"checkCorporateActions"}).catch(()=>{});
-    }catch(e){ setMsg("✗ "+String(e.message||e)); }
-    setBusy("");
-  };
-
-  const angelLoadHoldings=async()=>{
-    setBusy("zh"); setMsg(""); setZh(null);
-    try{
-      const r=await angelCall({action:"holdings"});
-      if(!r||!r.ok) throw new Error(r&&r.error||"could not read Angel One holdings");
-      const live=r.holdings||[];
-      const tok={}; live.forEach(x=>tok[x.symbol]={tradingsymbol:x.tradingsymbol,symboltoken:x.symboltoken,exchange:x.exchange});
-      setAngelTok(tok);
-      const have={}; (data?data.holdings:[]).forEach(hh=>have[hh.symbol]=1);
-      const fresh=live.filter(x=>!have[x.symbol]);
-      setZh(fresh);
-      const s={}; fresh.forEach((x,i)=>s[i]=true);
-      setZhPick(s);
-      setMsg(fresh.length?("Found "+fresh.length+" holding(s) not yet in this book"):
-        (live.length?("All "+live.length+" Angel One holding(s) are already in this book"):"No holdings in your Angel One account"));
-    }catch(e){ setMsg("✗ "+String(e.message||e)); }
-    setBusy("");
-  };
-
-  // Angel returns the same message for a wrong secret and a wrong client code.
-  // This asks our own function what shape the stored values have, so we can
-  // tell the two apart without regenerating anything.
-  const angelDiag=async()=>{
-    setBusy("diag"); setMsg("");
-    try{
-      const r=await angelCall({action:"diag"});
-      if(!r||!r.ok) throw new Error(r&&r.error||"diagnostic failed");
-      const s=r.secret||{};
-      setMsg("TOTP secret: "+s.length+" chars, "+(s.validBase32?"valid base32":"NOT valid base32")+
-        (s.contains&&s.contains.length?(" — contains "+s.contains.join(" and ")):"")+
-        " · client code "+(r.client||{}).length+" chars · MPIN "+(r.password||{}).length+" digits"+
-        " · API key "+(r.apiKey||{}).length+" chars"+
-        ((r.apiKey||{}).length>20?" ⚠️ TOO LONG — that looks like the Secret Key, not the API Key":"")+
-        " · server time "+r.serverTimeUTC+"\n"+(r.note||""));
-    }catch(e){ setMsg("✗ "+String(e.message||e)); }
-    setBusy("");
-  };
-
-  const angelLoadFunds=async()=>{
-    setBusy("funds"); setMsg("");
-    try{
-      const r=await angelCall({action:"funds"});
-      if(!r||!r.ok) throw new Error(r&&r.error||"could not read funds");
-      setAngelFunds(r);
-      setMsg("Angel One cash available: Rs."+Math.round(r.available).toLocaleString("en-IN"));
     }catch(e){ setMsg("✗ "+String(e.message||e)); }
     setBusy("");
   };
@@ -15160,7 +15122,7 @@ function AIMTrading({ onClose }) {
       }catch(e){ setMsg("✗ "+String(e.message||e)); }
       setBusy(""); return;
     }
-    if(book==="ANGEL"){ return await angelRefresh(); }
+    if(book==="ANGEL"){ return await manualRefreshPrices(); }
     if(book!=="INDIA"){ setMsg("✗ No price source for this book"); return; }
     if(!kite){ setMsg("✗ Connect Zerodha first"); return; }
     setBusy("prices"); setMsg("");
@@ -15227,8 +15189,8 @@ function AIMTrading({ onClose }) {
         if(!zhPick[i]) continue;
         const h=zh[i];
         const px=Number(h.last_price)||Number(h.average_price);
-        // Angel appends "-EQ" to its trading symbols; the book stores the plain
-        // NSE name so both brokers land on the same row.
+        // Symbols may carry a "-EQ" suffix from a broker export; strip it so
+        // every book lands on the same plain NSE name.
         const sym=String(h.symbol||h.tradingsymbol).replace(/-EQ$/i,"").toUpperCase();
         const r=await api({action:"openPosition",symbol:sym,
           shares:Number(h.quantity),price:px,costs:0,adopt:true,
@@ -15369,7 +15331,7 @@ function AIMTrading({ onClose }) {
       <button onClick={()=>setBook("USA")} style={{...btn,background:book==="USA"?"#5a3a1a":"#eee",color:book==="USA"?"#fff":"#555"}}>🇺🇸 USA</button>
       {!IS_TRADER&&<button onClick={()=>setBook("CRYPTO")} style={{...btn,background:isCrypto?"#5a3a1a":"#eee",color:isCrypto?"#fff":"#555"}}>₿ Crypto</button>}
       {!IS_TRADER&&<button onClick={()=>setBook("HOLD")} style={{...btn,background:book==="HOLD"?"#5a3a1a":"#eee",color:book==="HOLD"?"#fff":"#555"}}>🏦 Indiabulls</button>}
-      {!IS_TRADER&&<button onClick={()=>setBook("ANGEL")} style={{...btn,background:book==="ANGEL"?"#5a3a1a":"#eee",color:book==="ANGEL"?"#fff":"#555"}}>😇 Angel One</button>}
+      {!IS_TRADER&&<button onClick={()=>setBook("ANGEL")} style={{...btn,background:book==="ANGEL"?"#5a3a1a":"#eee",color:book==="ANGEL"?"#fff":"#555"}}>📦 Manual holdings</button>}
       {IS_TRADER&&<span style={{marginLeft:"auto",fontSize:11,color:"#8a7a5a",fontWeight:700}}>
         {URL_USER.charAt(0).toUpperCase()+URL_USER.slice(1)}</span>}
       {!IS_TRADER&&<button onClick={onClose} style={{...btn,background:"#eee",color:"#333",marginLeft:"auto"}}>✕</button>}
@@ -15459,49 +15421,44 @@ function AIMTrading({ onClose }) {
       </div>}
 
       {book==="ANGEL"&&!IS_TRADER&&<div style={card}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div style={{fontSize:11,color:"#888",fontWeight:700}}>ANGEL ONE</div>
-          <span style={{fontSize:10.5,fontWeight:700,color:angel&&angel.ok?"#2e7d32":angel?"#c62828":"#999"}}>
-            {angel?(angel.ok?"connected":"not connected"):"not checked"}</span>
-        </div>
+        <div style={{fontSize:11,color:"#888",fontWeight:700}}>MANUAL HOLDINGS</div>
         <div style={{fontSize:10.5,color:"#8a8a80",marginTop:5,lineHeight:1.5}}>
-          This session renews itself — Angel logs in with a stored one-time-password
-          secret, so there is no daily reconnect the way Zerodha needs.
+          No broker connected here — these 12 shares are entered by hand, and prices
+          come from Yahoo Finance's public feed, so nothing needs an API key.
+          AIM still runs on them normally: signals, Portfolio Control, the lot.
+          Orders are placed wherever you actually hold these shares, and recorded
+          back here once filled.
         </div>
-        <button onClick={angelStatus} disabled={!!busy}
-          style={{...btn,background:"#eee",color:"#333",width:"100%",marginTop:6,fontSize:12}}>
-          {busy==="angel"?"…":"🔌 Check connection"}</button>
-        <button onClick={angelDiag} disabled={!!busy}
-          style={{...btn,background:"#f4f4f4",color:"#666",width:"100%",marginTop:5,fontSize:12}}>
-          {busy==="diag"?"…":"🩺 Diagnose credentials"}</button>
-        {angel&&angel.configured===false&&
-          <div style={{fontSize:10.5,color:"#c62828",marginTop:5,lineHeight:1.45}}>
-            Set {(angel.missing||[]).join(", ")} in Netlify → Site settings → Environment variables, then redeploy.
-          </div>}
-        <div style={{display:"flex",gap:5,marginTop:5}}>
-          <button onClick={angelRefresh} disabled={!!busy} style={{...btn,background:"#1a3a6a",color:"#fff",flex:1}}>
-            {busy==="prices"?"…":"🔄 Live prices"}</button>
-          <button onClick={angelLoadFunds} disabled={!!busy} style={{...btn,background:"#eee",color:"#333",flex:1}}>
-            {busy==="funds"?"…":"💰 Cash"}</button>
+        <button onClick={manualLoadPasteBox} disabled={!!busy}
+          style={{...btn,background:"#eee",color:"#333",width:"100%",marginTop:6}}>
+          📋 Paste holdings to import
+        </button>
+        <button onClick={manualRefreshPrices} disabled={!!busy}
+          style={{...btn,background:"#1a3a6a",color:"#fff",width:"100%",marginTop:5}}>
+          {busy==="prices"?"…":"🔄 Live prices (Yahoo Finance)"}</button>
+      </div>}
+
+      {manualPaste!==null&&<div style={{...card,background:"#fffdf5",borderColor:"#e0c080"}}>
+        <div style={{fontSize:12,fontWeight:800,marginBottom:6}}>Paste your holdings</div>
+        <div style={{fontSize:10.5,color:"#8a6a1a",marginBottom:8,lineHeight:1.45}}>
+          One line per share: symbol, quantity, average price — tab, comma or a few
+          spaces between them. Paste straight from a screenshot's numbers or type
+          it out. Example:<br/>
+          <code style={{fontSize:10}}>INFY  3  1542.56{"\n"}RBLBANK  6  315.31</code>
         </div>
-        <button onClick={angelLoadHoldings} disabled={!!busy} style={{...btn,background:"#eee",color:"#333",width:"100%",marginTop:5}}>
-          {busy==="zh"?"…":"📥 Import holdings from Angel One"}</button>
-        {angelFunds&&<div style={{fontSize:11,color:"#5a6a5a",marginTop:6}}>
-          Cash available Rs.{Math.round(angelFunds.available).toLocaleString("en-IN")}
-          {data&&data.holdings&&data.holdings.length?(()=>{
-            const mv=data.holdings.reduce((s,x)=>s+(Number(x.shares)||0)*(Number(x.last_price)||0),0);
-            const pct=mv>0?(angelFunds.available/mv*100):0;
-            return <span style={{color:pct<15?"#c62828":"#5a6a5a"}}>
-              {" · "+pct.toFixed(0)+"% of holdings value"}
-              {pct<15?" — buy signals may not be fundable":""}</span>;
-          })():null}
-        </div>}
-        <div style={{fontSize:10,color:"#8a8a80",marginTop:6,lineHeight:1.45}}>
-          Angel One requires a registered static IP for order placement, which this
-          tracker does not have — so signals are shown for you to act on in the
-          Angel app yourself. Prices and holdings sync freely; only order entry is manual.
+        <textarea value={manualPaste} onChange={e=>setManualPaste(e.target.value)}
+          rows={7} placeholder={"INFY  3  1542.56\nDIAMONDYD  2  1038.33\nADANIPOWER  13  152.40\n..."}
+          style={{width:"100%",padding:9,borderRadius:8,border:"1.5px solid #cfd8cf",
+            fontSize:12.5,fontFamily:"monospace",boxSizing:"border-box"}}/>
+        <div style={{display:"flex",gap:6,marginTop:8}}>
+          <button onClick={manualImportPaste} disabled={!!busy}
+            style={{...btn,background:"#5a3a1a",color:"#fff",flex:1}}>
+            {busy==="manualimp"?"…":"Import these"}</button>
+          <button onClick={()=>{setManualPaste(null);setMsg("");}}
+            style={{...btn,background:"#eee",color:"#333"}}>Cancel</button>
         </div>
       </div>}
+
 
       {book==="INDIA"&&!IS_TRADER&&<div style={card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -15565,7 +15522,7 @@ function AIMTrading({ onClose }) {
 
       {zh&&zh.length>0&&<div style={{...card,background:"#fffdf5",borderColor:"#e0c080"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-          <div style={{fontSize:12,fontWeight:800}}>{book==="ANGEL"?"Your Angel One holdings":"Your Zerodha holdings"}</div>
+          <div style={{fontSize:12,fontWeight:800}}>{book==="ANGEL"?"Your holdings to import":"Your Zerodha holdings"}</div>
           <span style={{fontSize:11,color:"#5a3a1a",fontWeight:700,cursor:"pointer"}}
             onClick={()=>{const all=Object.values(zhPick).every(Boolean);
               const s={}; zh.forEach((h,i)=>s[i]=!all); setZhPick(s);}}>
