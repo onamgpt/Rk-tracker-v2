@@ -67,7 +67,8 @@ const {useState,useEffect,useRef,useMemo,useCallback}=React;
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 const SCRIPT_URL="https://script.google.com/macros/s/AKfycbwdvYUZYIGLy2Pf0_7-Dv09H0l8P99-Fzmo9J8JXfpEImFiOWM_o_jV6XDXPIJI0aCM/exec";
-const BOT_TOKEN="8852628858:AAHAZ3ZjosHPrEC0OU8fDnRXBNcKnwO2gus";
+// Bot token lives only in Netlify env (TELEGRAM_BOT_TOKEN), never here — this
+// file is served to every browser, so anything in it is public.
 const OWNER_CHAT_ID="8632288596";
 const URL_USER=new URLSearchParams(window.location.search).get("user")||"main";
 const IS_OWNER=(URL_USER==="main");  // only the owner sees profit/margin figures
@@ -436,9 +437,9 @@ ${STATUS_TAGS.join(", ")}`;
 // ── TELEGRAM ──────────────────────────────────────────────────────────────────
 async function tgSend(text){
   try{
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,{
+    await fetch("/.netlify/functions/telegram",{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({chat_id:OWNER_CHAT_ID,text,parse_mode:"HTML"})
+      body:JSON.stringify({action:"send",chatIds:[OWNER_CHAT_ID],message:text})
     });
   }catch(e){}
 }
