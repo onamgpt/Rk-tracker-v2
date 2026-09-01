@@ -47,6 +47,66 @@ exports.handler = async (event) => {
       return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, result }) };
     }
 
+    // ── createTemplate — submit a new template to Meta for review ─────────
+    // WhatsApp has no free-text send outside the 24h window, so anything new
+    // you want to say has to become a template and clear review first. This
+    // exists so that can be done from the app rather than WhatsApp Manager.
+    if (action === "createTemplate") {
+      if (!WABA_ID) return { statusCode: 500, headers: h, body: JSON.stringify({ error: "WHATSAPP_BUSINESS_ACCOUNT_ID not set" }) };
+      const { name, category, bodyText, headerText } = body;
+      if (!name || !bodyText) return { statusCode: 400, headers: h, body: JSON.stringify({ error: "Missing name/bodyText" }) };
+
+      const cleanName = String(name).toLowerCase().replace(/[^a-z0-9_]/g, "_").slice(0, 60);
+      const components = [];
+      if (headerText) components.push({ type: "HEADER", format: "TEXT", text: String(headerText).slice(0, 60) });
+
+      // Meta requires a sample value for every {{n}} in the body, or the
+      // submission is rejected outright.
+      const varCount = (String(bodyText).match(/\{\{\d+\}\}/g) || []).length;
+      const bodyComp = { type: "BODY", text: String(bodyText) };
+      if (varCount > 0) {
+        bodyComp.example = { body_text: [Array.from({ length: varCount }, (_, i) => "Sample" + (i + 1))] };
+      }
+      components.push(bodyComp);
+
+      try {
+        const result = await graphApiPost(`/${WABA_ID}/message_templates`, ACCESS_TOKEN, {
+          name: cleanName,
+          language: "en",
+          category: (category === "MARKETING" ? "MARKETING" : "UTILITY"),
+          components
+        });
+        return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, name: cleanName, result }) };
+      } catch (e) {
+        return { statusCode: 200, headers: h, body: JSON.stringify({ ok: false, error: e.message }) };
+      }
+    }
+
+    // ── schedule CRUD — the queue wa-scheduler drains ─────────────────────
+    if (action === "getSchedule") {
+      const store = await kvGet("wa_scheduled");
+      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, scheduled: store.scheduled || [] }) };
+    }
+
+    if (action === "saveSchedule") {
+      const { scheduled } = body;
+      if (!Array.isArray(scheduled)) return { statusCode: 400, headers: h, body: JSON.stringify({ error: "scheduled must be an array" }) };
+      await kvPut("wa_scheduled", { scheduled });
+      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, count: scheduled.length }) };
+    }
+
+    if (action === "getContacts") {
+      const store = await kvGet("wa_contacts");
+      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, contacts: store.contacts || [] }) };
+    }
+
+    if (action === "saveContacts") {
+      const { contacts } = body;
+      if (!Array.isArray(contacts)) return { statusCode: 400, headers: h, body: JSON.stringify({ error: "contacts must be an array" }) };
+      await kvPut("wa_contacts", { contacts });
+      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, count: contacts.length }) };
+    }
+
     // ── sendTemplate — required for first contact / outside 24h window ──
     if (action === "sendTemplate") {
       const { to, templateName, languageCode, params } = body;

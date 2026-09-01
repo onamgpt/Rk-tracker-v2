@@ -8044,6 +8044,270 @@ function TelegramShare({ entry, onClose }) {
 }
 
 
+function WhatsAppTeam({ onClose }) {
+  const [tab, setTab] = useState("send"); // send | scheduled | contacts | new
+  const [templates, setTemplates] = useState([]);
+  const [contacts, setContacts] = useState([]);
+  const [scheduled, setScheduled] = useState([]);
+  const [picked, setPicked] = useState("");
+  const [params, setParams] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [extra, setExtra] = useState("");
+  const [when, setWhen] = useState("");
+  const [repeat, setRepeat] = useState("once");
+  const [mode, setMode] = useState("now");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [nt, setNt] = useState({ name: "", header: "", body: "", category: "UTILITY" });
+
+  const api = async (action, extraBody) => {
+    const r = await fetch("/.netlify/functions/whatsapp", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(Object.assign({ action: action }, extraBody || {}))
+    });
+    return r.json();
+  };
+
+  const loadAll = async () => {
+    try { const t = await api("getTemplates"); if (t.ok) setTemplates(t.templates || []); } catch(e) {}
+    try { const c = await api("getContacts"); if (c.ok) setContacts(c.contacts || []); } catch(e) {}
+    try { const s = await api("getSchedule"); if (s.ok) setScheduled(s.scheduled || []); } catch(e) {}
+  };
+  useEffect(() => { loadAll(); }, []);
+
+  const current = templates.find(t => t.name === picked);
+  const bodyOf = (t) => {
+    if (!t || !t.components) return "";
+    const b = t.components.find(c => c.type === "BODY");
+    return b ? b.text : "";
+  };
+  const varCount = (bodyOf(current).match(/\{\{\d+\}\}/g) || []).length;
+  const isMarketing = current && current.category === "MARKETING";
+
+  // Preview with the values actually typed, so what you see is what sends.
+  const preview = () => {
+    let s = bodyOf(current);
+    for (let i = 0; i < varCount; i++) {
+      s = s.replace("{{" + (i + 1) + "}}", params[i] || "___");
+    }
+    return s;
+  };
+
+  const recipients = () => {
+    const typed = extra.split(/[\s,;]+/).filter(Boolean);
+    return Array.from(new Set(selected.concat(typed)));
+  };
+
+  const saveContacts = async (c) => { setContacts(c); await api("saveContacts", { contacts: c }); };
+  const saveScheduled = async (s) => { setScheduled(s); await api("saveSchedule", { scheduled: s }); };
+
+  const go = async () => {
+    const to = recipients();
+    if (!picked) return setMsg("Pick a template first.");
+    if (!to.length) return setMsg("Pick or type at least one number.");
+    if (params.slice(0, varCount).some(p => !p)) return setMsg("Fill every variable — a blank one is rejected by Meta.");
+
+    setBusy(true); setMsg("");
+    try {
+      if (mode === "schedule") {
+        if (!when) { setBusy(false); return setMsg("Pick a date and time."); }
+        const item = {
+          id: "wa" + Date.now(), templateName: picked, params: params.slice(0, varCount),
+          recipients: to, when: new Date(when).toISOString(), repeat: repeat,
+          category: current ? current.category : "UTILITY", status: "pending"
+        };
+        await saveScheduled(scheduled.concat([item]));
+        setMsg("⏰ Scheduled for " + new Date(when).toLocaleString() + " — " + to.length + " recipient(s).");
+        setTab("scheduled");
+      } else {
+        let ok = 0; const errs = [];
+        for (const p of to) {
+          const r = await api("sendTemplate", { to: p, templateName: picked, languageCode: "en", params: params.slice(0, varCount) });
+          if (r.ok) ok++; else errs.push(p + ": " + (r.error || "failed"));
+        }
+        setMsg("📤 Sent " + ok + " of " + to.length + (errs.length ? " — " + errs[0] : ""));
+      }
+    } catch (e) { setMsg("Error: " + e.message); }
+    setBusy(false);
+  };
+
+  const createTemplate = async () => {
+    if (!nt.name || !nt.body) return setMsg("Name and body are both needed.");
+    setBusy(true); setMsg("Submitting to Meta…");
+    try {
+      const r = await api("createTemplate", { name: nt.name, category: nt.category, bodyText: nt.body, headerText: nt.header });
+      if (r.ok) {
+        setMsg("✅ Submitted as '" + r.name + "'. Meta review usually takes minutes to a few hours. It appears in Send once approved.");
+        setNt({ name: "", header: "", body: "", category: "UTILITY" });
+        loadAll();
+      } else setMsg("❌ " + (r.error || "Rejected by Meta"));
+    } catch (e) { setMsg("Error: " + e.message); }
+    setBusy(false);
+  };
+
+  const btn = (k, label) => (
+    <button onClick={() => { setTab(k); setMsg(""); }} style={{
+      padding: "7px 12px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13,
+      fontWeight: tab === k ? 700 : 500,
+      background: tab === k ? "#25D366" : "#eee", color: tab === k ? "#fff" : "#444"
+    }}>{label}</button>
+  );
+
+  const box = { width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd", fontSize: 14, marginBottom: 8, boxSizing: "border-box" };
+
+  return (
+    <div style={{ minWidth: 300 }}>
+      <h3 style={{ margin: "0 0 10px" }}>💬 WhatsApp</h3>
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+        {btn("send", "Send")}{btn("scheduled", "Scheduled" + (scheduled.length ? " (" + scheduled.length + ")" : ""))}
+        {btn("contacts", "Contacts")}{btn("new", "New template")}
+      </div>
+
+      {msg && <div style={{ padding: 8, background: "#f3f7f3", borderRadius: 8, fontSize: 13, marginBottom: 10 }}>{msg}</div>}
+
+      {tab === "send" && (
+        <div>
+          <label style={{ fontSize: 12, color: "#666" }}>Template</label>
+          <select value={picked} onChange={e => { setPicked(e.target.value); setParams([]); }} style={box}>
+            <option value="">— pick one —</option>
+            {templates.filter(t => t.status === "APPROVED").map(t => (
+              <option key={t.name} value={t.name}>{t.name} ({t.category})</option>
+            ))}
+          </select>
+
+          {current && (
+            <div style={{ background: "#f7f7f7", padding: 10, borderRadius: 8, fontSize: 13, whiteSpace: "pre-wrap", marginBottom: 10 }}>
+              {preview()}
+            </div>
+          )}
+
+          {Array.from({ length: varCount }).map((_, i) => (
+            <input key={i} placeholder={"Value for {{" + (i + 1) + "}}"} value={params[i] || ""}
+              onChange={e => { const p = params.slice(); p[i] = e.target.value; setParams(p); }} style={box} />
+          ))}
+
+          {isMarketing && (
+            <div style={{ fontSize: 12, color: "#a15c00", background: "#fff6e5", padding: 8, borderRadius: 8, marginBottom: 8 }}>
+              Marketing template. Meta limits how often each person receives these and
+              skips anyone who opted out, so some recipients will not get it.
+            </div>
+          )}
+
+          {contacts.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ fontSize: 12, color: "#666" }}>Contacts</label>
+              <div style={{ maxHeight: 130, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, padding: 6 }}>
+                {contacts.map(c => (
+                  <label key={c.phone} style={{ display: "block", fontSize: 13, padding: "3px 0" }}>
+                    <input type="checkbox" checked={selected.includes(c.phone)}
+                      onChange={e => setSelected(e.target.checked ? selected.concat([c.phone]) : selected.filter(x => x !== c.phone))} />
+                    {" "}{c.name || c.phone} <span style={{ color: "#999" }}>{c.phone}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <input placeholder="Or type numbers: 9845563633, 9876543210" value={extra}
+            onChange={e => setExtra(e.target.value)} style={box} />
+
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <button onClick={() => setMode("now")} style={{ flex: 1, padding: 7, borderRadius: 8, border: "none", cursor: "pointer",
+              background: mode === "now" ? "#25D366" : "#eee", color: mode === "now" ? "#fff" : "#444" }}>Send now</button>
+            <button onClick={() => setMode("schedule")} style={{ flex: 1, padding: 7, borderRadius: 8, border: "none", cursor: "pointer",
+              background: mode === "schedule" ? "#25D366" : "#eee", color: mode === "schedule" ? "#fff" : "#444" }}>Schedule</button>
+          </div>
+
+          {mode === "schedule" && (
+            <div>
+              <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} style={box} />
+              <select value={repeat} onChange={e => setRepeat(e.target.value)} style={box}>
+                <option value="once">Once</option><option value="daily">Every day</option>
+                <option value="weekly">Every week</option><option value="monthly">Every month</option>
+              </select>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
+                The queue is checked every 15 minutes, so it sends at or just after the time you pick.
+              </div>
+            </div>
+          )}
+
+          <button onClick={go} disabled={busy} style={{ width: "100%", padding: 11, borderRadius: 10, border: "none",
+            background: "linear-gradient(135deg,#25D366,#128C7E)", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+            {busy ? "Working…" : (mode === "now" ? "📤 Send now" : "⏰ Schedule it")}
+          </button>
+        </div>
+      )}
+
+      {tab === "scheduled" && (
+        <div>
+          {!scheduled.length && <div style={{ color: "#888", fontSize: 13 }}>Nothing scheduled yet.</div>}
+          {scheduled.map(s => (
+            <div key={s.id} style={{ border: "1px solid #eee", borderRadius: 8, padding: 9, marginBottom: 8, fontSize: 13 }}>
+              <div style={{ fontWeight: 600 }}>{s.templateName}</div>
+              <div style={{ color: "#666" }}>{new Date(s.when).toLocaleString()} · {s.repeat} · {(s.recipients || []).length} recipient(s)</div>
+              <div style={{ color: s.status === "failed" ? "#c00" : "#888", fontSize: 12 }}>
+                {s.status}{s.lastError ? " — " + s.lastError : ""}
+              </div>
+              <button onClick={() => saveScheduled(scheduled.filter(x => x.id !== s.id))}
+                style={{ marginTop: 6, padding: "4px 9px", fontSize: 12, borderRadius: 6, border: "1px solid #ddd", background: "#fff", cursor: "pointer" }}>
+                Delete
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === "contacts" && (
+        <div>
+          <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
+            One per line: <code>name, number</code>
+          </div>
+          <textarea rows={7} style={box}
+            defaultValue={contacts.map(c => (c.name || "") + ", " + c.phone).join("\n")}
+            onBlur={e => {
+              const list = e.target.value.split("\n").map(l => {
+                const bits = l.split(",");
+                const phone = (bits.pop() || "").replace(/[^\d]/g, "");
+                return phone ? { name: bits.join(",").trim(), phone: phone.length === 10 ? "91" + phone : phone } : null;
+              }).filter(Boolean);
+              saveContacts(list);
+              setMsg("Saved " + list.length + " contact(s).");
+            }} />
+          <div style={{ fontSize: 12, color: "#888" }}>Saved when you tap outside the box.</div>
+        </div>
+      )}
+
+      {tab === "new" && (
+        <div>
+          <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
+            WhatsApp allows no free text outside a 24-hour reply window, so anything
+            new has to be approved first. Use <code>{"{{1}}"}</code>, <code>{"{{2}}"}</code> for
+            the parts that change.
+          </div>
+          <input placeholder="Name, e.g. diwali_greeting" value={nt.name}
+            onChange={e => setNt(Object.assign({}, nt, { name: e.target.value }))} style={box} />
+          <input placeholder="Header (optional, no variables)" value={nt.header}
+            onChange={e => setNt(Object.assign({}, nt, { header: e.target.value }))} style={box} />
+          <textarea rows={5} placeholder={"Hi {{1}},\n\nWishing you a happy Diwali from all of us at Onam."}
+            value={nt.body} onChange={e => setNt(Object.assign({}, nt, { body: e.target.value }))} style={box} />
+          <select value={nt.category} onChange={e => setNt(Object.assign({}, nt, { category: e.target.value }))} style={box}>
+            <option value="UTILITY">Utility — about an order or account</option>
+            <option value="MARKETING">Marketing — promotions, greetings, offers</option>
+          </select>
+          <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
+            Pick the one that genuinely matches. Meta rejects, or later downgrades,
+            templates filed under the wrong category.
+          </div>
+          <button onClick={createTemplate} disabled={busy} style={{ width: "100%", padding: 11, borderRadius: 10, border: "none",
+            background: "linear-gradient(135deg,#25D366,#128C7E)", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+            {busy ? "Submitting…" : "Submit for review"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TelegramTeam({ onClose }) {
   const [tab, setTab] = useState("send"); // send | scheduled | team
   const [contacts, setContacts] = useState([]);   // [{chatId,name,label}]
@@ -16396,6 +16660,7 @@ function App(){
   const [showKerala,setShowKerala]=useState(false);
   const [showRules,setShowRules]=useState(false);
   const [showTelegram,setShowTelegram]=useState(false);
+  const [showWhatsApp,setShowWhatsApp]=useState(false);
   const [showGym,setShowGym]=useState(false);
   const [showRecv,setShowRecv]=useState(false);
   const [showBank,setShowBank]=useState(false);
@@ -16875,6 +17140,7 @@ function App(){
                 {l:"🪔 Kerala",fn:()=>setShowKerala(true), ownerOnly:true},
                 {l:"⚖️ Rules",fn:()=>setShowRules(true), ownerOnly:true},
                 {l:"✈️ Telegram",fn:()=>setShowTelegram(true), ownerOnly:true},
+                {l:"💬 WhatsApp",fn:()=>setShowWhatsApp(true), ownerOnly:true},
                 {l:"🧭 Field Console",fn:()=>setShowFieldConsole(true)},
                 {l:"🗂️ Field Admin",fn:()=>setShowFieldAdmin(true), ownerOnly:true},
                 {l:"📝 Field Report",fn:()=>setShowFieldReport(true)},
@@ -17147,6 +17413,7 @@ function App(){
     <Modal open={showRules && IS_OWNER} onClose={()=>setShowRules(false)} wide><RulesEngine entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRules(false)}/></Modal>
     
     <Modal open={showTelegram && IS_OWNER} onClose={()=>setShowTelegram(false)}><TelegramTeam onClose={()=>setShowTelegram(false)}/></Modal>
+    <Modal open={showWhatsApp && IS_OWNER} onClose={()=>setShowWhatsApp(false)}><WhatsAppTeam onClose={()=>setShowWhatsApp(false)}/></Modal>
     <Modal open={showGym} onClose={()=>setShowGym(false)}><GymLog entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowGym(false)}/></Modal>
     <Modal open={showRecv && IS_OWNER} onClose={()=>setShowRecv(false)}><Receivables entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRecv(false)}/></Modal>
     <Modal open={showBank && IS_OWNER} onClose={()=>setShowBank(false)} wide><BankArchive onClose={()=>setShowBank(false)}/></Modal>
