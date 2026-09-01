@@ -8,17 +8,21 @@
   [headers.values]
     Access-Control-Allow-Origin = "*"
 
-# The whole application is one HTML file, so a cached copy means the user is
-# running old code no matter how many times they reload. Never cache it.
+# The whole application is one HTML file (~1.1MB), so no-store meant a full
+# re-download on every open — the app felt like it reloaded on every tap.
+# Now: serve from cache instantly, treat it as fresh for a day, and after that
+# still serve the cached copy immediately while fetching the new one in the
+# background. Consequence: a freshly deployed change lands on the *next* open,
+# not the current one.
 [[headers]]
   for = "/index.html"
   [headers.values]
-    Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
+    Cache-Control = "public, max-age=86400, stale-while-revalidate=604800"
 
 [[headers]]
   for = "/"
   [headers.values]
-    Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
+    Cache-Control = "public, max-age=86400, stale-while-revalidate=604800"
 
 # Run the Telegram scheduler every 5 minutes
 [functions."telegram-scheduler"]
