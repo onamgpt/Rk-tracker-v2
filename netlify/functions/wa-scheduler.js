@@ -83,6 +83,13 @@ exports.handler = async () => {
       }
     }
 
+    // Per-item outcome. Counting across the whole queue meant an item whose
+    // every recipient was skipped still came out marked "sent" — silence with
+    // no error, which is the worst possible failure mode.
+    const okCount   = results.filter(r => r.ok).length;
+    const errCount  = results.filter(r => r.error).length;
+    const skipCount = results.filter(r => r.skipped).length;
+
     item.lastRun = new Date().toISOString();
     item.lastResult = results;
     item.lastError = results.filter(r => r.error).map(r => r.error)[0] || null;
@@ -91,8 +98,15 @@ exports.handler = async () => {
     if (item.repeat && item.repeat !== "once") {
       item.when = nextRun(item.when, item.repeat);
       item.status = "pending";
+    } else if (okCount > 0) {
+      item.status = errCount || skipCount ? "partly sent" : "sent";
+    } else if (skipCount > 0 && errCount === 0) {
+      item.status = "skipped";
     } else {
-      item.status = failed && !sent ? "failed" : "sent";
+      item.status = "failed";
+    }
+    if (!item.lastError && skipCount && !okCount) {
+      item.lastError = results.filter(r => r.skipped).map(r => r.skipped)[0];
     }
     touched = true;
   }
@@ -118,7 +132,8 @@ function nextRun(when, repeat) {
 
 function formatPhone(phone) {
   let p = String(phone || "").replace(/[^\d]/g, "");
-  if (p.length === 10) p = "91" + p;
+  if (p.length === 10) p = "91" + p;           // bare Indian mobile
+  if (p.length === 11 && p[0] === "0") p = "91" + p.slice(1);
   return p.length >= 11 ? p : "";
 }
 

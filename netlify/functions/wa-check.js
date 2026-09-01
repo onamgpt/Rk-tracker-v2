@@ -62,7 +62,8 @@ exports.handler = async (event) => {
     out.push("  status:    " + (it.status || "?") + (it.lastError ? "  error: " + it.lastError : ""));
     out.push("  to:        " + (it.recipients || []).join(", "));
     if (it.kind === "text") {
-      for (const p of (it.recipients || [])) {
+      for (const raw of (it.recipients || [])) {
+        const p = norm(raw);
         const t = inbound[p];
         const open = t && (now - new Date(t).getTime()) < 86400000;
         out.push("  window:    " + p + " " + (open ? "OPEN" : "CLOSED — they must message the business number first"));
@@ -73,6 +74,14 @@ exports.handler = async (event) => {
 
   const due = items.filter(i => i.status !== "cancelled" && i.when &&
     new Date(i.when).getTime() <= now && !(i.repeat === "once" && i.status === "sent"));
+  const seen = Object.keys(inbound);
+  out.push("Numbers that have messaged the business number: " +
+           (seen.length ? seen.join(", ") : "NONE RECORDED"));
+  if (!seen.length) {
+    out.push("  If this is empty, the webhook is not recording inbound messages.");
+    out.push("  Free text cannot work until it does.");
+  }
+  out.push("");
   out.push(due.length + " item(s) are due and should have been sent.");
   out.push("");
 
@@ -125,6 +134,13 @@ exports.handler = async (event) => {
   out.push("15-minute trigger needs looking at.");
   return reply();
 };
+
+function norm(phone) {
+  let p = String(phone || "").replace(/[^\d]/g, "");
+  if (p.length === 10) p = "91" + p;
+  if (p.length === 11 && p[0] === "0") p = "91" + p.slice(1);
+  return p;
+}
 
 function waPost(body) {
   return new Promise((resolve, reject) => {
