@@ -1,7 +1,6 @@
 [build]
   command = ""
   functions = "netlify/functions"
-  environment = { SECRETS_SCAN_OMIT_KEYS = "WHATSAPP_ACCESS_TOKEN,ANGEL_PASSWORD" }
 
 [[headers]]
   for = "/*"
