@@ -95,6 +95,11 @@ exports.handler = async (event) => {
       return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, count: scheduled.length }) };
     }
 
+    if (action === "getInbound") {
+      const seen = await kvGet("wa_last_inbound");
+      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, inbound: seen }) };
+    }
+
     if (action === "getContacts") {
       const store = await kvGet("wa_contacts");
       return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, contacts: store.contacts || [] }) };

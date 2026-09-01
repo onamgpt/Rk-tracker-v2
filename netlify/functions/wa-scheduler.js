@@ -29,7 +29,16 @@ exports.handler = async () => {
 
   const optouts = await kvGet("wa_optouts");
   const marketingLog = await kvGet("wa_marketing_log");
+  const lastInbound = await kvGet("wa_last_inbound");
   const now = Date.now();
+
+  // A number is reachable with plain text only if it messaged us within the
+  // last 24 hours. Checked at send time, not schedule time — the window may
+  // well have closed in between.
+  const windowOpen = (phone) => {
+    const t = lastInbound[phone];
+    return !!t && (now - new Date(t).getTime()) < 24 * 3600 * 1000;
+  };
 
   let sent = 0, failed = 0, touched = false;
 
@@ -38,7 +47,8 @@ exports.handler = async () => {
     if (!item.when || new Date(item.when).getTime() > now) continue;
     if (item.repeat === "once" && item.status === "sent") continue;
 
-    const isMarketing = item.category === "MARKETING";
+    const isFreeText = item.kind === "text";
+    const isMarketing = !isFreeText && item.category === "MARKETING";
     const results = [];
 
     for (const raw of (item.recipients || [])) {
@@ -55,9 +65,17 @@ exports.handler = async () => {
       }
 
       try {
-        await sendTemplate(phone, item.templateName, item.params || []);
+        if (isFreeText) {
+          if (!windowOpen(phone)) {
+            results.push({ phone, skipped: "24h window closed — they must message the business number first" });
+            continue;
+          }
+          await sendText(phone, item.message || "");
+        } else {
+          await sendTemplate(phone, item.templateName, item.params || []);
+          if (isMarketing) marketingLog[phone] = new Date().toISOString();
+        }
         results.push({ phone, ok: true });
-        if (isMarketing) marketingLog[phone] = new Date().toISOString();
         sent++;
       } catch (e) {
         results.push({ phone, error: e.message });
@@ -103,17 +121,30 @@ function formatPhone(phone) {
   return p.length >= 11 ? p : "";
 }
 
+function sendText(to, message) {
+  return waPost({
+    messaging_product: "whatsapp",
+    to,
+    type: "text",
+    text: { body: String(message) }
+  });
+}
+
 function sendTemplate(to, name, params) {
   const components = params.length
     ? [{ type: "body", parameters: params.map(p => ({ type: "text", text: String(p) })) }]
     : [];
+  return waPost({
+    messaging_product: "whatsapp",
+    to,
+    type: "template",
+    template: { name, language: { code: "en" }, components }
+  });
+}
+
+function waPost(body) {
   return new Promise((resolve, reject) => {
-    const payload = JSON.stringify({
-      messaging_product: "whatsapp",
-      to,
-      type: "template",
-      template: { name, language: { code: "en" }, components }
-    });
+    const payload = JSON.stringify(body);
     const req = https.request({
       hostname: "graph.facebook.com",
       path: "/v21.0/" + PHONE_NUMBER_ID + "/messages",

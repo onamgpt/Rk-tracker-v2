@@ -8059,6 +8059,9 @@ function WhatsAppTeam({ onClose }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [nt, setNt] = useState({ name: "", header: "", body: "", category: "UTILITY" });
+  const [kind, setKind] = useState("template"); // template | text
+  const [freeText, setFreeText] = useState("");
+  const [inbound, setInbound] = useState({});
 
   const api = async (action, extraBody) => {
     const r = await fetch("/.netlify/functions/whatsapp", {
@@ -8072,6 +8075,7 @@ function WhatsAppTeam({ onClose }) {
     try { const t = await api("getTemplates"); if (t.ok) setTemplates(t.templates || []); } catch(e) {}
     try { const c = await api("getContacts"); if (c.ok) setContacts(c.contacts || []); } catch(e) {}
     try { const s = await api("getSchedule"); if (s.ok) setScheduled(s.scheduled || []); } catch(e) {}
+    try { const w = await api("getInbound"); if (w.ok) setInbound(w.inbound || {}); } catch(e) {}
   };
   useEffect(() => { loadAll(); }, []);
 
@@ -8098,31 +8102,43 @@ function WhatsAppTeam({ onClose }) {
     return Array.from(new Set(selected.concat(typed)));
   };
 
+  // Plain text can only reach someone who messaged the business number within
+  // the last 24 hours. Shown per contact so a silent skip is never a surprise.
+  const windowOpen = (phone) => {
+    const t = inbound[phone];
+    return !!t && (Date.now() - new Date(t).getTime()) < 86400000;
+  };
+
   const saveContacts = async (c) => { setContacts(c); await api("saveContacts", { contacts: c }); };
   const saveScheduled = async (s) => { setScheduled(s); await api("saveSchedule", { scheduled: s }); };
 
   const go = async () => {
     const to = recipients();
-    if (!picked) return setMsg("Pick a template first.");
+    if (kind === "template" && !picked) return setMsg("Pick a template first.");
+    if (kind === "text" && !freeText.trim()) return setMsg("Type a message.");
     if (!to.length) return setMsg("Pick or type at least one number.");
-    if (params.slice(0, varCount).some(p => !p)) return setMsg("Fill every variable — a blank one is rejected by Meta.");
+    if (kind === "template" && params.slice(0, varCount).some(p => !p)) return setMsg("Fill every variable — a blank one is rejected by Meta.");
 
     setBusy(true); setMsg("");
     try {
       if (mode === "schedule") {
         if (!when) { setBusy(false); return setMsg("Pick a date and time."); }
-        const item = {
-          id: "wa" + Date.now(), templateName: picked, params: params.slice(0, varCount),
-          recipients: to, when: new Date(when).toISOString(), repeat: repeat,
-          category: current ? current.category : "UTILITY", status: "pending"
-        };
+        const item = kind === "text"
+          ? { id: "wa" + Date.now(), kind: "text", message: freeText, recipients: to,
+              when: new Date(when).toISOString(), repeat: repeat, status: "pending" }
+          : { id: "wa" + Date.now(), kind: "template", templateName: picked,
+              params: params.slice(0, varCount), recipients: to,
+              when: new Date(when).toISOString(), repeat: repeat,
+              category: current ? current.category : "UTILITY", status: "pending" };
         await saveScheduled(scheduled.concat([item]));
         setMsg("⏰ Scheduled for " + new Date(when).toLocaleString() + " — " + to.length + " recipient(s).");
         setTab("scheduled");
       } else {
         let ok = 0; const errs = [];
         for (const p of to) {
-          const r = await api("sendTemplate", { to: p, templateName: picked, languageCode: "en", params: params.slice(0, varCount) });
+          const r = kind === "text"
+            ? await api("sendMessage", { to: p, message: freeText })
+            : await api("sendTemplate", { to: p, templateName: picked, languageCode: "en", params: params.slice(0, varCount) });
           if (r.ok) ok++; else errs.push(p + ": " + (r.error || "failed"));
         }
         setMsg("📤 Sent " + ok + " of " + to.length + (errs.length ? " — " + errs[0] : ""));
@@ -8167,26 +8183,45 @@ function WhatsAppTeam({ onClose }) {
 
       {tab === "send" && (
         <div>
-          <label style={{ fontSize: 12, color: "#666" }}>Template</label>
-          <select value={picked} onChange={e => { setPicked(e.target.value); setParams([]); }} style={box}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            <button onClick={() => setKind("template")} style={{ flex: 1, padding: 7, borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13,
+              background: kind === "template" ? "#128C7E" : "#eee", color: kind === "template" ? "#fff" : "#444" }}>Template</button>
+            <button onClick={() => setKind("text")} style={{ flex: 1, padding: 7, borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13,
+              background: kind === "text" ? "#128C7E" : "#eee", color: kind === "text" ? "#fff" : "#444" }}>Free text</button>
+          </div>
+
+          {kind === "text" && (
+            <div>
+              <div style={{ fontSize: 12, color: "#a15c00", background: "#fff6e5", padding: 8, borderRadius: 8, marginBottom: 8 }}>
+                Free text only reaches someone who messaged your business number in
+                the last 24 hours. The window is checked when the message actually
+                sends, so a reply today may not still count tomorrow morning.
+              </div>
+              <textarea rows={4} placeholder="Type anything…" value={freeText}
+                onChange={e => setFreeText(e.target.value)} style={box} />
+            </div>
+          )}
+
+          {kind === "template" && <label style={{ fontSize: 12, color: "#666" }}>Template</label>}
+          {kind === "template" && <select value={picked} onChange={e => { setPicked(e.target.value); setParams([]); }} style={box}>
             <option value="">— pick one —</option>
             {templates.filter(t => t.status === "APPROVED").map(t => (
               <option key={t.name} value={t.name}>{t.name} ({t.category})</option>
             ))}
-          </select>
+          </select>}
 
-          {current && (
+          {kind === "template" && current && (
             <div style={{ background: "#f7f7f7", padding: 10, borderRadius: 8, fontSize: 13, whiteSpace: "pre-wrap", marginBottom: 10 }}>
               {preview()}
             </div>
           )}
 
-          {Array.from({ length: varCount }).map((_, i) => (
+          {kind === "template" && Array.from({ length: varCount }).map((_, i) => (
             <input key={i} placeholder={"Value for {{" + (i + 1) + "}}"} value={params[i] || ""}
               onChange={e => { const p = params.slice(); p[i] = e.target.value; setParams(p); }} style={box} />
           ))}
 
-          {isMarketing && (
+          {kind === "template" && isMarketing && (
             <div style={{ fontSize: 12, color: "#a15c00", background: "#fff6e5", padding: 8, borderRadius: 8, marginBottom: 8 }}>
               Marketing template. Meta limits how often each person receives these and
               skips anyone who opted out, so some recipients will not get it.
@@ -8202,6 +8237,9 @@ function WhatsAppTeam({ onClose }) {
                     <input type="checkbox" checked={selected.includes(c.phone)}
                       onChange={e => setSelected(e.target.checked ? selected.concat([c.phone]) : selected.filter(x => x !== c.phone))} />
                     {" "}{c.name || c.phone} <span style={{ color: "#999" }}>{c.phone}</span>
+                    {kind === "text" && (windowOpen(c.phone)
+                      ? <span style={{ color: "#128C7E", fontSize: 11 }}> · open</span>
+                      : <span style={{ color: "#c00", fontSize: 11 }}> · closed</span>)}
                   </label>
                 ))}
               </div>
