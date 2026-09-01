@@ -105,7 +105,8 @@ exports.handler = async () => {
   return json({ ok: true, checked: items.length, sent, failed });
 };
 
-exports.config = { schedule: "*/15 * * * *" };
+// Schedule is declared in netlify.toml, not here — an in-file config export
+// is only honoured for ES modules, and this file is CommonJS.
 
 function nextRun(when, repeat) {
   const d = new Date(when);

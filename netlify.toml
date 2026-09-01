@@ -27,4 +27,10 @@
 [functions."telegram-scheduler"]
   schedule = "*/5 * * * *"
 
+# Drain the WhatsApp scheduled queue every 15 minutes.
+# Declared here rather than in the function file: wa-scheduler.js is CommonJS,
+# and Netlify only reads an in-file schedule from an ESM `export const config`.
+[functions."wa-scheduler"]
+  schedule = "*/15 * * * *"
+
 # reorder-nudge-background declares its own schedule in the function file.
