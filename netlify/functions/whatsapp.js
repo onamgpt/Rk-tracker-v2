@@ -283,7 +283,7 @@ function sendTemplateMsg(phoneNumberId, token, to, templateName, languageCode, p
     messaging_product: "whatsapp",
     to: formatPhone(to),
     type: "template",
-    template: { name: templateName, language: { code: languageCode || "en_US" }, components }
+    template: { name: templateName, language: { code: languageCode || "en" }, components }
   });
 }
 
