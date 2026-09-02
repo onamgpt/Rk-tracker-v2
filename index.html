@@ -15991,7 +15991,17 @@ function AIMTrading({ onClose }) {
           {s.action!=="HOLD"&&<div style={{background:s.action==="BUY"?"#e3f2fd":"#e8f5e9",borderRadius:6,padding:"7px 9px",marginTop:6}}>
             <div style={{fontSize:12,fontWeight:800,color:sigColor(s.action)}}>
               {s.action} {cur}{fmtN(s.amount)} · about {s.qty} shares
+              {s.action==="SELL" && <span style={{fontWeight:600}}> of {fmtN(h.shares)} held</span>}
             </div>
+            {/* A sell larger than the position can never fill, and always means
+                the stored quantity is wrong — usually a corporate action counted
+                twice, since the broker credits split and bonus shares itself. */}
+            {s.action==="SELL" && num(s.qty) > num(h.shares) &&
+              <div style={{fontSize:11,color:"#b03030",fontWeight:700,marginTop:4,
+                background:"#fdecea",borderRadius:5,padding:"5px 7px"}}>
+                This is more than you hold. Check the quantity against your broker —
+                import holdings to correct it.
+              </div>}
             {book==="INDIA"&&kite&&Math.round(s.qty)>=1&&
               <button onClick={()=>sendToKite([{symbol:h.symbol,side:s.action,qty:s.qty,price:h.last_price}])}
                 disabled={!!busy}
