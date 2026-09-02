@@ -5,6 +5,33 @@ const BOT = process.env.TELEGRAM_BOT_TOKEN || "";
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 const OWNER = "main"; // scheduled messages are stored under the main user
+const RESEND_KEY = process.env.RESEND_API_KEY || "";
+const MAIL_FROM = process.env.MAIL_FROM || "orders@onamagarbathi.com";
+
+// Email leg of a reminder. Kept deliberately simple and best-effort: a failed
+// email must never stop the Telegram leg from going out.
+function sendMail(to, subject, body) {
+  return new Promise((resolve) => {
+    if (!RESEND_KEY) return resolve(false);
+    const payload = JSON.stringify({
+      from: MAIL_FROM,
+      to: [to],
+      subject: "Reminder: " + subject,
+      text: (body ? body + "\n\n" : "") + "— RK Life Tracker, Onam Agarbathi"
+    });
+    const req = https.request({
+      hostname: "api.resend.com", path: "/emails", method: "POST",
+      headers: {
+        "Authorization": "Bearer " + RESEND_KEY,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload)
+      }
+    }, res => { res.on("data", () => {}); res.on("end", () => resolve(res.statusCode < 300)); });
+    req.on("error", () => resolve(false));
+    req.setTimeout(10000, () => { req.destroy(); resolve(false); });
+    req.write(payload); req.end();
+  });
+}
 
 function tg(method, payload) {
   return new Promise((resolve) => {
@@ -43,7 +70,9 @@ function sb(method, path, payload, extraHeaders) {
 }
 
 exports.handler = async () => {
-  if (!BOT || !SUPABASE_URL || !SUPABASE_KEY) {
+  // Supabase is required to read the queue at all. The bot token is not — a
+  // reminder may be email-only.
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
     return { statusCode: 200, body: JSON.stringify({ ok: false, error: "not configured" }) };
   }
 
@@ -95,6 +124,9 @@ exports.handler = async () => {
         for (const id of (m.chatIds || [])) {
           await tg("sendMessage", { chat_id: String(id), text: m.text || "", parse_mode: "HTML" });
           sent++;
+        }
+        for (const addr of (m.emails || [])) {
+          if (await sendMail(addr, m.subject || "Reminder", m.body || "")) sent++;
         }
         let next = null;
         if (m.repeat === "daily") {
