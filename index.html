@@ -15,6 +15,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:#fdf8ef;font-family:'Palatino Linotype','Book Antiqua',Palatino,serif;color:#2a1a00;-webkit-tap-highlight-color:transparent;}
@@ -9772,6 +9773,112 @@ function Spectrum({ onClose, onSaveEntry }) {
   ];
   const [master, setMaster] = useState(DEFAULT_MASTER);
   const [editingProducts, setEditingProducts] = useState(false);
+  // ---- New Product → onamagarbathi.com ----
+  const SHOP_REPO = "onamgpt/onamagarbathi-shop";
+  const npFileRef = useRef(null);
+  const npQrRef = useRef(null);
+  const [npName,setNpName]=useState(""); const [npId,setNpId]=useState(""); const [npIdTouched,setNpIdTouched]=useState(false);
+  const [npMrp,setNpMrp]=useState(""); const [npPack,setNpPack]=useState(""); const [npCat,setNpCat]=useState("premium");
+  const [npDesc,setNpDesc]=useState(""); const [npBadge,setNpBadge]=useState("New"); const [npImg,setNpImg]=useState("");
+  const [npTok,setNpTok]=useState(()=>{ try{ return localStorage.getItem("rk_gh_tok")||""; }catch(e){ return ""; } });
+  const [npBusy,setNpBusy]=useState(false); const [npLog,setNpLog]=useState([]); const [npQrUrl,setNpQrUrl]=useState("");
+
+  const npSlug = s => String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+  const npSay = m => setNpLog(p=>[...p,m]);
+
+  function onNpPhoto(e){
+    const f=e.target.files&&e.target.files[0]; if(!f) return;
+    const img=new Image();
+    img.onload=()=>{
+      const W=637,H=850,pad=20, c=document.createElement("canvas");
+      c.width=W; c.height=H; const x=c.getContext("2d");
+      x.fillStyle="#fff"; x.fillRect(0,0,W,H);
+      const s=Math.min((W-pad*2)/img.width,(H-pad*2)/img.height);
+      const w=img.width*s, h=img.height*s;
+      x.drawImage(img,(W-w)/2,(H-h)/2,w,h);
+      setNpImg(c.toDataURL("image/jpeg",0.86));
+    };
+    img.src=URL.createObjectURL(f);
+  }
+
+  function npB64ToText(b64){
+    const bin=atob(String(b64).replace(/\s/g,""));
+    const arr=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+    return new TextDecoder("utf-8").decode(arr);
+  }
+  function npTextToB64(t){
+    const arr=new TextEncoder().encode(t); let bin="";
+    for(let i=0;i<arr.length;i+=0x8000) bin+=String.fromCharCode.apply(null,arr.subarray(i,i+0x8000));
+    return btoa(bin);
+  }
+
+  function npDrawQr(url){
+    try{
+      if(typeof QRious==="undefined"||!npQrRef.current) return;
+      new QRious({element:npQrRef.current,value:url,size:720,level:"H",padding:24});
+    }catch(e){}
+  }
+  useEffect(()=>{ if(npQrUrl) setTimeout(()=>npDrawQr(npQrUrl),60); },[npQrUrl]);
+
+  function npDownloadQr(){
+    try{
+      const a=document.createElement("a");
+      a.href=npQrRef.current.toDataURL("image/png");
+      a.download=(npId||"product")+"-bookmark-qr.png"; a.click();
+    }catch(e){}
+  }
+
+  async function npPush(){
+    const tok=npTok.trim(), id=npId.trim();
+    setNpLog([]); setNpQrUrl("");
+    if(!npImg) return npSay("✗ Add a pack photo first.");
+    if(!npName.trim()) return npSay("✗ Give the product a name.");
+    if(!/^[a-z0-9-]+$/.test(id)) return npSay("✗ Product id must be lowercase letters, numbers and hyphens.");
+    if(!Number(npMrp)) return npSay("✗ Enter the MRP.");
+    if(!tok) return npSay("✗ Enter your GitHub token.");
+
+    setNpBusy(true);
+    const API="https://api.github.com/repos/"+SHOP_REPO;
+    const H={Authorization:"Bearer "+tok,Accept:"application/vnd.github+json"};
+    try{
+      npSay("Reading the live site…");
+      const meta=await fetch(API+"/contents/index.html",{headers:H});
+      if(!meta.ok) throw new Error("Could not read the shop repo ("+meta.status+"). Check the token has repo access.");
+      const sha=(await meta.json()).sha;
+      const blob=await fetch(API+"/git/blobs/"+sha,{headers:H});
+      if(!blob.ok) throw new Error("Could not download index.html ("+blob.status+").");
+      let html=npB64ToText((await blob.json()).content);
+      npSay("Read "+((html.length/1024)|0)+" KB.");
+
+      if(html.indexOf('"id": "'+id+'"')>=0||html.indexOf('"id":"'+id+'"')>=0)
+        throw new Error('"'+id+'" is already on the site. Change the id.');
+
+      const product={id,name:npName.trim(),brand:"Onam",cat:npCat,mrp:Number(npMrp),price:Number(npMrp)*12,
+        desc:npDesc.trim(),badge:npBadge.trim(),hsn:"33074100",gstRate:5,packSize:npPack.trim()};
+
+      const anchor="var IMGS = {";
+      if(html.indexOf(anchor)<0) throw new Error("Image list not found in index.html — stop and check.");
+      html=html.replace(anchor,anchor+JSON.stringify(id)+":"+JSON.stringify(npImg)+",");
+      const s=html.indexOf("var PRODUCTS = ["); if(s<0) throw new Error("Product list not found.");
+      const e2=html.indexOf("}];",s); if(e2<0) throw new Error("End of product list not found.");
+      html=html.slice(0,e2+1)+", "+JSON.stringify(product)+html.slice(e2+1);
+      npSay("Added "+product.name+" and its pack shot.");
+
+      npSay("Committing…");
+      const put=await fetch(API+"/contents/index.html",{method:"PUT",headers:H,
+        body:JSON.stringify({message:"Add product: "+product.name,content:npTextToB64(html),sha})});
+      if(!put.ok){ const j=await put.json().catch(()=>({})); throw new Error("Commit rejected ("+put.status+"). "+(j.message||"")); }
+
+      try{ localStorage.setItem("rk_gh_tok",tok); }catch(e){}
+      npSay("✓ Live in about a minute. QR below.");
+      setNpQrUrl("https://onamagarbathi.com/?product="+id+"&src=bookmark");
+    }catch(err){
+      npSay("✗ "+err.message); npSay("Nothing was changed on the site.");
+    }
+    setNpBusy(false);
+  }
+
   const OFFICERS = ["Sooraj","Sunil","Biju","Murugan","Sebi","Sugeesh","Satish","Sadasivan","Vinod","Rupesh (Agent 2)"];
   const AGENT2 = "Rupesh (Agent 2)";
   // WES (working/travel expense) per officer, monthly avg from the MAKT-WES ledger FY25-26
@@ -10148,9 +10255,9 @@ function Spectrum({ onClose, onSaveEntry }) {
         </div>;
       })()}
 
-      <div style={{display:"flex",gap:6,marginBottom:12}}>
-        {[["upload","📤 Upload"],["orders","📋 Orders"],["officers","👥 Officers"],["products","📦 Products"],["reports","📊 Reports"],["costing","💠 Costing"],["growth","🚀 Growth"]].map(([k,l])=>(
-          <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"8px",borderRadius:8,border:tab===k?"2px solid #5a3a9a":"1px solid #ccc",background:tab===k?"#f0eafa":"#fff",color:"#3a2a6a",fontWeight:700,cursor:"pointer",fontSize:12}}>{l}</button>
+      <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+        {[["upload","📤 Upload"],["orders","📋 Orders"],["officers","👥 Officers"],["products","📦 Products"],["reports","📊 Reports"],["costing","💠 Costing"],["growth","🚀 Growth"],["newproduct","🆕 New Product"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setTab(k)} style={{flex:"1 1 84px",padding:"8px",borderRadius:8,border:tab===k?"2px solid #5a3a9a":"1px solid #ccc",background:tab===k?"#f0eafa":"#fff",color:"#3a2a6a",fontWeight:700,cursor:"pointer",fontSize:12}}>{l}</button>
         ))}
       </div>
 
@@ -10165,6 +10272,54 @@ function Spectrum({ onClose, onSaveEntry }) {
         </div>;
       })()}
       {msg && <div style={{fontSize:12,color:msg[0]==="✓"?"#1a7a3a":"#a33",marginBottom:8}}>{msg}</div>}
+
+      {tab==="newproduct" && <div>
+        <div style={{background:"#f5f0fc",border:"1px solid #d8c8f0",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:11.5,color:"#4a2a8a"}}>
+          Snap the pack, set the MRP, push. Goes straight to onamagarbathi.com and gives you the bookmark QR.
+        </div>
+
+        <div style={{display:"flex",gap:12,marginBottom:12}}>
+          <div onClick={()=>npFileRef.current&&npFileRef.current.click()} style={{width:96,height:128,flex:"none",border:"1.5px dashed #7a5aba",borderRadius:8,background:npImg?"#fff":"#f5f0fc",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+            {npImg? <img src={npImg} style={{width:"100%",height:"100%",objectFit:"contain"}}/> : <span style={{fontSize:11,color:"#7a5aba",textAlign:"center",padding:6}}>📷<br/>Tap to add pack photo</span>}
+          </div>
+          <div style={{flex:1}}>
+            <input value={npName} onChange={e=>{setNpName(e.target.value); if(!npIdTouched) setNpId(npSlug(e.target.value));}} placeholder="Product name" style={{...inp,width:"100%",marginBottom:6}}/>
+            <input value={npId} onChange={e=>{setNpIdTouched(true); setNpId(e.target.value);}} placeholder="product-id" style={{...inp,width:"100%",marginBottom:6,fontFamily:"monospace",fontSize:11.5}}/>
+            <div style={{display:"flex",gap:6}}>
+              <input value={npMrp} onChange={e=>setNpMrp(e.target.value)} placeholder="MRP ₹" inputMode="numeric" style={{...inp,width:"50%"}}/>
+              <input value={npPack} onChange={e=>setNpPack(e.target.value)} placeholder="45g" style={{...inp,width:"50%"}}/>
+            </div>
+          </div>
+        </div>
+        <input ref={npFileRef} type="file" accept="image/*" onChange={onNpPhoto} style={{display:"none"}}/>
+
+        <div style={{display:"flex",gap:6,marginBottom:6}}>
+          <select value={npCat} onChange={e=>setNpCat(e.target.value)} style={{...inp,width:"50%"}}>
+            <option value="premium">Premium</option><option value="economy">Economy</option>
+            <option value="cones">Cones</option><option value="dhoop">Dhoop</option>
+          </select>
+          <input value={npBadge} onChange={e=>setNpBadge(e.target.value)} placeholder="Badge (optional)" style={{...inp,width:"50%"}}/>
+        </div>
+        <textarea value={npDesc} onChange={e=>setNpDesc(e.target.value)} placeholder="Short description for the shop" style={{...inp,width:"100%",minHeight:64,marginBottom:6,fontFamily:"inherit"}}/>
+        <div style={{fontSize:11,color:"#7a6a9a",marginBottom:10}}>Box of 12 auto-set to ₹{npMrp?(Number(npMrp)*12):0} · HSN 33074100 · GST 5%</div>
+
+        <input value={npTok} onChange={e=>setNpTok(e.target.value)} type="password" placeholder="GitHub token (saved on this device)" style={{...inp,width:"100%",marginBottom:8}}/>
+
+        <button onClick={npPush} disabled={npBusy} style={{width:"100%",padding:"12px",borderRadius:10,border:"none",background:npBusy?"#b8a0e0":"#5a3a9a",color:"#fff",fontWeight:800,fontSize:14,cursor:npBusy?"default":"pointer"}}>
+          {npBusy?"⏳ Pushing…":"🚀 Push to onamagarbathi.com"}
+        </button>
+
+        {npLog.length>0 && <div style={{marginTop:10,fontSize:11.5,background:"#fafaff",border:"1px solid #e0d8f0",borderRadius:8,padding:"8px 10px"}}>
+          {npLog.map((l,i)=><div key={i} style={{color:l[0]==="✓"?"#1a7a3a":(l[0]==="✗"?"#a33":"#5a4a7a"),padding:"2px 0"}}>{l}</div>)}
+        </div>}
+
+        {npQrUrl && <div style={{marginTop:12,textAlign:"center",background:"#fff",border:"1px solid #d8c8f0",borderRadius:10,padding:12}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#3a2a6a",marginBottom:8}}>Bookmark QR</div>
+          <canvas ref={npQrRef} style={{width:180,height:180}}/>
+          <div style={{fontSize:10,color:"#7a6a9a",wordBreak:"break-all",margin:"8px 0"}}>{npQrUrl}</div>
+          <button onClick={npDownloadQr} style={{padding:"8px 16px",borderRadius:8,border:"1px solid #5a3a9a",background:"#fff",color:"#3a2a6a",fontWeight:700,fontSize:12,cursor:"pointer"}}>↓ Download QR (PNG)</button>
+        </div>}
+      </div>}
 
       {tab==="upload" && <div>
         <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={onPick} style={{display:"none"}}/>
