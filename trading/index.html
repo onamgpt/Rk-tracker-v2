@@ -70,6 +70,7 @@ h4{font-size:13px;margin:12px 0 6px;color:var(--blue)}
     <div class="row"><span class="lbl">Total Value</span><span class="big gold" id="pf-total">₹0</span></div>
     <div class="row"><span class="lbl">Invested</span><span class="val" id="pf-invested">₹0</span></div>
     <div class="row"><span class="lbl">P&L</span><span class="val" id="pf-pnl">₹0</span></div>
+    <div class="row"><span class="lbl">Actual profit (net cash out − in)</span><span class="val" id="pf-actual-total">₹0</span></div>
     <div class="row"><span class="lbl">Cash Reserve (AIM pool)</span><span class="val blue" id="pf-cash">₹0</span></div>
   </div>
   <div class="card">
@@ -252,6 +253,23 @@ function fetchHistory(sym, range){
     }).catch(function(){ return null; });
 }
 
+// ───────────────────────── EFFECTIVE ("ACTUAL") AVERAGE ─────────────────────────
+// Net cash ever put into this stock, minus net cash ever taken out, divided by
+// shares currently held. Mathematically identical to redistributing each
+// sale's profit across the remaining shares — falls on a profitable sell,
+// rises on a loss, same as it moves on a buy. This is a DISPLAY/tracking
+// number only: AIM's sell-blocked-below-average rule still uses the ordinary
+// weighted-average h.avg, unchanged — using the effective average there would
+// almost never block a sell once it drifts toward zero, defeating the rule.
+function netAvg(h){
+  var ni = (h.netInv!=null) ? h.netInv : h.avg*h.qty;
+  return h.qty>0 ? ni/h.qty : 0;
+}
+function actualProfit(h, ltp){
+  var ni = (h.netInv!=null) ? h.netInv : h.avg*h.qty;
+  return (ltp||0)*h.qty - ni;
+}
+
 // ───────────────────────── PORTFOLIO ─────────────────────────
 function renderHoldings(){
   var el = document.getElementById("holdings-list");
@@ -264,11 +282,16 @@ function renderHoldings(){
     var cost = h.avg * h.qty;
     var pnl = value - cost;
     var cls = pnl>=0 ? "green" : "red";
+    var na = netAvg(h);
+    var ap = actualProfit(h, ltp);
+    var apCls = ap>=0 ? "green" : "red";
     html += '<div class="holding-item">'
       + '<span class="del" onclick="delHolding(' + i + ')">✕ remove</span>'
       + '<strong>' + h.sym + '</strong> · ' + h.qty + ' shares @ ' + inr(h.avg)
       + '<div class="row"><span class="lbl">LTP ' + (ltp? inr(ltp): "—") + '</span>'
       + '<span class="val ' + cls + '">' + (ltp? inr(pnl) + " (" + (cost>0? pct(pnl/cost*100):"") + ")" : "tap refresh") + '</span></div>'
+      + '<div class="row"><span class="lbl">Actual avg (net invested ÷ held)</span><span class="val">' + inr(na) + '</span></div>'
+      + '<div class="row"><span class="lbl">Actual profit</span><span class="val ' + apCls + '">' + (ltp? inr(ap) : "tap refresh") + '</span></div>'
       + '</div>';
   }
   el.innerHTML = html;
@@ -276,11 +299,13 @@ function renderHoldings(){
 }
 
 function updateTotals(){
-  var total=0, invested=0;
+  var total=0, invested=0, actualTotal=0;
   for(var i=0;i<S.holdings.length;i++){
     var h = S.holdings[i];
-    total += (S.prices[h.sym]||0) * h.qty;
+    var ltp = S.prices[h.sym]||0;
+    total += ltp * h.qty;
     invested += h.avg * h.qty;
+    actualTotal += actualProfit(h, ltp);
   }
   var pnl = total - invested;
   document.getElementById("pf-total").textContent = inr(total + S.cash);
@@ -289,6 +314,8 @@ function updateTotals(){
   pnlEl.textContent = inr(pnl) + (invested>0? " ("+pct(pnl/invested*100)+")" : "");
   pnlEl.className = "val " + (pnl>=0? "green":"red");
   document.getElementById("pf-cash").textContent = inr(S.cash);
+  var atEl = document.getElementById("pf-actual-total");
+  if(atEl){ atEl.textContent = inr(actualTotal); atEl.className = "val " + (actualTotal>=0?"green":"red"); }
 }
 
 function addHolding(){
@@ -301,13 +328,15 @@ function addHolding(){
   for(var i=0;i<S.holdings.length;i++){
     if(S.holdings[i].sym===sym){
       var h = S.holdings[i];
+      if(h.netInv==null) h.netInv = h.avg*h.qty;   // migrate a pre-existing holding once
       var newQty = h.qty + qty;
       h.avg = (h.avg*h.qty + avg*qty)/newQty;
+      h.netInv += qty*avg;
       h.qty = newQty;
       found = true;
     }
   }
-  if(!found) S.holdings.push({sym:sym, qty:qty, avg:avg, pc: qty*avg});
+  if(!found) S.holdings.push({sym:sym, qty:qty, avg:avg, pc: qty*avg, netInv: qty*avg});
   save(S);
   document.getElementById("h-sym").value="";
   document.getElementById("h-qty").value="";
@@ -817,15 +846,19 @@ function applyTradeLocally(sym, action, shares, price, silent){
     var h = S.holdings[i];
     if(h.sym !== sym) continue;
     if(!h.pc || h.pc<=0) h.pc = h.avg * h.qty;   // initialise PC if missing
+    if(h.netInv==null) h.netInv = h.avg * h.qty; // migrate a pre-existing holding once
     if(action === "BUY"){
       h.avg = (h.avg*h.qty + amount) / (h.qty + shares);
       h.qty = h.qty + shares;
       h.pc  = h.pc + amount/2;                    // Lichello: PC up by half the buy
+      h.netInv += amount;                         // actual-avg cost basis rises with cash out
       S.cash = Math.max(0, S.cash - amount);
     } else if(action === "SELL"){
       h.qty = Math.max(0, h.qty - shares);
       S.cash = S.cash + amount;                   // sale proceeds into single pool
-      // avg and PC unchanged on sells per AIM
+      h.netInv -= amount;                          // actual-avg falls — profit taken off the table
+      // avg and PC unchanged on sells per AIM (this is the conventional cost basis,
+      // kept separate from netInv so the sell-blocked-below-average rule never moves)
     }
     break;
   }
