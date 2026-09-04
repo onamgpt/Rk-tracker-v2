@@ -86,6 +86,11 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
 .entry .emeta{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink-soft);margin-top:2px}
 .entry .enote{font-size:12.5px;color:var(--ink-soft);margin-top:3px}
 .entry .edel{flex:none;background:none;border:none;color:var(--stamp);cursor:pointer;font-size:16px;padding:0 2px}
+.entry .ebell{flex:none;background:none;border:none;cursor:pointer;font-size:16px;padding:0 6px;opacity:1}
+.entry .ebell[disabled]{opacity:.3;cursor:default}
+.addentry label.remrow{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-soft);margin-bottom:8px}
+.addentry .remrow input[type=checkbox]{width:auto}
+.addentry .remrow input[type=number]{width:64px;padding:6px 8px}
 .addentry{border:1px dashed var(--rule);border-radius:4px;padding:10px;margin-top:4px}
 .addentry .row{margin-bottom:8px}
 .addentry .row:last-child{margin-bottom:0}
@@ -123,6 +128,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     <button class="iconbtn" id="btnNew" title="New trip">+ New</button>
     <button class="iconbtn" id="btnDup" title="Duplicate trip">⧉</button>
     <button class="iconbtn" id="btnDel" title="Delete trip">🗑</button>
+    <button class="iconbtn" id="btnReload" title="Reload the latest itinerary into this trip">↻ Latest</button>
   </div>
 
   <div class="tabs">
@@ -177,17 +183,63 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
 
   function defaultTrip(name){
     return {
-      id: uid(), name: name || 'Europe · Sep 2026',
+      id: uid(), name: name || 'Switzerland & Italy 2026',
       start: '2026-09-25', pax: '3',
       sectors: [
-        {id:uid(), city:'Zürich',       nights:1, mode:'flight'},
-        {id:uid(), city:'Venice',       nights:2, mode:'train'},
-        {id:uid(), city:'Rome',         nights:3, mode:'train'},
-        {id:uid(), city:'Amalfi Coast', nights:6, mode:'train'},
-        {id:uid(), city:'Zürich',       nights:1, mode:'train'}
+        {id:uid(), city:'Zürich',   nights:1, mode:'flight'},
+        {id:uid(), city:'Venice',   nights:2, mode:'train'},
+        {id:uid(), city:'Rome',     nights:3, mode:'train'},
+        {id:uid(), city:'Sorrento', nights:2, mode:'train'}
       ],
       homeCity:'Bengaluru',
-      binder: {}
+      binder: seedBinder()
+    };
+  }
+
+  // The real, currently-booked plan — carried over from the itinerary already
+  // worked out on the day it was planned, not re-guessed. Times are as
+  // researched; anything not yet ticketed says so rather than inventing one.
+  function seedBinder(){
+    const e = (type,time,title,ref,note,remindMin) => {
+      var o = {id:uid(),type,time,title,ref:ref||'',note:note||''};
+      if(remindMin!=null && time){ o.remind = true; o.remindMin = remindMin; }
+      return o;
+    };
+    return {
+      '2026-09-25': [
+        e('flight','10:00','Etihad BLR → Abu Dhabi → Zürich','','Round-trip fare, ₹1,26,526 total for 3 — covers the return leg too. Lands ZRH 18:55.', 180),
+        e('taxi','19:10','Airport train to Zürich HB, then walk to hotel','','13 min train + 8 min walk. Hotel Alexander, Niederdorf — ask for a triple room.')
+      ],
+      '2026-09-26': [
+        e('train','09:09','EuroCity Zürich HB → Milano Centrale','','Arrive 12:50. Change ~75 min in Milan.', 45),
+        e('train','14:05','Frecciarossa Milano Centrale → Venezia S. Lucia','','Arrive 16:22. Vaporetto Line 1 or 2 to Hotel Antico Trovatore, San Marco.')
+      ],
+      '2026-09-27': [
+        e('activity','09:30','Basilica di San Marco',''),
+        e('activity','11:00','Doge\u2019s Palace — timed entry',''),
+        e('activity','14:00','Rialto + Murano via Vaporetto Line 12','','Sightseeing tickets ~\u20B924,000 total for 3.')
+      ],
+      '2026-09-28': [
+        e('train','09:25','Frecciarossa Venezia S. Lucia → Roma Termini (direct)','','Arrive 13:12. Yes Hotel — 2 min walk from the Via Marsala exit.', 45)
+      ],
+      '2026-09-29': [
+        e('activity','08:30','Colosseum — timed entry','','Metro B, Termini→Colosseo, 2 stops. Forum + Palatine on the same ticket.')
+      ],
+      '2026-09-30': [
+        e('activity','08:00','Vatican Museums','','Metro A, Termini→Ottaviano. Allow 3 hours, then St Peter\u2019s. Tickets ~\u20B921,600 total.')
+      ],
+      '2026-10-01': [
+        e('train','09:00','Frecciarossa Roma Termini → Napoli Centrale','','Arrive 10:10.', 45),
+        e('train','10:40','Campania Express Napoli Centrale → Sorrento','','Arrive 11:45. Hotel Plaza — 3 min from the station.')
+      ],
+      '2026-10-02': [
+        e('activity','09:00','Circumvesuviana to Pompei Scavi','','30 min ride, site opens 09:00, allow 3 hours. Capri ferry (25 min from Marina Piccola) is optional — two nights covers one or the other, not both comfortably.')
+      ],
+      '2026-10-03': [
+        e('taxi','06:30','Curreri coach: Sorrento Piazza Tasso → Naples Capodichino','','Arrives 07:50. Tightest morning of the trip — leave the hotel by 06:15.', 45),
+        e('flight','09:45','Naples → Zürich (easyJet/SWISS)','','Arrive ZRH 11:35. Separate ticket from the Etihad leg — leave at least 4 hours at Zürich for the connection.', 150),
+        e('flight','','Zürich → Abu Dhabi → BLR (Etihad)','','Departure time not yet confirmed on the ticket — check and update once booked.')
+      ]
     };
   }
 
@@ -275,6 +327,17 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     var ids = Object.keys(trips); if(ids.length<2){ flash('Keep at least one trip'); return; }
     if(!confirm('Delete "'+active().name+'"? This cannot be undone.')) return;
     delete trips[activeId]; activeId = Object.keys(trips)[0]; renderAll(); save();
+  });
+  document.getElementById('btnReload').addEventListener('click', function(){
+    if(!confirm('Replace this trip\'s dates and day-by-day plan with the latest version? Anything you typed in yourself will be lost.')) return;
+    var fresh = defaultTrip(active().name);
+    fresh.id = activeId;
+    trips[activeId] = fresh;
+    renderAll(); save();
+    Object.keys(fresh.binder).forEach(function(iso){
+      fresh.binder[iso].forEach(function(entry){ if(entry.remind) syncEntryReminder(iso, entry); });
+    });
+    flash('Reloaded');
   });
 
   /* ---------- tabs ---------- */
@@ -370,6 +433,55 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     });
   }
 
+  /* ---------- Telegram reminders (shared queue with the main tracker) ---------- */
+  // Same bot, same Netlify function, same owner chat — this just adds travel
+  // entries into the queue the tracker already polls every 5 minutes. Tagged
+  // tg_travel_<entryId> so it can never touch an Orders reminder.
+  var OWNER_CHAT_ID = "8632288596";
+  var DEFAULT_LEAD = {flight:180, train:45, taxi:15, activity:30, hotel:30, other:30};
+
+  async function dbAPI(action, extra){
+    try{
+      var r = await fetch('/.netlify/functions/db', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(Object.assign({action:action, user:'main'}, extra||{}))
+      });
+      return await r.json();
+    }catch(e){ return {ok:false, error:String(e)}; }
+  }
+
+  async function syncEntryReminder(dateISO, entry){
+    var tag = 'tg_travel_' + entry.id;
+    var res = await dbAPI('getPortfolio', {key:'tg_scheduled'});
+    var list = (res && res.ok && res.data && Array.isArray(res.data.scheduled)) ? res.data.scheduled : [];
+    list = list.filter(function(m){ return m.id !== tag; });
+
+    if(entry.remind && entry.time){
+      var when = fromISO(dateISO);
+      var parts = entry.time.split(':');
+      when.setHours(parseInt(parts[0],10)||0, parseInt(parts[1],10)||0, 0, 0);
+      when.setMinutes(when.getMinutes() - (Number(entry.remindMin)||0));
+      list.push({
+        id: tag,
+        text: (TYPE_ICON[entry.type]||'📄') + ' <b>' + esc(entry.title||'Reminder') + '</b>' + (entry.note? '\n'+esc(entry.note) : ''),
+        chatIds: [OWNER_CHAT_ID],
+        when: when.toISOString(),
+        repeat: 'once',
+        entryId: entry.id, owner: 'main',
+        created: new Date().toISOString()
+      });
+    }
+    await dbAPI('savePortfolio', {key:'tg_scheduled', data:{scheduled:list}});
+  }
+
+  async function cancelEntryReminder(entry){
+    var tag = 'tg_travel_' + entry.id;
+    var res = await dbAPI('getPortfolio', {key:'tg_scheduled'});
+    var list = (res && res.ok && res.data && Array.isArray(res.data.scheduled)) ? res.data.scheduled : [];
+    list = list.filter(function(m){ return m.id !== tag; });
+    await dbAPI('savePortfolio', {key:'tg_scheduled', data:{scheduled:list}});
+  }
+
   /* ---------- binder render ---------- */
   var TYPE_ICON = {flight:'✈️', train:'🚆', hotel:'🏨', taxi:'🚕', activity:'📍', other:'📄'};
 
@@ -391,13 +503,17 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     var html = days.map(function(iso){
       var entries = (t.binder[iso] || []).slice().sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); });
       var entryHtml = entries.length ? entries.map(function(e){
+        var bellOn = !!e.remind;
+        var bellTitle = e.time ? (bellOn ? (e.remindMin||0)+' min before, via Telegram — tap to turn off' : 'Remind me before this, via Telegram') : 'Add a time first to set a reminder';
         return '<div class="entry">' +
           '<div class="etype">'+ (TYPE_ICON[e.type]||'📄') +'</div>' +
           '<div class="ebody">' +
             '<div class="etitle">'+esc(e.title||'Untitled')+'</div>' +
             '<div class="emeta">'+ (e.time?esc(e.time)+' · ':'') + (e.ref?'Ref '+esc(e.ref):'') +'</div>' +
             (e.note?'<div class="enote">'+esc(e.note)+'</div>':'') +
+            (bellOn ? '<div class="enote" style="color:var(--go)">🔔 Telegram '+ (e.remindMin||0) +' min before</div>' : '') +
           '</div>' +
+          '<button class="ebell" data-day="'+iso+'" data-eid="'+e.id+'" title="'+esc(bellTitle)+'" '+(e.time?'':'disabled')+'>'+(bellOn?'🔔':'🔕')+'</button>' +
           '<button class="edel" data-day="'+iso+'" data-eid="'+e.id+'">✕</button>' +
         '</div>';
       }).join('') : '<div class="empty">Nothing added yet.</div>';
@@ -415,6 +531,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
             '<input type="text" class="f-ref ae-ref" placeholder="Confirmation / PNR">' +
           '</div>' +
           '<div class="row"><textarea class="ae-note" placeholder="Address, notes…"></textarea></div>' +
+          '<label class="remrow"><input type="checkbox" class="ae-remind"> 🔔 Remind me <input type="number" class="ae-remindmin" value="30" min="0"> min before (Telegram)</label>' +
           '<button class="mini ae-add">Add to '+fmt(iso).split(' ').slice(0,2).join(' ')+'</button>' +
         '</div>' +
       '</div>';
@@ -424,27 +541,57 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     Array.prototype.forEach.call(document.querySelectorAll('.edel'), function(btn){
       btn.addEventListener('click', function(){
         var day = btn.getAttribute('data-day'), eid = btn.getAttribute('data-eid');
+        var doomed = (t.binder[day]||[]).find(function(e){return e.id===eid});
         t.binder[day] = (t.binder[day]||[]).filter(function(e){return e.id!==eid});
         renderBinder(); save();
+        if(doomed && doomed.remind) cancelEntryReminder(doomed);
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.ebell'), function(btn){
+      if(btn.disabled) return;
+      btn.addEventListener('click', function(){
+        var day = btn.getAttribute('data-day'), eid = btn.getAttribute('data-eid');
+        var entry = (t.binder[day]||[]).find(function(e){return e.id===eid});
+        if(!entry) return;
+        if(entry.remind){
+          entry.remind = false;
+          renderBinder(); save();
+          cancelEntryReminder(entry);
+        } else {
+          var def = DEFAULT_LEAD[entry.type] || 30;
+          var mins = prompt('Remind how many minutes before '+(entry.time||'this')+'?', def);
+          if(mins===null) return;
+          entry.remind = true; entry.remindMin = Math.max(0, parseInt(mins,10)||0);
+          renderBinder(); save();
+          syncEntryReminder(day, entry);
+        }
       });
     });
     Array.prototype.forEach.call(document.querySelectorAll('.day'), function(dayEl){
       var iso = dayEl.getAttribute('data-day');
+      var typeSel = dayEl.querySelector('.ae-type');
+      var minInp = dayEl.querySelector('.ae-remindmin');
+      typeSel.addEventListener('change', function(){ minInp.value = DEFAULT_LEAD[typeSel.value] || 30; });
       var btn = dayEl.querySelector('.ae-add');
       btn.addEventListener('click', function(){
         var title = dayEl.querySelector('.ae-title').value.trim();
         if(!title){ dayEl.querySelector('.ae-title').focus(); return; }
+        var wantsRemind = dayEl.querySelector('.ae-remind').checked;
+        var time = dayEl.querySelector('.ae-time').value;
         var entry = {
           id: uid(),
-          type: dayEl.querySelector('.ae-type').value,
-          time: dayEl.querySelector('.ae-time').value,
+          type: typeSel.value,
+          time: time,
           title: title,
           ref: dayEl.querySelector('.ae-ref').value.trim(),
-          note: dayEl.querySelector('.ae-note').value.trim()
+          note: dayEl.querySelector('.ae-note').value.trim(),
+          remind: wantsRemind && !!time,
+          remindMin: Math.max(0, parseInt(minInp.value,10)||0)
         };
         t.binder[iso] = t.binder[iso] || [];
         t.binder[iso].push(entry);
         renderBinder(); save();
+        if(entry.remind) syncEntryReminder(iso, entry);
       });
     });
   }
