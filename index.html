@@ -4339,6 +4339,31 @@ function TravelPlanner({ onClose }) {
     comfort: true
   });
 
+  // The Sep-Oct 2026 trip, ready to load in one tap. Costs are totals for three.
+  const swissTrip = () => ({
+    id: "tr_" + Date.now(),
+    name: "Switzerland & Italy 2026",
+    kind: "leisure",
+    start: "2026-09-25",
+    pax: 3,
+    daily: 3600,
+    currency: "\u20B9",
+    origin: { city:"Bangalore", code:"BLR" },
+    stops: [
+      { city:"Zurich", code:"ZRH", nights:1, flight:126526, hotel:16000, booked:false, ref:"", actual:0,
+        note:"Etihad BLR 10:00 via Abu Dhabi, land ZRH 18:55. Round-trip fare, covers the return home. Airport train to Zurich HB 13 min, then 8 min walk to Hotel Alexander, Niederdorf. Ask for a triple room." },
+      { city:"Venice", code:"VCE", nights:2, flight:11500, hotel:32000, booked:false, ref:"", actual:0,
+        note:"26 Sep by train: EuroCity Zurich HB 09:09 to Milano Centrale 12:50, change 75 min, Frecciarossa 14:05 to Venezia Santa Lucia 16:22. Vaporetto Line 1 or 2 to the hotel. Hotel Antico Trovatore, San Marco. Sun: Basilica 09:30, Doge's Palace 11:00 timed entry, Rialto, Murano by Line 12. Tickets 24,000." },
+      { city:"Rome", code:"FCO", nights:3, flight:13000, hotel:48000, booked:false, ref:"", actual:0,
+        note:"28 Sep Frecciarossa Venice 09:25 direct to Roma Termini 13:12. Yes Hotel is 2 min walk from Via Marsala exit. Tue: Metro B Termini to Colosseo, 2 stops, 08:30 timed entry, Forum and Palatine same ticket. Wed: Metro A to Ottaviano, Vatican Museums open 08:00, allow 3 hours, then St Peter's. Tickets 21,600. Book Colosseum and Vatican the day the visa lands." },
+      { city:"Sorrento", code:"NAP", nights:2, flight:9500, hotel:32000, booked:false, ref:"", actual:0,
+        note:"1 Oct Frecciarossa Termini 09:00 to Napoli Centrale 10:10, then Campania Express 10:40 to Sorrento 11:45. Hotel Plaza, 3 min from the station. Fri: Circumvesuviana to Pompei Scavi 30 min, site opens 09:00, allow 3 hours. Capri ferry 25 min from Marina Piccola is optional. Two nights covers Pompeii or Capri, not both comfortably." }
+    ],
+    ret: { flight:16000, booked:false, ref:"", actual:0,
+      note:"3 Oct Curreri coach Sorrento Piazza Tasso 06:30 to Naples Capodichino 07:50. easyJet or SWISS NAP 09:45 to ZRH 11:35, then the Etihad return leg to Bangalore. Separate tickets, so leave at least 4 hours at Zurich." },
+    comfort: true
+  });
+
   const [trips,setTrips]=useState([]);
   const [cur,setCur]=useState(null);
   const [busy,setBusy]=useState("");
@@ -4946,6 +4971,15 @@ function TravelPlanner({ onClose }) {
           {trips.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
         <button onClick={()=>{setCur(blankTrip());setOpenEdit({});}} style={ghost}>+ New</button>
+        <button onClick={async()=>{
+            if(!trips.some(t=>t.id===cur.id)){ setCur(blankTrip()); setOpenEdit({}); return; }
+            if(!window.confirm("Delete \""+cur.name+"\"? This cannot be undone.")) return;
+            const list=trips.filter(t=>t.id!==cur.id);
+            await persist(list);
+            setCur(list.length?list[0]:blankTrip()); setOpenEdit({});
+            setMsg("Deleted"); setTimeout(()=>setMsg(""),2500);
+          }} style={ghost}>Delete trip</button>
+        <button onClick={()=>{ setCur(swissTrip()); setOpenEdit({}); }} style={ghost}>Load Swiss/Italy</button>
       </div>
 
       <div style={{background:"#f7faf7",borderRadius:10,padding:"11px 12px",marginBottom:11}}>
