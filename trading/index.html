@@ -111,8 +111,9 @@ h4{font-size:13px;margin:12px 0 6px;color:var(--blue)}
 <!-- AIM SIGNALS -->
 <div class="page" id="page-signals">
   <div class="status">AIM rules: single cash pool · sell only if profitable · 5% midpoint trigger to avoid overtrading</div>
+  <div id="signals-gate"></div>
   <div id="signals-list"></div>
-  <button onclick="runAIM()">🎯 Calculate AIM Signals</button>
+  <button id="btn-run-aim" onclick="runAIM()">🎯 Calculate AIM Signals</button>
   <button class="sec" onclick="downloadAIMReport()">⬇ Download Report (Sells first, Buys next)</button>
 </div>
 
@@ -206,7 +207,8 @@ function defaults(){
       {sym:"SHK", qty:0, avg:0, pc:0},
       {sym:"VEDL", qty:0, avg:0, pc:0}
     ],
-    cash: 0, prices: {}, settings: {client:"FS0303", key:"", secret:"", safe:10, trigger:5}
+    cash: 0, prices: {}, settings: {client:"FS0303", key:"", secret:"", safe:10, trigger:5},
+    lastAimRun: null
   };
 }
 var S = load();
@@ -219,6 +221,7 @@ function showPage(p){
   document.getElementById("page-"+p).classList.add("active");
   var tabs = document.querySelectorAll(".tab");
   for(var j=0;j<tabs.length;j++) tabs[j].classList.toggle("active", tabs[j].getAttribute("data-page")===p);
+  if(p==="signals" && typeof renderSignalsGate==="function") renderSignalsGate();
 }
 
 // ───────────────────────── HELPERS ─────────────────────────
@@ -414,7 +417,57 @@ function aimSignal(h, ltp, safePct, trigPct){
 }
 
 var LAST_SIGNALS = [];
-function runAIM(){
+
+// ───────────────────────── DISCIPLINE LOCK ─────────────────────────
+// AIM only works if it's run rarely and mechanically — checking daily invites
+// exactly the emotional overtrading the algorithm exists to prevent. This
+// blocks a fresh calculation for 14 days after the last one. Stored in S, so
+// it's saved to the same cloud pool as everything else — clearing the
+// browser doesn't reset it. An override exists (a real emergency shouldn't
+// leave you locked out), but it takes a deliberate second tap, not a reflex.
+var AIM_LOCK_DAYS = 14;
+function aimLockStatus(){
+  if(!S.lastAimRun) return {locked:false};
+  var last = new Date(S.lastAimRun);
+  var next = new Date(last.getTime() + AIM_LOCK_DAYS*86400000);
+  var msLeft = next.getTime() - Date.now();
+  if(msLeft <= 0) return {locked:false};
+  var daysLeft = Math.ceil(msLeft/86400000);
+  return {locked:true, next:next, daysLeft:daysLeft, last:last};
+}
+function renderSignalsGate(){
+  var gate = document.getElementById("signals-gate");
+  var btn = document.getElementById("btn-run-aim");
+  if(!gate || !btn) return;
+  var st = aimLockStatus();
+  if(!st.locked){
+    gate.innerHTML = S.lastAimRun
+      ? '<div class="muted">Last run ' + new Date(S.lastAimRun).toLocaleDateString("en-IN") + ' · discipline check clear, run whenever you\'re ready</div>'
+      : '';
+    btn.disabled = false;
+    btn.textContent = "🎯 Calculate AIM Signals";
+    document.getElementById("signals-list").innerHTML = "";
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = "🔒 Locked for " + st.daysLeft + " more day" + (st.daysLeft===1?"":"s");
+  gate.innerHTML = '<div class="card">'
+    + '<div class="row"><strong>🔒 Discipline lock</strong></div>'
+    + '<div class="muted">Last run ' + st.last.toLocaleDateString("en-IN") + '. AIM is built on infrequent, mechanical review — next check-in unlocks ' + st.next.toLocaleDateString("en-IN") + ' (' + st.daysLeft + ' day' + (st.daysLeft===1?"":"s") + ').</div>'
+    + '<button class="sec" onclick="overrideAimLock()" style="margin-top:8px">I understand the risk — check anyway</button>'
+    + '</div>';
+  document.getElementById("signals-list").innerHTML = "";
+}
+function overrideAimLock(){
+  if(!confirm("Checking early defeats the point of AIM's discipline — it works because you don't react to every price move.\n\nRun the signals anyway?")) return;
+  runAIM(true);
+}
+
+function runAIM(override){
+  if(!override){
+    var st = aimLockStatus();
+    if(st.locked){ renderSignalsGate(); return; }
+  }
   LAST_SIGNALS = [];
   var el = document.getElementById("signals-list");
   el.innerHTML = '<div class="status">📡 Fetching prices and calculating...</div>';
@@ -440,7 +493,9 @@ function runAIM(){
         + '</div>';
       done++;
       if(done===pending.length){
+        S.lastAimRun = new Date().toISOString();
         save(S);
+        renderSignalsGate();
         el.innerHTML = html + '<div class="muted">Execute manually in Zerodha Kite. After executing, update holdings + cash in Portfolio tab.</div>';
       }
     });
