@@ -6,13 +6,17 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 const OWNER = "main"; // scheduled messages are stored under the main user
 const RESEND_KEY = process.env.RESEND_API_KEY || "";
-const MAIL_FROM = process.env.MAIL_FROM || "orders@onamagarbathi.com";
+// No hardcoded fallback here: Netlify's secrets scanner fails the build when a
+// configured env var's literal value appears in committed code. MAIL_FROM is
+// set in Netlify env vars; if it is ever missing, sendMail no-ops (see below)
+// and the Telegram leg still goes out.
+const MAIL_FROM = process.env.MAIL_FROM || "";
 
 // Email leg of a reminder. Kept deliberately simple and best-effort: a failed
 // email must never stop the Telegram leg from going out.
 function sendMail(to, subject, body) {
   return new Promise((resolve) => {
-    if (!RESEND_KEY) return resolve(false);
+    if (!RESEND_KEY || !MAIL_FROM) return resolve(false);
     const payload = JSON.stringify({
       from: MAIL_FROM,
       to: [to],
