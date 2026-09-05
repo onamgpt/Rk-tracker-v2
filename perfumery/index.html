@@ -121,7 +121,7 @@ var KEY = "perfumery_v1";
 var LS  = "rk_perfumery_v1";
 
 var S = { materials:[], formulas:[], quotes:[], plans:[] };
-var tab = "dash", dirty = false, editing = null;
+var tab = "dash", dirty = false, editing = null, seedNote = "";
 
 function uid(p){ return p + Math.random().toString(36).slice(2,9); }
 function today(){ return new Date().toISOString().slice(0,10); }
@@ -254,7 +254,7 @@ function render(){
     return '<button class="tab'+(tab===x[0]?' on':'')+'" data-t="'+x[0]+'">'+esc(x[1])+'</button>';
   }).join("");
   Array.prototype.forEach.call(t.querySelectorAll(".tab"), function(b){
-    b.onclick = function(){ tab = b.getAttribute("data-t"); editing = null; render(); window.scrollTo(0,0); };
+    b.onclick = function(){ tab = b.getAttribute("data-t"); editing = null; seedNote = ""; render(); window.scrollTo(0,0); };
   });
   var v = document.getElementById("view");
   ({dash:vDash, mat:vMat, form:vForm, quote:vQuote, cost:vCost, mrp:vMrp, ai:vAi}[tab])(v);
@@ -335,8 +335,9 @@ function vMat(v){
     return !q || (m.name+" "+(m.code||"")+" "+(m.cas||"")).toLowerCase().indexOf(q)>=0;
   });
   var html = '<div class="bar"><button class="btn" id="add">+ Material</button>'+
+    '<button class="btn sec" id="seed">Import rates sheet</button>'+
     '<input id="q" placeholder="Search name, code, CAS" value="'+esc(window.__mq||"")+'" style="max-width:260px">'+
-    '</div>';
+    '</div><div id="seedmsg">'+seedNote+'</div>';
   if(!list.length){
     html += '<div class="empty">'+(S.materials.length?"Nothing matches that.":"No materials yet.")+'</div>';
   }else{
@@ -357,6 +358,36 @@ function vMat(v){
   v.innerHTML = html;
   document.getElementById("add").onclick = function(){
     editing = {type:"mat", d:{id:uid("m_"), uom:"kg", hist:[]}}; render();
+  };
+  document.getElementById("seed").onclick = function(){
+    seedNote = '<div class="note">Loading…</div>';
+    document.getElementById("seedmsg").innerHTML = seedNote;
+    fetch("/perfumery/materials-seed.json").then(function(r){ return r.json(); })
+      .then(function(rows){
+        var have = {};
+        S.materials.forEach(function(m){ if(m.name) have[m.name.trim().toLowerCase()] = true; });
+        var added = 0, skipped = 0;
+        rows.forEach(function(r){
+          var k = String(r.name||"").trim().toLowerCase();
+          if(!k) return;
+          if(have[k]){ skipped++; return; }
+          have[k] = true;
+          // Fresh id each time so a re-import can never collide with existing rows.
+          var copy = JSON.parse(JSON.stringify(r));
+          copy.id = uid("m_");
+          S.materials.push(copy);
+          added++;
+        });
+        if(added) push();
+        seedNote = '<div class="good">Added '+added+' material'+(added===1?'':'s')+
+          (skipped?', skipped '+skipped+' already present':'')+
+          '. Rates are from your Drive rates sheet — check a few before trusting the costing.</div>';
+        render();
+      })
+      .catch(function(e){
+        seedNote = '<div class="flag">Could not load the list: '+esc(e.message||"failed")+'</div>';
+        render();
+      });
   };
   var qi = document.getElementById("q");
   qi.oninput = function(){ window.__mq = qi.value; var p = qi.selectionStart; render();
