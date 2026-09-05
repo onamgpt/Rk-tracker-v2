@@ -128,6 +128,21 @@ h4{font-size:13px;margin:12px 0 6px;color:var(--blue)}
 
 <!-- SCREENER -->
 <div class="page" id="page-screener">
+  <div class="card">
+    <h3>🛡 AIM Quality Screen v3 — protect first, then grow</h3>
+    <div class="muted">Three stages: (1) behaviour across the whole market — proven bounce-back after ≥20% falls, healthy volatility, liquidity, trend; (2) deep 5-year history on the best 150; (3) fundamentals &amp; protection — SEC EDGAR: Altman Z, Piotroski F, debt, cash-flow quality, revenue growth. You get the top 20 with the reason for each, and an audit of what was cut.</div>
+    <div class="field"><label>Universe</label>
+      <select id="aim3-universe">
+        <option value="quick">Quick — 240 US majors (~3 min)</option>
+        <option value="full">FULL US market — every NASDAQ + NYSE stock (~15 min)</option>
+      </select>
+    </div>
+    <button onclick="AIM3.run(document.getElementById('aim3-universe').value)">🛡 Run Quality Screen</button>
+    <button class="sec" onclick="AIM3.stop()">⏹ Stop</button>
+    <div id="aim3-status" class="status" style="margin-top:8px"></div>
+    <div id="aim3-results" style="margin-top:10px"></div>
+  </div>
+  <details style="margin-top:12px"><summary class="muted">Legacy v2 quick scan (price-only)</summary>
   <div class="status">v2 score: sweet spot 10–40% of 52wk range + healthy volatility. Crashed stocks (1yr < −40%) excluded. WDC-style winners hide in the full market.</div>
   <div class="card">
     <div class="field"><label>Universe</label>
@@ -141,6 +156,7 @@ h4{font-size:13px;margin:12px 0 6px;color:var(--blue)}
   <button onclick="runScreener()">🔍 Scan US Stocks</button>
   <button class="sec" onclick="SCR_CANCEL=true">⏹ Stop Scan</button>
   <div id="screener-results" style="margin-top:10px"></div>
+  </details>
 </div>
 
 <!-- SETTINGS -->
@@ -709,5 +725,31 @@ function saveSettings(){
   renderHoldings();
 })();
 </script>
+
+<script>
+// ---- AIM Quality Screener v3 host adapter ----
+window.AIM_HOST = {
+  market: "US",
+  getUniverse: function(kind){ return kind==="full" ? getFullUSList() : Promise.resolve(NIFTY.slice()); },
+  fetchBars: function(sym, range){
+    return fetch("/.netlify/functions/yahoo?action=history&symbol=" + encodeURIComponent(sym + "") + "&range=" + range)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var res = d.chart && d.chart.result && d.chart.result[0]; if(!res) return null;
+        var q = res.indicators && res.indicators.quote && res.indicators.quote[0]; if(!q) return null;
+        var closes = q.close || [], vols = q.volume || [], out = [];
+        for(var i=0;i<closes.length;i++){ if(closes[i]!=null) out.push({close: closes[i], volume: vols[i]||0}); }
+        return out;
+      }).catch(function(){ return null; });
+  },
+  fmtMoney: function(n){ return inr(n); },
+  addHolding: function(sym, ltp){
+    try{ document.getElementById("h-sym").value = sym; document.getElementById("h-avg").value = ltp.toFixed(2); document.getElementById("h-qty").value = ""; }catch(e){}
+    showPage("portfolio"); alert(sym + " prefilled in Add Holding at " + ltp.toFixed(2) + " — enter quantity after you buy in your broker.");
+  }
+};
+</script>
+<script src="/trading/aim-screener.js"></script>
+<script src="/trading/aim-screener-run.js"></script>
 </body>
 </html>
