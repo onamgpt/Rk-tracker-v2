@@ -2,6 +2,15 @@
   command = ""
   functions = "netlify/functions"
 
+# Netlify's secrets scanner was failing the build on APPS_SCRIPT_ID.
+# That value is a Google Apps Script *web app deployment URL* — an endpoint,
+# not a credential. It is necessarily present in client-side index.html and is
+# therefore public regardless. Excluding this one key only; every real
+# credential (ANTHROPIC_API_KEY, GITHUB_TOKEN, GOOGLE_APPS_SCRIPT_REFRESH_TOKEN,
+# Google_oauth_client_secret) remains scanned.
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "APPS_SCRIPT_ID"
+
 [[headers]]
   for = "/*"
   [headers.values]
