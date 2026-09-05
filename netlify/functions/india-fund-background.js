@@ -28,6 +28,15 @@ export default async (req) => {
   };
   const job = async (o) => kvWrite("pf_in_fund_job", Object.assign({ at: new Date().toISOString() }, o));
 
+
+  const tgNotify = async (text) => {
+    try {
+      const bot = Netlify.env.get("TELEGRAM_BOT_TOKEN"), chat = Netlify.env.get("TELEGRAM_CHAT_ID");
+      if (!bot || !chat) return;
+      await fetch("https://api.telegram.org/bot" + bot + "/sendMessage", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chat, text: text, parse_mode: "HTML" }) });
+    } catch (e) {}
+  };
+
   let symbols = [];
   try { const b = await req.json(); symbols = Array.isArray(b && b.symbols) ? b.symbols.map(s => String(s).toUpperCase().trim()).filter(Boolean) : []; } catch (e) {}
   symbols = symbols.slice(0, 250);
@@ -71,9 +80,11 @@ export default async (req) => {
     }
     await kvWrite("pf_in_fundamentals", { updatedAt: new Date().toISOString(), data: cache.data });
     await job({ state: "done", total: symbols.length, done, errors, surveillance: surv.ok ? "ok" : "unavailable", survCount: surv.ok ? Object.keys(surv.flags || {}).length : 0 });
+    await tgNotify("🇮🇳 <b>India protection stage done</b>\nNSE surveillance: " + (surv.ok ? ("ok — " + Object.keys(surv.flags || {}).length + " flagged securities") : "UNAVAILABLE (check ASM/GSM manually)") + "\nFundamentals: " + done + "/" + symbols.length + " · errors " + errors);
     return new Response(JSON.stringify({ ok: true, done, errors }), { status: 200 });
   } catch (e) {
     await job({ state: "error", error: String(e && e.message || e) });
+    await tgNotify("🇮🇳 <b>India protection stage FAILED</b>\n" + String(e && e.message || e).slice(0, 200));
     return new Response(JSON.stringify({ ok: false, error: String(e && e.message || e) }), { status: 200 });
   }
 };
