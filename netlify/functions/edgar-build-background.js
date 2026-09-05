@@ -14,6 +14,15 @@ export default async (req) => {
   const UA = "RKTrading/1.0 (onamagarbathi@gmail.com)";
   const sbH = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json" };
 
+
+  const tgNotify = async (text) => {
+    try {
+      const bot = Netlify.env.get("TELEGRAM_BOT_TOKEN"), chat = Netlify.env.get("TELEGRAM_CHAT_ID");
+      if (!bot || !chat) return;
+      await fetch("https://api.telegram.org/bot" + bot + "/sendMessage", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chat, text: text, parse_mode: "HTML" }) });
+    } catch (e) {}
+  };
+
   let force = false;
   try { const b = await req.json(); force = !!(b && b.force); } catch (e) {}
 
@@ -132,9 +141,11 @@ export default async (req) => {
       body: JSON.stringify({ owner: "main", k: "pf_us_fundamentals", v: payload })
     });
     await status({ state: "done", count: payload.count, frames: payload.frames });
+    await tgNotify("🇺🇸 <b>US fundamentals table built</b>\n" + payload.count + " companies from SEC EDGAR · frames " + FY + " / " + inst[0] + "\nCached 7 days — the USA screener's quality stage is now instant.");
     return new Response(JSON.stringify({ ok: true, count: payload.count }), { status: 200 });
   } catch (e) {
     await status({ state: "error", error: String(e && e.message || e) });
+    await tgNotify("🇺🇸 <b>US fundamentals build FAILED</b>\n" + String(e && e.message || e).slice(0, 200));
     return new Response(JSON.stringify({ ok: false, error: String(e && e.message || e) }), { status: 200 });
   }
 };
