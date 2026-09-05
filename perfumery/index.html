@@ -185,6 +185,49 @@ function push(){
 /* ---------------------------------------------------------------
    Costing. One place, so every tab agrees on the numbers.
 ----------------------------------------------------------------*/
+function norm(s){
+  return String(s==null?"":s).toLowerCase()
+    .replace(/[^a-z0-9%]+/g," ").replace(/\s+/g," ").trim();
+}
+function aliasList(m){
+  return String(m.alias||"").split(",").map(function(x){ return x.trim(); }).filter(Boolean);
+}
+// Supplier paperwork rarely uses the name you filed the material under.
+// Try exact, then known aliases, then a containment match as a last resort.
+function findMaterial(name){
+  var n = norm(name); if(!n) return null;
+  var i, m, j;
+  for(i=0;i<S.materials.length;i++) if(norm(S.materials[i].name)===n) return S.materials[i];
+  for(i=0;i<S.materials.length;i++){
+    m = S.materials[i];
+    var al = aliasList(m);
+    for(j=0;j<al.length;j++) if(norm(al[j])===n) return m;
+  }
+  var best = null;
+  for(i=0;i<S.materials.length;i++){
+    m = S.materials[i];
+    var cands = [norm(m.name)].concat(aliasList(m).map(norm));
+    for(j=0;j<cands.length;j++){
+      var c = cands[j];
+      if(c.length>=5 && (c.indexOf(n)>=0 || n.indexOf(c)>=0)){
+        if(!best || c.length>best.len) best = {m:m, len:c.length};
+      }
+    }
+  }
+  return best ? best.m : null;
+}
+// Remember a supplier's wording so the next inward matches on its own.
+function learnAlias(m, heardAs){
+  if(!m || !heardAs) return false;
+  var n = norm(heardAs);
+  if(!n || n === norm(m.name)) return false;
+  var al = aliasList(m);
+  for(var i=0;i<al.length;i++) if(norm(al[i])===n) return false;
+  al.push(String(heardAs).trim());
+  m.alias = al.join(", ");
+  return true;
+}
+
 function matById(id){
   for(var i=0;i<S.materials.length;i++) if(S.materials[i].id===id) return S.materials[i];
   return null;
@@ -332,7 +375,7 @@ function vMat(v){
   if(editing && editing.type==="mat") return matForm(v);
   var q = (window.__mq||"").toLowerCase();
   var list = S.materials.filter(function(m){
-    return !q || (m.name+" "+(m.code||"")+" "+(m.cas||"")).toLowerCase().indexOf(q)>=0;
+    return !q || (m.name+" "+(m.code||"")+" "+(m.cas||"")+" "+(m.alias||"")).toLowerCase().indexOf(q)>=0;
   });
   var html = '<div class="bar"><button class="btn" id="add">+ Material</button>'+
     '<button class="btn sec" id="seed">Import rates sheet</button>'+
@@ -347,6 +390,7 @@ function vMat(v){
         var lowFlag = num(m.reorder)>0 && num(m.stock)<num(m.reorder);
         return '<tr><td><b>'+esc(m.name)+'</b>'+(m.code?'<span class="pill">'+esc(m.code)+'</span>':'')+
           (lowFlag?'<span class="pill">low</span>':'')+
+          (aliasList(m).length?'<span class="pill">'+aliasList(m).length+' alias</span>':'')+
           (m.cas?'<div class="note" style="margin:2px 0">CAS '+esc(m.cas)+'</div>':'')+'</td>'+
           '<td>'+esc(m.cat||"—")+'</td>'+
           '<td class="n">'+num(m.stock)+' '+esc(m.uom||"kg")+'</td>'+
@@ -421,6 +465,8 @@ function matForm(v){
     '<div class="row"><div><label>Rate per '+esc(d.uom||"kg")+' (₹)</label>'+
       '<input id="f_rate" type="number" step="any" value="'+esc(d.rate||"")+'"></div>'+
     '<div><label>Supplier</label><input id="f_supplier" value="'+esc(d.supplier||"")+'"></div></div>'+
+    '<label>Also known as <span class="pill">supplier names, synonyms — comma separated</span></label>'+
+    '<input id="f_alias" value="'+esc(d.alias||"")+'" placeholder="Methyl dihydrojasmonate, MDJ">'+
     '<label>Notes / substitutes</label><textarea id="f_notes">'+esc(d.notes||"")+'</textarea>'+
     (hist.length ? '<h3>Rate history</h3><div class="scroll"><table><tr><th>Date</th><th class="n">Rate</th><th>Source</th></tr>'+
       hist.map(function(h){ return '<tr><td>'+esc(h.d)+'</td><td class="n">'+money(h.rate)+'</td><td>'+esc(h.src||"manual")+'</td></tr>'; }).join("")+
@@ -435,6 +481,7 @@ function matForm(v){
     d.name = g("f_name").trim(); d.code = g("f_code").trim(); d.cas = g("f_cas").trim();
     d.cat = g("f_cat"); d.uom = g("f_uom"); d.stock = num(g("f_stock"));
     d.reorder = num(g("f_reorder")); d.lead = g("f_lead"); d.supplier = g("f_supplier").trim();
+    d.alias = g("f_alias").trim();
     d.notes = g("f_notes");
     if(!d.name){ alert("Name is needed."); return; }
     d.hist = d.hist || [];
@@ -684,9 +731,10 @@ function vQuote(v){
     res.innerHTML = '<h3>Review</h3><div class="scroll"><table><tr><th>Material</th><th>Pack</th>'+
       '<th class="n">Rate</th><th>Match to</th></tr>'+
       items.map(function(it,i){
-        var guess = S.materials.filter(function(m){
-          return m.name && it.name && m.name.toLowerCase().indexOf(String(it.name).toLowerCase().slice(0,8))>=0;
-        })[0];
+        var guess = findMaterial(it.name);
+        // Write the guess back into the data, not just the markup — otherwise an
+        // auto-matched row looks selected but is skipped when applying.
+        if(guess && !it.mid) it.mid = guess.id;
         return '<tr><td>'+esc(it.name||"?")+'</td><td>'+esc(it.pack||"—")+'</td>'+
           '<td class="n"><input data-i="'+i+'" data-k="rate" type="number" step="any" value="'+
             esc(it.rate==null?"":it.rate)+'" style="width:100px"></td>'+
@@ -706,7 +754,7 @@ function vQuote(v){
     document.getElementById("q_apply").onclick = function(){
       var sup = document.getElementById("q_sup").value.trim();
       var dt  = document.getElementById("q_date").value || today();
-      var n = 0;
+      var n = 0, learned = 0;
       items.forEach(function(it){
         if(!it.mid || !(num(it.rate)>0)) return;
         var m = matById(it.mid); if(!m) return;
@@ -714,11 +762,13 @@ function vQuote(v){
         m.hist.push({d:dt, rate:num(it.rate), src:sup||"quote"});
         m.rate = num(it.rate);
         if(sup) m.supplier = sup;
+        if(learnAlias(m, it.name)) learned++;
         n++;
       });
       S.quotes.push({id:uid("q_"), supplier:sup, date:dt, items:items});
       push();
-      alert(n+" rate(s) updated. Formula costs have moved with them.");
+      alert(n+" rate(s) updated. Formula costs have moved with them."+
+        (learned ? "\n\n"+learned+" supplier name(s) remembered — next time they will match on their own." : ""));
       render();
     };
   }
