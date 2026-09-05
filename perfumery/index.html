@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Perfumery — Onam Agarbathi</title>
+<style>
+  :root{
+    --paper:#F4F3EF; --card:#FFF; --ink:#16181C; --muted:#6A6F76; --faint:#9BA1A8;
+    --rule:#DEDCD6; --rail:#B3ADA2; --signal:#C8102E; --green:#1a5a3a;
+    --ok:#1F7A4D; --okBg:#E8F3EC; --warnBg:#FBF3DD; --warnLine:#EBDFB8; --warnInk:#5C4A15;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased;padding:0 0 80px}
+  .wrap{max-width:820px;margin:0 auto;padding:0 14px}
+  a{color:var(--green)}
+
+  .top{padding:12px 0 0;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .back{color:var(--muted);text-decoration:none;font-size:15px;padding:6px 0}
+  .back:hover{color:var(--ink)}
+  .sync{font-size:12px;color:var(--faint)}
+
+  .hero{padding:14px 0 16px;border-bottom:1px solid var(--rule)}
+  .hero h1{margin:0;font-size:27px;line-height:1.12;letter-spacing:-.02em;font-weight:640}
+  .hero p{margin:7px 0 0;color:var(--muted);font-size:14px}
+
+  .tabs{display:flex;gap:6px;overflow-x:auto;padding:12px 0;border-bottom:1px solid var(--rule);
+    -webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{background:none;border:1px solid var(--rule);color:var(--muted);font:inherit;font-size:13px;
+    padding:7px 13px;border-radius:999px;cursor:pointer;white-space:nowrap;flex:0 0 auto}
+  .tab:hover{border-color:var(--rail);color:var(--ink)}
+  .tab.on{background:var(--green);border-color:var(--green);color:#fff}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:16px 0}
+  .c{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:12px}
+  .c .k{font-size:12px;color:var(--muted)}
+  .c .v{font-size:22px;font-weight:640;margin-top:3px;letter-spacing:-.02em}
+  .c.warn{background:var(--warnBg);border-color:var(--warnLine)}
+  .c.warn .v{color:var(--warnInk)}
+
+  h2{font-size:16px;margin:22px 0 8px;font-weight:640}
+  h3{font-size:14px;margin:16px 0 6px;font-weight:640;color:var(--muted)}
+
+  table{width:100%;border-collapse:collapse;background:var(--card);
+    border:1px solid var(--rule);border-radius:10px;overflow:hidden;font-size:14px}
+  th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--rule);vertical-align:top}
+  th{font-size:12px;color:var(--muted);font-weight:600;background:#FAF9F6}
+  tr:last-child td{border-bottom:none}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+  input,select,textarea{font:inherit;font-size:15px;padding:8px 9px;border:1px solid var(--rule);
+    border-radius:8px;background:#fff;color:var(--ink);width:100%}
+  textarea{min-height:80px;resize:vertical}
+  label{display:block;font-size:12px;color:var(--muted);margin:9px 0 3px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+  @media(max-width:560px){.row,.row3{grid-template-columns:1fr}}
+
+  button{font:inherit;cursor:pointer}
+  .btn{background:var(--green);border:1px solid var(--green);color:#fff;font-size:14px;
+    padding:9px 16px;border-radius:8px}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btn.sec{background:none;color:var(--muted);border-color:var(--rule)}
+  .btn.sec:hover{color:var(--ink);border-color:var(--rail)}
+  .btn.del{background:none;color:var(--signal);border-color:var(--rule)}
+  .btn.sm{font-size:12px;padding:5px 10px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+
+  .panel{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:14px;margin:12px 0}
+  .note{font-size:13px;color:var(--muted);margin:8px 0}
+  .flag{background:var(--warnBg);border:1px solid var(--warnLine);color:var(--warnInk);
+    padding:9px 11px;border-radius:8px;font-size:13px;margin:8px 0}
+  .good{background:var(--okBg);border:1px solid #CFE6D8;color:var(--ok);
+    padding:9px 11px;border-radius:8px;font-size:13px;margin:8px 0}
+  .draft{background:#FDF0F2;border:1px solid #F3D3D8;color:#8C1B2C;
+    padding:10px 12px;border-radius:8px;font-size:13px;margin:10px 0;font-weight:600}
+  .up{color:var(--signal)} .down{color:var(--ok)}
+  .pill{display:inline-block;font-size:11px;padding:2px 7px;border-radius:999px;
+    background:#EFEDE7;color:var(--muted);margin-left:5px}
+  .empty{color:var(--faint);font-size:14px;padding:18px 0;text-align:center}
+  pre.out{white-space:pre-wrap;font-size:13px;background:#FAF9F6;border:1px solid var(--rule);
+    border-radius:8px;padding:12px;line-height:1.55;font-family:ui-monospace,Menlo,monospace}
+  .hide{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <a class="back" href="/">← Tracker</a>
+    <span class="sync" id="sync">·</span>
+  </div>
+
+  <div class="hero">
+    <h1>Perfumery</h1>
+    <p>Formulas, materials, supplier rates and costing — one place.</p>
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+  <div id="view"></div>
+
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------------------------------------------------------------
+   Storage. Cloud through the shared db function (same surface the
+   trading and travel pages use), with a localStorage mirror so the
+   page still opens and works if the network is down.
+----------------------------------------------------------------*/
+var DB  = "/.netlify/functions/db";
+var AI  = "/.netlify/functions/claude";
+var KEY = "perfumery_v1";
+var LS  = "rk_perfumery_v1";
+
+var S = { materials:[], formulas:[], quotes:[], plans:[] };
+var tab = "dash", dirty = false, editing = null;
+
+function uid(p){ return p + Math.random().toString(36).slice(2,9); }
+function today(){ return new Date().toISOString().slice(0,10); }
+function num(v){ var n = parseFloat(v); return isFinite(n) ? n : 0; }
+function money(n){
+  if(!isFinite(n)) return "—";
+  return "₹" + n.toLocaleString("en-IN",{maximumFractionDigits:2,minimumFractionDigits:2});
+}
+function esc(s){
+  return String(s==null?"":s).replace(/[&<>"']/g,function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
+function setSync(t){ document.getElementById("sync").textContent = t; }
+
+function loadLocal(){
+  try{
+    var raw = localStorage.getItem(LS);
+    if(raw){ var d = JSON.parse(raw); if(d && typeof d === "object") merge(d); }
+  }catch(e){}
+}
+function merge(d){
+  ["materials","formulas","quotes","plans"].forEach(function(k){
+    if(Array.isArray(d[k])) S[k] = d[k];
+  });
+}
+function saveLocal(){
+  try{ localStorage.setItem(LS, JSON.stringify(S)); }catch(e){}
+}
+
+function post(url, body){
+  return fetch(url,{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(body)
+  }).then(function(r){ return r.json(); });
+}
+
+function pull(){
+  setSync("syncing…");
+  return post(DB,{action:"getPortfolio", user:"main", key:KEY})
+    .then(function(r){
+      if(r && r.data) merge(r.data);
+      saveLocal(); setSync("synced " + new Date().toLocaleTimeString());
+      render();
+    })
+    .catch(function(){ setSync("offline — using this device"); });
+}
+
+var pushTimer = null;
+function push(){
+  saveLocal(); dirty = true; setSync("saving…");
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(function(){
+    post(DB,{action:"savePortfolio", user:"main", key:KEY, data:S})
+      .then(function(){ dirty = false; setSync("saved " + new Date().toLocaleTimeString()); })
+      .catch(function(){ setSync("not saved to cloud — kept on this device"); });
+  }, 700);
+}
+
+/* ---------------------------------------------------------------
+   Costing. One place, so every tab agrees on the numbers.
+----------------------------------------------------------------*/
+function matById(id){
+  for(var i=0;i<S.materials.length;i++) if(S.materials[i].id===id) return S.materials[i];
+  return null;
+}
+
+// Quantity of each material needed for one batch of a formula, in kg.
+function lineQtyKg(f, ln){
+  var batch = num(f.batchKg) || 1;
+  var pct   = num(ln.pct);
+  var waste = num(ln.waste);
+  return batch * (pct/100) * (1 + waste/100);
+}
+
+function costFormula(f){
+  var total = 0, missing = [], pct = 0, lines = [];
+  (f.lines||[]).forEach(function(ln){
+    var m = matById(ln.mid);
+    var qty = lineQtyKg(f, ln);
+    pct += num(ln.pct);
+    if(!m){ missing.push("unknown material"); lines.push({ln:ln,m:null,qty:qty,cost:0}); return; }
+    if(!isFinite(num(m.rate)) || num(m.rate) <= 0) missing.push(m.name);
+    var cost = qty * num(m.rate);
+    total += cost;
+    lines.push({ln:ln, m:m, qty:qty, cost:cost});
+  });
+  var batch = num(f.batchKg) || 1;
+  var perKg = total / batch;
+  // Bottle: ml treated as g (density ~1). Only the concentrate is charged.
+  var ml   = num(f.bottleMl);
+  var conc = num(f.conc);
+  var perBottle = ml && conc ? (perKg/1000) * ml * (conc/100) : 0;
+  return {
+    total: total, perKg: perKg, perBottle: perBottle,
+    pct: pct, pctOk: Math.abs(pct - 100) < 0.05,
+    missing: missing, lines: lines
+  };
+}
+
+function inventoryValue(){
+  return S.materials.reduce(function(a,m){ return a + num(m.stock) * num(m.rate); }, 0);
+}
+function belowReorder(){
+  return S.materials.filter(function(m){
+    return num(m.reorder) > 0 && num(m.stock) < num(m.reorder);
+  });
+}
+// Month-on-month move from a material's own price history.
+function priceMove(m){
+  var h = (m.hist||[]).slice().sort(function(a,b){ return a.d < b.d ? -1 : 1; });
+  if(h.length < 2) return null;
+  var prev = num(h[h.length-2].rate), now = num(h[h.length-1].rate);
+  if(!prev) return null;
+  return { pct: ((now - prev)/prev)*100, from: prev, to: now };
+}
+
+/* ---------------------------------------------------------------
+   Views
+----------------------------------------------------------------*/
+var TABS = [
+  ["dash","Dashboard"], ["mat","Raw Materials"], ["form","Formulas"],
+  ["quote","Supplier Prices"], ["cost","Costing"], ["mrp","Planning"], ["ai","AI Development"]
+];
+
+function render(){
+  var t = document.getElementById("tabs");
+  t.innerHTML = TABS.map(function(x){
+    return '<button class="tab'+(tab===x[0]?' on':'')+'" data-t="'+x[0]+'">'+esc(x[1])+'</button>';
+  }).join("");
+  Array.prototype.forEach.call(t.querySelectorAll(".tab"), function(b){
+    b.onclick = function(){ tab = b.getAttribute("data-t"); editing = null; render(); window.scrollTo(0,0); };
+  });
+  var v = document.getElementById("view");
+  ({dash:vDash, mat:vMat, form:vForm, quote:vQuote, cost:vCost, mrp:vMrp, ai:vAi}[tab])(v);
+}
+
+/* ---- Dashboard ---- */
+function vDash(v){
+  var low = belowReorder();
+  var noRate = S.materials.filter(function(m){ return !(num(m.rate)>0); });
+  var bad = S.formulas.filter(function(f){ return f.status==="active" && !costFormula(f).pctOk; });
+  var movers = S.materials.map(function(m){
+    var mv = priceMove(m); return mv ? {m:m,mv:mv} : null;
+  }).filter(Boolean).sort(function(a,b){ return Math.abs(b.mv.pct)-Math.abs(a.mv.pct); }).slice(0,6);
+
+  var html = '<div class="cards">' +
+    card("Active formulas", S.formulas.filter(function(f){return f.status==="active";}).length) +
+    card("Raw materials", S.materials.length) +
+    card("Inventory value", money(inventoryValue())) +
+    card("Below reorder", low.length, low.length>0) +
+  '</div>';
+
+  if(noRate.length || bad.length){
+    html += '<h2>Needs attention</h2>';
+    if(noRate.length) html += '<div class="flag">'+noRate.length+' material'+(noRate.length>1?'s have':' has')+
+      ' no rate yet — any formula using '+(noRate.length>1?'them':'it')+' will cost low.</div>';
+    if(bad.length) html += '<div class="flag">'+bad.length+' active formula'+(bad.length>1?'s do':' does')+
+      ' not total 100%.</div>';
+  }
+
+  if(low.length){
+    html += '<h2>Reorder now</h2><div class="scroll"><table><tr><th>Material</th><th class="n">Stock</th>'+
+      '<th class="n">Reorder at</th><th class="n">Lead days</th></tr>' +
+      low.map(function(m){
+        return '<tr><td>'+esc(m.name)+'</td><td class="n">'+num(m.stock)+' '+esc(m.uom||"kg")+'</td>'+
+          '<td class="n">'+num(m.reorder)+'</td><td class="n">'+(m.lead||"—")+'</td></tr>';
+      }).join("") + '</table></div>';
+  }
+
+  if(movers.length){
+    html += '<h2>Recent rate moves</h2><div class="scroll"><table><tr><th>Material</th>'+
+      '<th class="n">Was</th><th class="n">Now</th><th class="n">Change</th></tr>' +
+      movers.map(function(x){
+        var cls = x.mv.pct>0?"up":"down";
+        return '<tr><td>'+esc(x.m.name)+'</td><td class="n">'+money(x.mv.from)+'</td>'+
+          '<td class="n">'+money(x.mv.to)+'</td><td class="n '+cls+'">'+
+          (x.mv.pct>0?"+":"")+x.mv.pct.toFixed(1)+'%</td></tr>';
+      }).join("") + '</table></div>';
+  }
+
+  var act = S.formulas.filter(function(f){return f.status==="active";});
+  if(act.length){
+    html += '<h2>Cost per formula</h2><div class="scroll"><table><tr><th>Formula</th>'+
+      '<th class="n">Per kg</th><th class="n">Per batch</th><th class="n">Per bottle</th></tr>' +
+      act.map(function(f){
+        var c = costFormula(f);
+        return '<tr><td>'+esc(f.name)+(c.pctOk?'':'<span class="pill">not 100%</span>')+'</td>'+
+          '<td class="n">'+money(c.perKg)+'</td><td class="n">'+money(c.total)+'</td>'+
+          '<td class="n">'+(c.perBottle?money(c.perBottle):"—")+'</td></tr>';
+      }).join("") + '</table></div>';
+  }
+
+  if(!S.materials.length && !S.formulas.length){
+    html += '<div class="empty">Nothing here yet. Start with <b>Raw Materials</b> — '+
+      'formulas need materials to cost against.</div>';
+  }
+  v.innerHTML = html;
+}
+function card(k,val,warn){
+  return '<div class="c'+(warn?' warn':'')+'"><div class="k">'+esc(k)+'</div><div class="v">'+
+    (typeof val==="number"?val:esc(val))+'</div></div>';
+}
+
+/* ---- Raw materials ---- */
+function vMat(v){
+  if(editing && editing.type==="mat") return matForm(v);
+  var q = (window.__mq||"").toLowerCase();
+  var list = S.materials.filter(function(m){
+    return !q || (m.name+" "+(m.code||"")+" "+(m.cas||"")).toLowerCase().indexOf(q)>=0;
+  });
+  var html = '<div class="bar"><button class="btn" id="add">+ Material</button>'+
+    '<input id="q" placeholder="Search name, code, CAS" value="'+esc(window.__mq||"")+'" style="max-width:260px">'+
+    '</div>';
+  if(!list.length){
+    html += '<div class="empty">'+(S.materials.length?"Nothing matches that.":"No materials yet.")+'</div>';
+  }else{
+    html += '<div class="scroll"><table><tr><th>Name</th><th>Type</th><th class="n">Stock</th>'+
+      '<th class="n">Rate</th><th>Supplier</th><th></th></tr>' +
+      list.map(function(m){
+        var lowFlag = num(m.reorder)>0 && num(m.stock)<num(m.reorder);
+        return '<tr><td><b>'+esc(m.name)+'</b>'+(m.code?'<span class="pill">'+esc(m.code)+'</span>':'')+
+          (lowFlag?'<span class="pill">low</span>':'')+
+          (m.cas?'<div class="note" style="margin:2px 0">CAS '+esc(m.cas)+'</div>':'')+'</td>'+
+          '<td>'+esc(m.cat||"—")+'</td>'+
+          '<td class="n">'+num(m.stock)+' '+esc(m.uom||"kg")+'</td>'+
+          '<td class="n">'+(num(m.rate)?money(m.rate):'<span class="up">none</span>')+'</td>'+
+          '<td>'+esc(m.supplier||"—")+'</td>'+
+          '<td><button class="btn sec sm" data-e="'+m.id+'">Edit</button></td></tr>';
+      }).join("") + '</table></div>';
+  }
+  v.innerHTML = html;
+  document.getElementById("add").onclick = function(){
+    editing = {type:"mat", d:{id:uid("m_"), uom:"kg", hist:[]}}; render();
+  };
+  var qi = document.getElementById("q");
+  qi.oninput = function(){ window.__mq = qi.value; var p = qi.selectionStart; render();
+    var n = document.getElementById("q"); n.focus(); n.setSelectionRange(p,p); };
+  Array.prototype.forEach.call(v.querySelectorAll("[data-e]"), function(b){
+    b.onclick = function(){
+      var m = matById(b.getAttribute("data-e"));
+      editing = {type:"mat", d:JSON.parse(JSON.stringify(m))}; render();
+    };
+  });
+}
+
+function matForm(v){
+  var d = editing.d;
+  var hist = (d.hist||[]).slice().sort(function(a,b){ return a.d<b.d?1:-1; });
+  v.innerHTML = '<div class="panel">'+
+    '<h2 style="margin-top:0">'+(matById(d.id)?"Edit material":"New material")+'</h2>'+
+    '<div class="row"><div><label>Name</label><input id="f_name" value="'+esc(d.name||"")+'"></div>'+
+    '<div><label>Internal code</label><input id="f_code" value="'+esc(d.code||"")+'"></div></div>'+
+    '<div class="row3"><div><label>CAS</label><input id="f_cas" value="'+esc(d.cas||"")+'"></div>'+
+    '<div><label>Type</label><select id="f_cat">'+
+      ["aroma chemical","essential oil","natural extract","solvent","fixative","carrier","colour","packaging","other"]
+        .map(function(o){ return '<option'+(d.cat===o?' selected':'')+'>'+o+'</option>'; }).join("")+
+    '</select></div>'+
+    '<div><label>Unit</label><select id="f_uom">'+
+      ["kg","g","L","ml","pcs"].map(function(o){ return '<option'+(d.uom===o?' selected':'')+'>'+o+'</option>'; }).join("")+
+    '</select></div></div>'+
+    '<div class="row3"><div><label>Stock</label><input id="f_stock" type="number" step="any" value="'+esc(d.stock||"")+'"></div>'+
+    '<div><label>Reorder at</label><input id="f_reorder" type="number" step="any" value="'+esc(d.reorder||"")+'"></div>'+
+    '<div><label>Lead time (days)</label><input id="f_lead" type="number" value="'+esc(d.lead||"")+'"></div></div>'+
+    '<div class="row"><div><label>Rate per '+esc(d.uom||"kg")+' (₹)</label>'+
+      '<input id="f_rate" type="number" step="any" value="'+esc(d.rate||"")+'"></div>'+
+    '<div><label>Supplier</label><input id="f_supplier" value="'+esc(d.supplier||"")+'"></div></div>'+
+    '<label>Notes / substitutes</label><textarea id="f_notes">'+esc(d.notes||"")+'</textarea>'+
+    (hist.length ? '<h3>Rate history</h3><div class="scroll"><table><tr><th>Date</th><th class="n">Rate</th><th>Source</th></tr>'+
+      hist.map(function(h){ return '<tr><td>'+esc(h.d)+'</td><td class="n">'+money(h.rate)+'</td><td>'+esc(h.src||"manual")+'</td></tr>'; }).join("")+
+      '</table></div>' : '')+
+    '<div class="bar"><button class="btn" id="save">Save</button>'+
+    '<button class="btn sec" id="cancel">Cancel</button>'+
+    (matById(d.id)?'<button class="btn del" id="del">Delete</button>':'')+'</div></div>';
+
+  document.getElementById("save").onclick = function(){
+    var g = function(i){ var el = document.getElementById(i); return el ? el.value : ""; };
+    var newRate = num(g("f_rate"));
+    d.name = g("f_name").trim(); d.code = g("f_code").trim(); d.cas = g("f_cas").trim();
+    d.cat = g("f_cat"); d.uom = g("f_uom"); d.stock = num(g("f_stock"));
+    d.reorder = num(g("f_reorder")); d.lead = g("f_lead"); d.supplier = g("f_supplier").trim();
+    d.notes = g("f_notes");
+    if(!d.name){ alert("Name is needed."); return; }
+    d.hist = d.hist || [];
+    // Only record history when the rate actually moves.
+    if(newRate > 0 && newRate !== num(d.rate)){
+      d.hist.push({d:today(), rate:newRate, src:"manual"});
+    }
+    d.rate = newRate;
+    var ex = matById(d.id);
+    if(ex){ S.materials[S.materials.indexOf(ex)] = d; } else { S.materials.push(d); }
+    editing = null; push(); render();
+  };
+  document.getElementById("cancel").onclick = function(){ editing = null; render(); };
+  var db_ = document.getElementById("del");
+  if(db_) db_.onclick = function(){
+    var used = S.formulas.filter(function(f){
+      return (f.lines||[]).some(function(l){ return l.mid === d.id; });
+    });
+    if(used.length){ alert("Used in "+used.length+" formula(s). Remove it there first."); return; }
+    if(!confirm("Delete "+d.name+"?")) return;
+    S.materials = S.materials.filter(function(m){ return m.id !== d.id; });
+    editing = null; push(); render();
+  };
+}
+
+/* ---- Formulas ---- */
+function vForm(v){
+  if(editing && editing.type==="form") return formForm(v);
+  var html = '<div class="bar"><button class="btn" id="add">+ Formula</button></div>';
+  if(!S.formulas.length){
+    html += '<div class="empty">No formulas yet.'+
+      (S.materials.length?'':' Add some raw materials first so costs can be worked out.')+'</div>';
+  }else{
+    html += '<div class="scroll"><table><tr><th>Formula</th><th>Status</th><th class="n">Lines</th>'+
+      '<th class="n">Per kg</th><th></th></tr>' +
+      S.formulas.map(function(f){
+        var c = costFormula(f);
+        return '<tr><td><b>'+esc(f.name)+'</b>'+(f.code?'<span class="pill">'+esc(f.code)+'</span>':'')+
+          '<span class="pill">v'+esc(f.ver||"1")+'</span>'+
+          (c.pctOk?'':'<span class="pill">'+c.pct.toFixed(1)+'%</span>')+'</td>'+
+          '<td>'+esc(f.status||"draft")+'</td>'+
+          '<td class="n">'+((f.lines||[]).length)+'</td>'+
+          '<td class="n">'+money(c.perKg)+'</td>'+
+          '<td><button class="btn sec sm" data-e="'+f.id+'">Open</button></td></tr>';
+      }).join("") + '</table></div>';
+  }
+  v.innerHTML = html;
+  document.getElementById("add").onclick = function(){
+    editing = {type:"form", d:{id:uid("f_"), ver:"1", status:"draft", batchKg:1, lines:[]}}; render();
+  };
+  Array.prototype.forEach.call(v.querySelectorAll("[data-e]"), function(b){
+    b.onclick = function(){
+      var id = b.getAttribute("data-e");
+      var f = S.formulas.filter(function(x){ return x.id===id; })[0];
+      editing = {type:"form", d:JSON.parse(JSON.stringify(f))}; render();
+    };
+  });
+}
+
+function formForm(v){
+  var d = editing.d, c = costFormula(d);
+  var opts = S.materials.map(function(m){
+    return '<option value="'+m.id+'">'+esc(m.name)+'</option>';
+  }).join("");
+
+  var html = '<div class="panel"><h2 style="margin-top:0">Formula</h2>'+
+    '<div class="row"><div><label>Name</label><input id="f_name" value="'+esc(d.name||"")+'"></div>'+
+    '<div><label>Code / SKU</label><input id="f_code" value="'+esc(d.code||"")+'"></div></div>'+
+    '<div class="row3"><div><label>Category</label><input id="f_cat" value="'+esc(d.cat||"")+'" placeholder="incense, attar…"></div>'+
+    '<div><label>Version</label><input id="f_ver" value="'+esc(d.ver||"1")+'"></div>'+
+    '<div><label>Status</label><select id="f_status">'+
+      ["draft","active","discontinued"].map(function(o){
+        return '<option'+(d.status===o?' selected':'')+'>'+o+'</option>'; }).join("")+
+    '</select></div></div>'+
+    '<div class="row3"><div><label>Batch size (kg)</label><input id="f_batch" type="number" step="any" value="'+esc(d.batchKg||1)+'"></div>'+
+    '<div><label>Bottle (ml)</label><input id="f_ml" type="number" step="any" value="'+esc(d.bottleMl||"")+'"></div>'+
+    '<div><label>Concentration (%)</label><input id="f_conc" type="number" step="any" value="'+esc(d.conc||"")+'"></div></div>';
+
+  html += '<h3>Ingredients</h3>';
+  if(!S.materials.length){
+    html += '<div class="flag">No raw materials yet — add them first.</div>';
+  }else{
+    html += '<div class="scroll"><table><tr><th>Material</th><th class="n">%</th><th class="n">Waste %</th>'+
+      '<th class="n">Qty (kg)</th><th class="n">Cost</th><th></th></tr>'+
+      (d.lines||[]).map(function(ln,i){
+        var m = matById(ln.mid);
+        var qty = lineQtyKg(d, ln);
+        var cost = m ? qty*num(m.rate) : 0;
+        return '<tr><td><select data-l="'+i+'" data-k="mid">'+
+            S.materials.map(function(mm){
+              return '<option value="'+mm.id+'"'+(mm.id===ln.mid?' selected':'')+'>'+esc(mm.name)+'</option>';
+            }).join("")+'</select></td>'+
+          '<td class="n"><input data-l="'+i+'" data-k="pct" type="number" step="any" value="'+esc(ln.pct||"")+'" style="width:80px"></td>'+
+          '<td class="n"><input data-l="'+i+'" data-k="waste" type="number" step="any" value="'+esc(ln.waste||"")+'" style="width:80px"></td>'+
+          '<td class="n">'+qty.toFixed(4)+'</td>'+
+          '<td class="n">'+(m && num(m.rate)?money(cost):'<span class="up">no rate</span>')+'</td>'+
+          '<td><button class="btn sec sm" data-rm="'+i+'">×</button></td></tr>';
+      }).join("")+'</table></div>'+
+      '<div class="bar"><button class="btn sec sm" id="addline">+ Ingredient</button></div>';
+  }
+
+  html += (c.pctOk
+    ? '<div class="good">Totals 100%.</div>'
+    : '<div class="flag">Ingredients total '+c.pct.toFixed(2)+'%, not 100%.</div>');
+  if(c.missing.length){
+    html += '<div class="flag">No rate for: '+esc(c.missing.join(", "))+'. Cost is understated.</div>';
+  }
+
+  html += '<div class="cards">'+
+    card("Cost / kg", money(c.perKg)) +
+    card("Cost / batch", money(c.total)) +
+    card("Cost / bottle", c.perBottle?money(c.perBottle):"set ml + conc") +
+  '</div>';
+
+  html += '<label>Notes, substitutions, technical remarks</label>'+
+    '<textarea id="f_notes">'+esc(d.notes||"")+'</textarea>'+
+    '<div class="bar"><button class="btn" id="save">Save</button>'+
+    '<button class="btn sec" id="dup">Duplicate as new version</button>'+
+    '<button class="btn sec" id="cancel">Cancel</button>'+
+    '<button class="btn del" id="del">Delete</button></div></div>';
+
+  v.innerHTML = html;
+
+  function collect(){
+    var g = function(i){ var el = document.getElementById(i); return el?el.value:""; };
+    d.name = g("f_name").trim(); d.code = g("f_code").trim(); d.cat = g("f_cat").trim();
+    d.ver = g("f_ver").trim() || "1"; d.status = g("f_status");
+    d.batchKg = num(g("f_batch")) || 1; d.bottleMl = num(g("f_ml")); d.conc = num(g("f_conc"));
+    d.notes = g("f_notes");
+  }
+  Array.prototype.forEach.call(v.querySelectorAll("[data-l]"), function(el){
+    el.onchange = function(){
+      var i = +el.getAttribute("data-l"), k = el.getAttribute("data-k");
+      d.lines[i][k] = (k==="mid") ? el.value : num(el.value);
+      collect(); render();
+    };
+  });
+  Array.prototype.forEach.call(v.querySelectorAll("[data-rm]"), function(b){
+    b.onclick = function(){ collect(); d.lines.splice(+b.getAttribute("data-rm"),1); render(); };
+  });
+  var al = document.getElementById("addline");
+  if(al) al.onclick = function(){
+    collect(); d.lines = d.lines||[];
+    d.lines.push({mid:S.materials[0].id, pct:0, waste:0}); render();
+  };
+  document.getElementById("save").onclick = function(){
+    collect();
+    if(!d.name){ alert("Name is needed."); return; }
+    var ex = S.formulas.filter(function(x){ return x.id===d.id; })[0];
+    if(ex){ S.formulas[S.formulas.indexOf(ex)] = d; } else { S.formulas.push(d); }
+    editing = null; push(); render();
+  };
+  document.getElementById("dup").onclick = function(){
+    collect();
+    var copy = JSON.parse(JSON.stringify(d));
+    copy.id = uid("f_");
+    copy.ver = String((parseFloat(d.ver)||1) + 1);
+    copy.status = "draft";
+    copy.name = d.name;
+    S.formulas.push(copy);
+    editing = {type:"form", d:copy};
+    push(); render();
+  };
+  document.getElementById("cancel").onclick = function(){ editing = null; render(); };
+  document.getElementById("del").onclick = function(){
+    if(!confirm("Delete this formula?")) return;
+    S.formulas = S.formulas.filter(function(x){ return x.id!==d.id; });
+    editing = null; push(); render();
+  };
+}
+
+/* ---- Supplier prices ---- */
+function vQuote(v){
+  var html = '<div class="panel"><h2 style="margin-top:0">Add supplier prices</h2>'+
+    '<div class="note">Paste a quote, or upload a photo/PDF of one. It gets read into a table '+
+    'you can check and correct before anything touches your material rates.</div>'+
+    '<div class="row"><div><label>Supplier</label><input id="q_sup" placeholder="Supplier name"></div>'+
+    '<div><label>Quote date</label><input id="q_date" type="date" value="'+today()+'"></div></div>'+
+    '<label>Paste text (WhatsApp, email, price list)</label>'+
+    '<textarea id="q_text" placeholder="Hexyl cinnamic aldehyde 25kg ₹950/kg&#10;Iso E Super 5kg ₹2100/kg"></textarea>'+
+    '<label>Or upload an image / PDF</label><input id="q_file" type="file" accept="image/*,application/pdf">'+
+    '<div class="bar"><button class="btn" id="q_read">Read it</button></div>'+
+    '<div id="q_status"></div><div id="q_result"></div></div>';
+
+  if(S.quotes.length){
+    html += '<h2>Saved quotes</h2><div class="scroll"><table><tr><th>Supplier</th><th>Date</th>'+
+      '<th class="n">Items</th><th></th></tr>'+
+      S.quotes.slice().reverse().map(function(q){
+        return '<tr><td>'+esc(q.supplier||"—")+'</td><td>'+esc(q.date||"")+'</td>'+
+          '<td class="n">'+((q.items||[]).length)+'</td>'+
+          '<td><button class="btn sec sm" data-q="'+q.id+'">View</button></td></tr>';
+      }).join("")+'</table></div>';
+  }
+  v.innerHTML = html;
+
+  document.getElementById("q_read").onclick = function(){
+    var txt = document.getElementById("q_text").value.trim();
+    var file = document.getElementById("q_file").files[0];
+    var st = document.getElementById("q_status");
+    if(!txt && !file){ st.innerHTML = '<div class="flag">Paste something or pick a file first.</div>'; return; }
+    st.innerHTML = '<div class="note">Reading…</div>';
+
+    var sys = "You read supplier price quotations for a perfumery business in India. "+
+      "Return ONLY a JSON array, no prose, no markdown fences. Each element: "+
+      '{"name":string,"pack":string,"rate":number,"uom":string,"moq":string,"notes":string}. '+
+      "rate must be the price per single unit of measure in INR as a plain number. "+
+      "If a value is genuinely absent use null. If you cannot find any prices return [].";
+
+    var body = {system:sys, prompt: txt || "Extract every material and its rate from this document."};
+
+    var go = function(){
+      post(AI, body).then(function(r){
+        if(r.error){ st.innerHTML = '<div class="flag">'+esc(r.error)+'</div>'; return; }
+        var items;
+        try{
+          var clean = String(r.text||"").replace(/```json|```/g,"").trim();
+          items = JSON.parse(clean);
+        }catch(e){
+          st.innerHTML = '<div class="flag">Could not read that cleanly. Raw reply below — '+
+            'you can still type the rates in by hand.</div><pre class="out">'+esc(r.text||"")+'</pre>';
+          return;
+        }
+        if(!Array.isArray(items) || !items.length){
+          st.innerHTML = '<div class="flag">No prices found in that.</div>'; return;
+        }
+        st.innerHTML = '<div class="good">Found '+items.length+' item(s). Check them before applying.</div>';
+        showQuote(items);
+      }).catch(function(e){
+        st.innerHTML = '<div class="flag">'+esc(e.message||"Request failed")+'</div>';
+      });
+    };
+
+    if(file){
+      var fr = new FileReader();
+      fr.onload = function(){
+        var b64 = String(fr.result).split(",")[1];
+        if(file.type === "application/pdf"){ body.pdfBase64 = b64; }
+        else { body.imageBase64 = b64; body.imageType = file.type; }
+        go();
+      };
+      fr.readAsDataURL(file);
+    } else { go(); }
+  };
+
+  function showQuote(items){
+    var res = document.getElementById("q_result");
+    res.innerHTML = '<h3>Review</h3><div class="scroll"><table><tr><th>Material</th><th>Pack</th>'+
+      '<th class="n">Rate</th><th>Match to</th></tr>'+
+      items.map(function(it,i){
+        var guess = S.materials.filter(function(m){
+          return m.name && it.name && m.name.toLowerCase().indexOf(String(it.name).toLowerCase().slice(0,8))>=0;
+        })[0];
+        return '<tr><td>'+esc(it.name||"?")+'</td><td>'+esc(it.pack||"—")+'</td>'+
+          '<td class="n"><input data-i="'+i+'" data-k="rate" type="number" step="any" value="'+
+            esc(it.rate==null?"":it.rate)+'" style="width:100px"></td>'+
+          '<td><select data-i="'+i+'" data-k="mid"><option value="">— skip —</option>'+
+            S.materials.map(function(m){
+              return '<option value="'+m.id+'"'+(guess&&guess.id===m.id?' selected':'')+'>'+esc(m.name)+'</option>';
+            }).join("")+'</select></td></tr>';
+      }).join("")+'</table></div>'+
+      '<div class="bar"><button class="btn" id="q_apply">Apply to material rates</button></div>';
+
+    Array.prototype.forEach.call(res.querySelectorAll("[data-i]"), function(el){
+      el.onchange = function(){
+        var i = +el.getAttribute("data-i"), k = el.getAttribute("data-k");
+        items[i][k] = (k==="rate") ? num(el.value) : el.value;
+      };
+    });
+    document.getElementById("q_apply").onclick = function(){
+      var sup = document.getElementById("q_sup").value.trim();
+      var dt  = document.getElementById("q_date").value || today();
+      var n = 0;
+      items.forEach(function(it){
+        if(!it.mid || !(num(it.rate)>0)) return;
+        var m = matById(it.mid); if(!m) return;
+        m.hist = m.hist || [];
+        m.hist.push({d:dt, rate:num(it.rate), src:sup||"quote"});
+        m.rate = num(it.rate);
+        if(sup) m.supplier = sup;
+        n++;
+      });
+      S.quotes.push({id:uid("q_"), supplier:sup, date:dt, items:items});
+      push();
+      alert(n+" rate(s) updated. Formula costs have moved with them.");
+      render();
+    };
+  }
+
+  Array.prototype.forEach.call(v.querySelectorAll("[data-q]"), function(b){
+    b.onclick = function(){
+      var q = S.quotes.filter(function(x){ return x.id===b.getAttribute("data-q"); })[0];
+      alert((q.items||[]).map(function(i){ return i.name+" — "+i.rate; }).join("\n") || "Empty");
+    };
+  });
+}
+
+/* ---- Costing ---- */
+function vCost(v){
+  var withHist = S.materials.filter(function(m){ return (m.hist||[]).length>1; });
+  var html = '<h2>Rate movement</h2>';
+  if(!withHist.length){
+    html += '<div class="empty">No rate history yet. It builds as you change rates or apply quotes.</div>';
+  }else{
+    html += '<div class="scroll"><table><tr><th>Material</th><th class="n">Was</th><th class="n">Now</th>'+
+      '<th class="n">Change</th><th class="n">Points</th></tr>'+
+      withHist.map(function(m){
+        var mv = priceMove(m);
+        return '<tr><td>'+esc(m.name)+'</td><td class="n">'+money(mv.from)+'</td>'+
+          '<td class="n">'+money(mv.to)+'</td>'+
+          '<td class="n '+(mv.pct>0?"up":"down")+'">'+(mv.pct>0?"+":"")+mv.pct.toFixed(1)+'%</td>'+
+          '<td class="n">'+(m.hist||[]).length+'</td></tr>';
+      }).join("")+'</table></div>';
+  }
+
+  html += '<h2>What each formula costs</h2>';
+  if(!S.formulas.length){
+    html += '<div class="empty">No formulas yet.</div>';
+  }else{
+    html += '<div class="scroll"><table><tr><th>Formula</th><th class="n">Per kg</th>'+
+      '<th class="n">Per bottle</th><th>Biggest cost</th></tr>'+
+      S.formulas.map(function(f){
+        var c = costFormula(f);
+        var top = c.lines.slice().sort(function(a,b){ return b.cost-a.cost; })[0];
+        var share = top && c.total ? (top.cost/c.total*100) : 0;
+        return '<tr><td>'+esc(f.name)+'</td><td class="n">'+money(c.perKg)+'</td>'+
+          '<td class="n">'+(c.perBottle?money(c.perBottle):"—")+'</td>'+
+          '<td>'+(top&&top.m?esc(top.m.name)+' <span class="pill">'+share.toFixed(0)+'%</span>':"—")+'</td></tr>';
+      }).join("")+'</table></div>';
+  }
+  v.innerHTML = html;
+}
+
+/* ---- Planning (MRP) ---- */
+function vMrp(v){
+  var html = '<div class="panel"><h2 style="margin-top:0">Production plan</h2>'+
+    '<div class="note">Say what you intend to make. The requirement below is worked out from '+
+    'your formulas and current stock.</div>';
+  if(!S.formulas.length){
+    html += '<div class="flag">Add a formula first.</div></div>';
+    v.innerHTML = html; return;
+  }
+  html += '<div class="row3"><div><label>Formula</label><select id="p_f">'+
+      S.formulas.map(function(f){ return '<option value="'+f.id+'">'+esc(f.name)+'</option>'; }).join("")+
+    '</select></div>'+
+    '<div><label>Quantity (kg)</label><input id="p_q" type="number" step="any"></div>'+
+    '<div><label>Month</label><input id="p_m" type="month" value="'+today().slice(0,7)+'"></div></div>'+
+    '<div class="bar"><button class="btn" id="p_add">Add to plan</button></div>';
+
+  if(S.plans.length){
+    html += '<div class="scroll"><table><tr><th>Formula</th><th>Month</th><th class="n">Qty (kg)</th><th></th></tr>'+
+      S.plans.map(function(p,i){
+        var f = S.formulas.filter(function(x){ return x.id===p.fid; })[0];
+        return '<tr><td>'+esc(f?f.name:"(deleted)")+'</td><td>'+esc(p.month)+'</td>'+
+          '<td class="n">'+num(p.qty)+'</td>'+
+          '<td><button class="btn sec sm" data-pd="'+i+'">×</button></td></tr>';
+      }).join("")+'</table></div>';
+  }
+  html += '</div>';
+
+  // Requirement
+  var need = {};
+  S.plans.forEach(function(p){
+    var f = S.formulas.filter(function(x){ return x.id===p.fid; })[0];
+    if(!f) return;
+    var factor = num(p.qty) / (num(f.batchKg)||1);
+    (f.lines||[]).forEach(function(ln){
+      var q = lineQtyKg(f, ln) * factor;
+      need[ln.mid] = (need[ln.mid]||0) + q;
+    });
+  });
+  var rows = Object.keys(need).map(function(mid){
+    var m = matById(mid); if(!m) return null;
+    var gross = need[mid], stock = num(m.stock);
+    var net = Math.max(0, gross - stock);
+    return {m:m, gross:gross, stock:stock, net:net, value:net*num(m.rate)};
+  }).filter(Boolean).sort(function(a,b){ return b.net - a.net; });
+
+  html += '<h2>What to buy</h2>';
+  if(!rows.length){
+    html += '<div class="empty">Add something to the plan above.</div>';
+  }else{
+    var totalVal = rows.reduce(function(a,r){ return a+r.value; },0);
+    html += '<div class="scroll"><table><tr><th>Material</th><th class="n">Needed</th><th class="n">In stock</th>'+
+      '<th class="n">To buy</th><th class="n">Est. value</th><th>Order by</th></tr>'+
+      rows.map(function(r){
+        var by = "—";
+        if(r.net>0 && r.m.lead){
+          var dd = new Date(); dd.setDate(dd.getDate() - num(r.m.lead));
+          by = num(r.m.lead) + "d lead";
+        }
+        return '<tr><td>'+esc(r.m.name)+'</td><td class="n">'+r.gross.toFixed(3)+'</td>'+
+          '<td class="n">'+r.stock+'</td>'+
+          '<td class="n"><b>'+(r.net>0?r.net.toFixed(3):"0")+'</b></td>'+
+          '<td class="n">'+(r.net>0?money(r.value):"—")+'</td>'+
+          '<td>'+esc(by)+'</td></tr>';
+      }).join("")+
+      '<tr><td colspan="4"><b>Total</b></td><td class="n"><b>'+money(totalVal)+'</b></td><td></td></tr>'+
+      '</table></div>';
+  }
+  v.innerHTML = html;
+
+  document.getElementById("p_add").onclick = function(){
+    var q = num(document.getElementById("p_q").value);
+    if(!(q>0)){ alert("Quantity?"); return; }
+    S.plans.push({fid:document.getElementById("p_f").value, qty:q, month:document.getElementById("p_m").value});
+    push(); render();
+  };
+  Array.prototype.forEach.call(v.querySelectorAll("[data-pd]"), function(b){
+    b.onclick = function(){ S.plans.splice(+b.getAttribute("data-pd"),1); push(); render(); };
+  });
+}
+
+/* ---- AI development ---- */
+function vAi(v){
+  v.innerHTML = '<div class="panel"><h2 style="margin-top:0">AI perfume development</h2>'+
+    '<div class="note">Answer what you can — blanks are fine. The draft comes back using your own '+
+    'material list where it can.</div>'+
+    '<div class="row"><div><label>Product type</label><input id="a_type" placeholder="incense fragrance, attar, fine fragrance…"></div>'+
+    '<div><label>Scent direction</label><input id="a_family" placeholder="rose, woody, oriental…"></div></div>'+
+    '<div class="row3"><div><label>Target cost / kg (₹)</label><input id="a_cost" type="number"></div>'+
+    '<div><label>Batch size (kg)</label><input id="a_batch" type="number" value="1"></div>'+
+    '<div><label>Market</label><input id="a_market" placeholder="India, Gulf…"></div></div>'+
+    '<div class="row"><div><label>Must include</label><input id="a_in"></div>'+
+    '<div><label>Must avoid</label><input id="a_out"></div></div>'+
+    '<label>Anything else — performance, customer, regulatory</label><textarea id="a_more"></textarea>'+
+    '<div class="bar"><button class="btn" id="a_go">Draft a formula</button>'+
+    '<button class="btn sec" id="a_stock">Prefer what I have in stock</button></div>'+
+    '<div id="a_out_box"></div></div>';
+
+  var preferStock = false;
+  document.getElementById("a_stock").onclick = function(){
+    preferStock = !preferStock;
+    this.textContent = preferStock ? "✓ Using stock first" : "Prefer what I have in stock";
+  };
+
+  document.getElementById("a_go").onclick = function(){
+    var g = function(i){ return document.getElementById(i).value.trim(); };
+    var box = document.getElementById("a_out_box");
+    var pool = S.materials.filter(function(m){ return !preferStock || num(m.stock)>0; });
+    if(!pool.length){
+      box.innerHTML = '<div class="flag">No materials to work from. Add raw materials first.</div>';
+      return;
+    }
+    box.innerHTML = '<div class="note">Thinking…</div>';
+
+    var list = pool.slice(0,120).map(function(m){
+      return "- "+m.name+(m.cas?" (CAS "+m.cas+")":"")+", "+(m.cat||"")+
+        ", ₹"+num(m.rate)+"/"+(m.uom||"kg")+", stock "+num(m.stock);
+    }).join("\n");
+
+    var sys = "You are a working perfumer advising an Indian incense and fragrance manufacturer. "+
+      "Be concrete and commercial. Use the supplied material list wherever possible and give "+
+      "percentages that total exactly 100. Note where a material is a placeholder. "+
+      "Always state clearly that the result needs perfumer bench work, stability testing and "+
+      "IFRA/regulatory checking before use. Keep it tight.";
+
+    var prompt = "Materials available:\n"+list+"\n\nBrief:\n"+
+      "Product type: "+(g("a_type")||"unspecified")+"\n"+
+      "Scent direction: "+(g("a_family")||"unspecified")+"\n"+
+      "Target cost per kg: "+(g("a_cost")||"unspecified")+" INR\n"+
+      "Batch size: "+(g("a_batch")||"1")+" kg\n"+
+      "Market: "+(g("a_market")||"unspecified")+"\n"+
+      "Must include: "+(g("a_in")||"none")+"\n"+
+      "Must avoid: "+(g("a_out")||"none")+"\n"+
+      "Other: "+(g("a_more")||"none")+"\n\n"+
+      "Give: a short scent brief; top/heart/base structure; a percentage formula in a simple table "+
+      "using the materials above; the estimated cost per kg from the rates given; and cheaper "+
+      "alternatives if it overshoots the target cost.";
+
+    post(AI,{system:sys, prompt:prompt}).then(function(r){
+      if(r.error){ box.innerHTML = '<div class="flag">'+esc(r.error)+'</div>'; return; }
+      box.innerHTML = '<div class="draft">Draft — needs perfumer bench work and regulatory / IFRA '+
+        'checking before any production use.</div><pre class="out">'+esc(r.text||"")+'</pre>'+
+        '<div class="note">Copy the parts you want into a new formula under <b>Formulas</b>, '+
+        'where it will cost automatically against your live rates.</div>';
+    }).catch(function(e){
+      box.innerHTML = '<div class="flag">'+esc(e.message||"Request failed")+'</div>';
+    });
+  };
+}
+
+/* ---- boot ---- */
+loadLocal();
+render();
+pull();
+
+window.addEventListener("beforeunload", function(e){
+  if(dirty){ e.preventDefault(); e.returnValue = ""; }
+});
+
+})();
+</script>
+</body>
+</html>
