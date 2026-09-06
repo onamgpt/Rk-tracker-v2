@@ -411,24 +411,29 @@ async function runScreen(){
     /* Final gates and both axes. */
     var ranked=[];
     shortlist.forEach(function(c){
+      /* Two possible sources for company data, in order of strength:
+         1. the full balance-sheet table the trading app can build, which
+            supports Altman Z, Piotroski F and accruals;
+         2. the figures carried in the universe file itself.
+         The second is weaker and is labelled as such wherever it is used. */
       var f = funds[c.sym] || null;
-      var m = f ? E.protectionMetrics(f, c.a.ltp) : null;
-
-      // India universe carries pledge and promoter holding from Screener.in.
-      // Pledged promoter holding is a reject reason in its own right and is
-      // not covered by the fundamentals table.
-      var extra=[];
-      if(MARKET==="IN"){
-        var u = uni.stocks[c.sym]||{};
-        if(u.pl != null && u.pl >= 25) extra.push("promoter shares pledged " + u.pl + "%");
-        if(m && m.promoterPct == null && u.ph != null) m.promoterPct = u.ph;
+      var u = uni.stocks[c.sym] || null;
+      var m, q;
+      if(f){
+        if(u && u.pl != null) f = Object.assign({}, f, { pledge: u.pl });
+        m = E.protectionMetrics(f, c.a.ltp);
+        if(MARKET==="IN" && m && m.promoterPct == null && u && u.ph != null) m.promoterPct = u.ph;
+        q = E.qualityScore(m, mk);
+      } else if(u && (u.roe != null || u.ic != null)){
+        m = E.metricsFromUniverse(u, c.a.ltp);
+        q = E.qualityFromUniverse(m, mk);
+      } else {
+        m = null; q = { total:null, basis:null, note:"no company data" };
       }
 
       var sflags = (surv && surv.ok && surv.flags && surv.flags[c.sym]) ? {flags:surv.flags[c.sym]} : null;
-      var g = E.gates(c.a, m, mk, sflags, false).concat(extra);
+      var g = E.gates(c.a, m, mk, sflags, false);
       if(g.length){ reject(c.sym,g); return; }
-
-      var q = E.qualityScore(m, mk);
       var s = E.aimSuitability(c.a);
 
       // Unverified fundamentals are not silently ranked as if verified.
@@ -444,7 +449,8 @@ async function runScreen(){
         quality:q.total, qparts:q.parts,
         aim:s.total, aparts:s.parts,
         combined:E.combined(q,s,m,mk),
-        reasons:E.reasons(c.a,m,mk),
+        basis:q.basis||"balance sheet",
+        reasons:(q.basis==="universe"?E.reasonsFromUniverse:E.reasons)(c.a,m,mk),
         ltp:c.a.ltp
       });
     });
@@ -464,6 +470,7 @@ async function runScreen(){
         passed: ranked.length,
         fundamentalsAt: fundAt,
         fundamentalsCount: Object.keys(funds).length,
+        basis: Object.keys(funds).length ? "balance sheet" : "universe",
         surveillanceOk: !!(surv && surv.ok)
       }
     };
@@ -503,8 +510,11 @@ function renderAsOf(res){
     (m.universeBuilt? ' Universe list built '+fmtDate(m.universeBuilt)+'.':'')+'</div></div>';
 
   var warn="";
-  if(!m.fundamentalsCount){
-    warn='<div class="warnbox"><b>No fundamentals were available.</b> The shared table was empty, so nothing could be checked for solvency and everything was rejected as unverified. Run the quality screen in the trading app first to populate it \u2014 this page will not build it, because that table belongs to the live app.</div>';
+  if(m.basis==="universe"){
+    warn='<div class="warnbox"><b>Company quality here is scored on the universe file, not a balance sheet.</b> '+
+      'That means ROE, operating margin, interest cover, leverage, pledge and promoter holding \u2014 but <b>no Altman Z, no Piotroski F and no accruals</b>, '+
+      'because the figures needed for those are not in that file. Those are the measures with the strongest evidence behind them, so treat the quality number as a plainer read than it would otherwise be. '+
+      'The figures are also as of the universe build date, not today.</div>';
   } else if(m.fundamentalsAt && daysSince(m.fundamentalsAt)>45){
     warn='<div class="warnbox"><b>Fundamentals are '+Math.round(daysSince(m.fundamentalsAt))+' days old</b> (updated '+fmtDate(m.fundamentalsAt)+'). Solvency checks used figures that may have moved.</div>';
   }
@@ -564,8 +574,9 @@ function renderPicks(res){
         '<div class="ax"><div class="h"><span>AIM suitability</span><b>'+p.aim+'</b></div>'+bar(p.aim,"var(--gold)")+'</div>'+
       '</div>'+
       '<div class="chips">'+chips+'</div>'+
-      '<div class="passed">Cleared: liquidity, solvency, Altman Z, interest cover, operating profit, cash flow, accruals, drawdown recovery'+
-      (res.market==="IN"?", promoter holding, pledge, NSE surveillance":"")+
+      '<div class="passed">Quality basis: '+esc(p.basis||"universe")+
+      ' &middot; cleared liquidity, drawdown recovery, market cap, interest cover, leverage'+
+      (res.market==="IN"?", promoter holding":"")+
       ' &middot; last price '+cur+Math.round(p.ltp).toLocaleString("en-IN")+'</div>'+
     '</div>';
   }).join("");
