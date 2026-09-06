@@ -15163,7 +15163,21 @@ function AIMTrading({ onClose }) {
     setLoading(false);
   };
 
+  // The recovery view needs every transaction ever recorded, not the recent
+  // window the ledger tab shows, or the arithmetic silently understates what
+  // was taken out.
+  const loadRecovery=async()=>{
+    setLoading(true);
+    try{ const r=await api({action:"ledger",limit:5000}); if(r.ok) setRecLedger(r.transactions||[]); }catch(e){}
+    setLoading(false);
+  };
+
   const [recon,setRecon]=useState(null);
+
+  // Cost recovery — a measurement only. Nothing here is read by aimSignal or by
+  // the sell rule; see the note in the tab itself.
+  const [recLedger,setRecLedger]=useState(null);
+  const [recTax,setRecTax]=useState(0);
 
   // Ask Zerodha what is actually held and compare it against this book. The
   // ledger only knows about trades that were recorded, so this is the check
@@ -15215,7 +15229,7 @@ function AIMTrading({ onClose }) {
     setLoading(false);
   };
 
-  useEffect(()=>{ if(tab==="dash"){ load(); loadLedger(); } if(tab==="ledger") loadLedger(); if(tab==="audit") runAudit(); if(tab==="compare") runCompare(); },[book,tab]);
+  useEffect(()=>{ if(tab==="dash"){ load(); loadLedger(); } if(tab==="ledger") loadLedger(); if(tab==="audit") runAudit(); if(tab==="compare") runCompare(); if(tab==="recovery") loadRecovery(); },[book,tab]);
 
   // An off-database copy. Supabase is durable but there is no point-in-time
   // recovery on this plan, so the ledger should exist somewhere you control too.
@@ -15878,7 +15892,7 @@ function AIMTrading({ onClose }) {
     </div>
 
     {book!=="HOLD"&&<div style={{display:"flex",gap:4,marginBottom:10,flexWrap:"wrap"}}>
-      {[["dash","📊 Signals"],["screener","🔍 Screener"],["backtest","⏮ Backtest"],["compare","⚖ Compare"],["ledger","📒 Ledger"],["audit","🔍 Audit"],["gate","✅ Gate check"]].map(([k,l])=>
+      {[["dash","📊 Signals"],["screener","🔍 Screener"],["backtest","⏮ Backtest"],["compare","⚖ Compare"],["ledger","📒 Ledger"],["recovery","💰 Cost recovery"],["audit","🔍 Audit"],["gate","✅ Gate check"]].map(([k,l])=>
         <button key={k} onClick={()=>setTab(k)} style={{...btn,padding:"6px 10px",fontSize:11,
           background:tab===k?"#5a3a1a":"#f0f0f0",color:tab===k?"#fff":"#555"}}>{l}</button>)}
     </div>}
@@ -16335,6 +16349,150 @@ function AIMTrading({ onClose }) {
         <SipCompare/>
       </div>
       <AIMBacktest/>
+    </div>}
+
+    {/* ─────────────────────────────── COST RECOVERY ───────────────────────────
+        How much of the money put into each holding has already come back out.
+
+        This is a MEASUREMENT. It is not read by aimSignal, by Portfolio
+        Control, or by the rule that blocks selling below average cost. Those
+        all continue to use avg_cost, untouched.
+
+        The arithmetic, stated because it is easy to get wrong:
+          money out   = everything paid for shares, plus dealing costs
+          money back  = everything received from sales
+          still at stake = money out - money back
+          effective cost = still at stake / shares still held
+
+        Sale proceeds are NOT profit. Selling 150 of 1000 shares bought at 100
+        for 200 each returns 30,000, of which 15,000 is the original cost of
+        those 150 shares coming back and 15,000 is gain. Deducting the full
+        30,000 from the remaining shares' cost basis would count that 15,000
+        twice and understate the effective cost.
+    */}
+    {book!=="HOLD"&&tab==="recovery"&&<div>
+      <div style={{fontSize:11,color:"#888",marginBottom:8}}>
+        How much of what you put in has already come back out. A measurement only —
+        the algorithm and the sell rule are untouched by anything on this page.
+      </div>
+
+      <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:9}}>
+        <span style={{fontSize:11,color:"#666",fontWeight:700}}>Tax on realised gains</span>
+        <select value={recTax} onChange={e=>setRecTax(Number(e.target.value))}
+          style={{padding:"6px 8px",borderRadius:7,border:"1.5px solid #d8d8c8",fontSize:12,background:"#fff"}}>
+          <option value={0}>Ignore</option>
+          <option value={0.125}>12.5% long term</option>
+          <option value={0.20}>20% short term</option>
+        </select>
+      </div>
+
+      {!recLedger&&<div style={{fontSize:12,color:"#888"}}>Reading the ledger…</div>}
+
+      {recLedger&&(()=>{
+        const held=(data&&data.holdings)||[];
+        const bySym={};
+        (recLedger||[]).forEach(t=>{
+          const k=t.symbol; if(!k) return;
+          const b=bySym[k]||(bySym[k]={bought:0,boughtVal:0,sold:0,soldVal:0,costs:0,n:0});
+          const sh=num(t.shares), amt=num(t.amount);
+          b.costs+=num(t.costs); b.n++;
+          if(String(t.action).toUpperCase()==="SELL"){ b.sold+=sh; b.soldVal+=amt; }
+          else { b.bought+=sh; b.boughtVal+=amt; }
+        });
+
+        const rows=Object.keys(bySym).map(sym=>{
+          const b=bySym[sym];
+          const h=held.find(x=>x.symbol===sym);
+          const openShares=h?num(h.shares):Math.max(0,b.bought-b.sold);
+          // avg_cost from the holdings table is the figure the algorithm uses.
+          const avgCost=h&&num(h.avg_cost)>0?num(h.avg_cost):(b.bought>0?b.boughtVal/b.bought:0);
+
+          const moneyOut=b.boughtVal+b.costs;
+          const moneyBack=b.soldVal;
+          const gain=b.sold>0?(b.soldVal-avgCost*b.sold):0;
+          const tax=gain>0?gain*recTax:0;
+          const stake=moneyOut-moneyBack+tax;
+
+          const effCost=openShares>0?stake/openShares:null;
+          const mktVal=h?openShares*num(h.last_price):0;
+          const recoveredPct=moneyOut>0?(moneyBack-tax)/moneyOut*100:0;
+          return {sym,openShares,avgCost,moneyOut,moneyBack,tax,stake,effCost,mktVal,recoveredPct,
+                  closed:openShares<=0,txns:b.n,sold:b.sold};
+        }).filter(r=>r.txns>0).sort((x,y)=>y.recoveredPct-x.recoveredPct);
+
+        const open=rows.filter(r=>!r.closed);
+        const tOut=open.reduce((a,r)=>a+r.moneyOut,0);
+        const tBack=open.reduce((a,r)=>a+r.moneyBack,0);
+        const tTax=open.reduce((a,r)=>a+r.tax,0);
+        const tStake=open.reduce((a,r)=>a+r.stake,0);
+        const tMkt=open.reduce((a,r)=>a+r.mktVal,0);
+
+        if(!rows.length) return <div style={{fontSize:12,color:"#888"}}>No transactions recorded yet.</div>;
+
+        return <div>
+          <div style={{background:"#f7faf7",border:"1px solid #dde6dd",borderRadius:10,
+            padding:"12px 13px",marginBottom:10}}>
+            <div style={{fontSize:12.5,fontWeight:800,color:"#1a5a3a",marginBottom:7}}>
+              Across {open.length} open holding{open.length===1?"":"s"}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:11.5}}>
+              <div>Put in <b>{cur}{fmtN(tOut)}</b></div>
+              <div>Taken out <b>{cur}{fmtN(tBack)}</b></div>
+              {recTax>0&&<div>Less tax <b>{cur}{fmtN(tTax)}</b></div>}
+              <div>Still at stake <b>{cur}{fmtN(tStake)}</b></div>
+            </div>
+            <div style={{fontSize:11.5,marginTop:7,paddingTop:7,borderTop:"1px solid #dde6dd"}}>
+              Capital returned <b>{tOut>0?((tBack-tTax)/tOut*100).toFixed(1):"0.0"}%</b>
+            </div>
+            <div style={{fontSize:10.5,color:"#a06a2a",marginTop:6,lineHeight:1.5}}>
+              Exposed to the market right now: <b>{cur}{fmtN(tMkt)}</b> — the full value of
+              what you hold. Money already taken out is banked and spent elsewhere; it does not
+              sit under these shares absorbing a fall.
+            </div>
+          </div>
+
+          {rows.map(r=><div key={r.sym} style={{background:"#fff",border:"1px solid #e0d5c0",
+            borderRadius:9,padding:"10px 11px",marginBottom:7,opacity:r.closed?0.55:1}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+              <div>
+                <span style={{fontWeight:800,fontSize:13.5}}>{r.sym}</span>
+                <span style={{fontSize:10.5,color:"#999",marginLeft:6}}>
+                  {r.closed?"closed":fmtN(r.openShares)+" held"}</span>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:13,fontWeight:800,
+                  color:r.recoveredPct>=100?"#2e7d32":r.recoveredPct>=50?"#1a5a3a":"#8a6a3a"}}>
+                  {r.recoveredPct.toFixed(0)}%</div>
+                <div style={{fontSize:9,color:"#999"}}>RETURNED</div>
+              </div>
+            </div>
+
+            {!r.closed&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,
+              fontSize:11,marginTop:7}}>
+              <div style={{color:"#666"}}>Average cost <b style={{color:"#333"}}>{cur}{fmtN(r.avgCost)}</b></div>
+              <div style={{color:"#666"}}>Effective cost <b style={{color:"#1a5a3a"}}>
+                {r.effCost==null?"—":cur+fmtN(r.effCost)}</b></div>
+              <div style={{color:"#666"}}>Still at stake <b style={{color:"#333"}}>{cur}{fmtN(r.stake)}</b></div>
+              <div style={{color:"#666"}}>Market value <b style={{color:"#333"}}>{cur}{fmtN(r.mktVal)}</b></div>
+            </div>}
+
+            <div style={{fontSize:10,color:"#aaa",marginTop:6}}>
+              in {cur}{fmtN(r.moneyOut)} · out {cur}{fmtN(r.moneyBack)}
+              {r.tax>0?(" · tax "+cur+fmtN(r.tax)):""} · {r.txns} txn{r.txns===1?"":"s"}
+            </div>
+          </div>)}
+
+          <div style={{background:"#fff8e8",border:"1px solid #e8d5a8",borderRadius:9,
+            padding:"11px 12px",marginTop:10,fontSize:11,color:"#6a5a2a",lineHeight:1.65}}>
+            <b>What these two numbers are for.</b><br/>
+            <b>Average cost</b> is what you paid per share. The algorithm uses it, and the rule
+            that blocks selling below your buy price uses it. Nothing on this page changes it.<br/><br/>
+            <b>Effective cost</b> answers a different question: has this position given back the
+            money you committed to it? It is a scorecard for the method, not a measure of risk
+            and not a floor for selling. A share worth {cur}500 is {cur}500 at risk whatever you
+            paid for it and whatever you have already taken out.
+          </div>
+        </div>;
+      })()}
     </div>}
 
     {/* COMPARE */}
