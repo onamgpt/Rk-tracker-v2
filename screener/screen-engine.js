@@ -324,7 +324,7 @@
       // solvency check that never ran.
       if (m.marketCap != null && m.marketCap < mk.capFloor) out.push("market cap below floor");
       if (m.intCover != null && m.intCover < 2) out.push("interest cover under 2x");
-      if (m.de != null && m.de > 1.5) out.push("debt to equity above 1.5");
+      if (!m.isFinancial && m.de != null && m.de > 1.5) out.push("debt to equity above 1.5");
       if (mk.code === "IN" && m.promoterPct != null && m.promoterPct < 20) out.push("promoter holding under 20%");
       return out;
     }
@@ -596,7 +596,15 @@
     m.accruals = null; m.ocfPositive = null; m.ocfBeatsNI = null;
     m.revGrowth = null; m.ebitPositive = null;
     m.profitableEither = true;   // the universe was built from profit-making companies
-    m.isFinancial = false;
+
+    /* Financial-sector detection from the industry label.
+     * These are NOT excluded — that is a deliberate choice. But leverage and
+     * margin mean something different for a lender or an investment company
+     * than for a manufacturer, so the flag is carried through and shown, and
+     * the leverage component is not scored for them rather than being scored
+     * on a basis that does not apply. */
+    var ind = String(u.ind || "").toLowerCase();
+    m.isFinancial = /financ|bank|nbfc|invest|insur|asset manage|housing fin/.test(ind);
     m.asOfUniverse = true;
     return m;
   }
@@ -639,12 +647,21 @@
                 : ic >= 5 ? 16
                 : ic >= 3 ? 10 : 4;
 
-    // Leverage (20)
-    var d = m.de;
-    p.leverage = d == null ? 7
-               : d <= 0.10 ? 20
-               : d <= 0.30 ? 16
-               : d <= 0.60 ? 11 : 5;
+    /* Leverage (20). Not scored for financial-sector companies: borrowing is
+     * their raw material, not a warning sign, so a low-debt score would be
+     * meaningless. Their weight moves to returns and margin, which do carry
+     * comparable meaning. */
+    if (m.isFinancial) {
+      p.leverage = 0;
+      p.returns = Math.round(p.returns * 1.30);
+      p.margin = Math.round(p.margin * 1.30);
+    } else {
+      var d = m.de;
+      p.leverage = d == null ? 7
+                 : d <= 0.10 ? 20
+                 : d <= 0.30 ? 16
+                 : d <= 0.60 ? 11 : 5;
+    }
 
     // Promoter pledge (penalty). Pledged promoter shares are a forced-selling
     // risk that has nothing to do with the operating business. Scored rather
@@ -670,11 +687,12 @@
   function reasonsFromUniverse(a, m, mk) {
     var r = [];
     var b = a.bounce;
+    if (m && m.isFinancial) r.push("financial sector");
     if (b.episodes) r.push(b.recovered + " of " + b.episodes + " falls recovered" +
       (b.avgRecoverBars ? " (~" + Math.round(b.avgRecoverBars / 21) + " mo)" : ""));
     if (b.avgBounce != null) r.push("avg rebound +" + Math.round(b.avgBounce * 100) + "%");
     r.push("vol " + Math.round(a.annVol * 100) + "%");
-    r.push(Math.round(a.pos * 100) + "% of 52w range");
+    r.push(Math.round(a.pos * 100) + "% of 52w range" + (a.pos >= 0.85 ? " \u2014 near its high" : ""));
     r.push("3y " + (a.cagr >= 0 ? "+" : "") + Math.round(a.cagr * 100) + "%/yr");
     if (m) {
       if (m.roe != null) r.push("ROE " + Math.round(m.roe * 100) + "%");
