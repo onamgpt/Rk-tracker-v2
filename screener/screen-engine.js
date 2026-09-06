@@ -271,6 +271,10 @@
     m.fPct = Fmax ? F / Fmax : null;
 
     m.promoterPct = f.promoterPct != null ? f.promoterPct : null;
+    // Pledge does not appear in company filings the way the other figures do;
+    // the caller attaches it from the universe file. Carried here so the
+    // penalty applies on this basis too, not only the universe one.
+    m.pledge = f.pledge != null ? f.pledge : null;
     return m;
   }
 
@@ -314,6 +318,17 @@
     if (surv && surv.flags && surv.flags.length) out.push("NSE surveillance: " + surv.flags.join(", "));
 
     /* --- solvency and accounting --- */
+    if (m && m.basis === "universe") {
+      // Only the checks this data can actually support. The universe was
+      // pre-gated on the rest, and pretending otherwise would report a
+      // solvency check that never ran.
+      if (m.marketCap != null && m.marketCap < mk.capFloor) out.push("market cap below floor");
+      if (m.intCover != null && m.intCover < 2) out.push("interest cover under 2x");
+      if (m.de != null && m.de > 1.5) out.push("debt to equity above 1.5");
+      if (mk.code === "IN" && m.promoterPct != null && m.promoterPct < 20) out.push("promoter holding under 20%");
+      return out;
+    }
+
     if (m) {
       if (m.marketCap != null && m.marketCap < mk.capFloor) out.push("market cap below floor");
       if (!m.profitableEither) out.push("loss-making in both of the last two years");
@@ -387,7 +402,17 @@
     }
     p.governance = gov;
 
-    var total = p.solvency + p.strength + p.leverage + p.cashQuality + p.growth + p.governance;
+    // Promoter pledge. A forced-selling risk unrelated to the operating
+    // business. Applied on this basis as well as the universe one, so that
+    // building a richer fundamentals table can never make pledge stop
+    // counting.
+    var pl = m.pledge;
+    p.pledgePenalty = pl == null ? 0
+                    : pl >= 20 ? -20
+                    : pl >= 10 ? -12
+                    : pl > 0 ? -6 : 0;
+
+    var total = p.solvency + p.strength + p.leverage + p.cashQuality + p.growth + p.governance + p.pledgePenalty;
     total = Math.max(0, Math.min(100, total));
     return { total: Math.round(total), verified: true, parts: p, note: null };
   }
@@ -518,8 +543,147 @@
       if (m.de != null) r.push("D/E " + m.de.toFixed(2));
       if (m.accruals != null) r.push("accruals " + (m.accruals * 100).toFixed(0) + "%");
       if (m.revGrowth != null) r.push("rev " + (m.revGrowth >= 0 ? "+" : "") + Math.round(m.revGrowth * 100) + "%");
+      if (m.pledge) r.push("pledged " + m.pledge + "%");
       if (mk.code === "IN" && m.promoterPct != null) r.push("promoter " + Math.round(m.promoterPct) + "%");
     } else r.push("fundamentals unverified");
+    return r;
+  }
+
+
+  /* ------------------------------------------------------------------ */
+  /* Fundamentals from the universe file                                */
+  /* ------------------------------------------------------------------ */
+
+  /* The India universe file carries per-company figures from a Screener.in
+   * export: market cap, ROE, debt/equity, interest cover, operating margin,
+   * P/E, promoter pledge and promoter holding.
+   *
+   * This is a WEAKER basis than the balance-sheet route above. It cannot
+   * produce an Altman Z (no working capital, retained earnings or total
+   * liabilities) or a Piotroski F (no prior-year figures), and it cannot
+   * measure accruals (no operating cash flow). Those are the measures with
+   * the strongest published out-of-sample support, and they are simply not
+   * available here.
+   *
+   * What it can support is a real but plainer read on profitability,
+   * leverage, debt servicing and governance. Anything built from this is
+   * marked basis:"universe" so the interface can say so rather than implying
+   * a solvency check that did not happen.
+   *
+   * Note also that the universe was itself gated when it was built
+   * (PAT>0, OPM>0, ROE>=6, D/E<1, IntCover>=2, OCF>0, MCap>=1000cr,
+   * Pledge<25). Re-applying those same thresholds as gates here would
+   * exclude nobody. They are therefore used to SCORE, not to gate, and the
+   * figures are as of the universe build date, not today.
+   */
+  function metricsFromUniverse(u, price) {
+    if (!u) return null;
+    var m = { basis: "universe" };
+    // market cap in the file is in crore for India
+    m.marketCap = u.mc != null ? u.mc * 1e7 : null;
+    m.roe = u.roe != null ? u.roe / 100 : null;
+    m.de = u.de != null ? u.de : null;
+    m.intCover = u.ic != null ? u.ic : null;
+    m.opm = u.opm != null ? u.opm / 100 : null;
+    m.pledge = u.pl != null ? u.pl : null;
+    m.promoterPct = u.ph != null ? u.ph : null;
+    m.pe = u.pe != null ? u.pe : null;
+    m.industry = u.ind || null;
+
+    // Not derivable from this source. Left explicitly null so nothing
+    // downstream can mistake absence for a pass.
+    m.z = null; m.f = null; m.fMax = null; m.fPct = null;
+    m.accruals = null; m.ocfPositive = null; m.ocfBeatsNI = null;
+    m.revGrowth = null; m.ebitPositive = null;
+    m.profitableEither = true;   // the universe was built from profit-making companies
+    m.isFinancial = false;
+    m.asOfUniverse = true;
+    return m;
+  }
+
+  /* Quality on the universe basis (0-100).
+   *
+   * Deliberately excludes P/E. A low P/E is a statement about price, not
+   * about how well the business is run, and this axis is about the business.
+   */
+  function qualityFromUniverse(m, mk) {
+    if (!m) return { total: null, verified: false, parts: {}, basis: "universe", note: "no company data" };
+    var p = {};
+
+    // Return on equity (30). Very high ROE is usually a small equity base or
+    // leverage rather than excellence, so the band tapers at the top instead
+    // of rewarding extremes.
+    var r = m.roe;
+    p.returns = r == null ? 10
+              : r >= 0.40 ? 24
+              : r >= 0.25 ? 30
+              : r >= 0.18 ? 26
+              : r >= 0.12 ? 19
+              : r >= 0.08 ? 11 : 4;
+
+    // Operating margin (25). How much of revenue survives the cost of doing
+    // business — the plainest available read on pricing power.
+    var o = m.opm;
+    p.margin = o == null ? 8
+             : o >= 0.30 ? 25
+             : o >= 0.20 ? 21
+             : o >= 0.14 ? 16
+             : o >= 0.08 ? 10 : 4;
+
+    // Debt servicing (25). Interest cover is the single best solvency signal
+    // available from this source now that Altman Z is out of reach.
+    var ic = m.intCover;
+    p.servicing = ic == null ? 8
+                : ic >= 20 ? 25
+                : ic >= 10 ? 21
+                : ic >= 5 ? 16
+                : ic >= 3 ? 10 : 4;
+
+    // Leverage (20)
+    var d = m.de;
+    p.leverage = d == null ? 7
+               : d <= 0.10 ? 20
+               : d <= 0.30 ? 16
+               : d <= 0.60 ? 11 : 5;
+
+    // Promoter pledge (penalty). Pledged promoter shares are a forced-selling
+    // risk that has nothing to do with the operating business. Scored rather
+    // than gated, because the universe was already built with a pledge cut-off
+    // and a gate here would never fire.
+    var pl = m.pledge;
+    p.pledgePenalty = pl == null ? 0
+                    : pl >= 20 ? -20
+                    : pl >= 10 ? -12
+                    : pl > 0 ? -6 : 0;
+
+    // Promoter holding (judgement call, small weight — see notes above).
+    var ph = m.promoterPct;
+    p.governance = (mk.code !== "IN" || ph == null) ? 0
+                 : ph >= 50 ? 0
+                 : ph >= 35 ? -4 : -9;
+
+    var total = p.returns + p.margin + p.servicing + p.leverage + p.pledgePenalty + p.governance;
+    total = Math.max(0, Math.min(100, total));
+    return { total: Math.round(total), verified: true, basis: "universe", parts: p, note: null };
+  }
+
+  function reasonsFromUniverse(a, m, mk) {
+    var r = [];
+    var b = a.bounce;
+    if (b.episodes) r.push(b.recovered + " of " + b.episodes + " falls recovered" +
+      (b.avgRecoverBars ? " (~" + Math.round(b.avgRecoverBars / 21) + " mo)" : ""));
+    if (b.avgBounce != null) r.push("avg rebound +" + Math.round(b.avgBounce * 100) + "%");
+    r.push("vol " + Math.round(a.annVol * 100) + "%");
+    r.push(Math.round(a.pos * 100) + "% of 52w range");
+    r.push("3y " + (a.cagr >= 0 ? "+" : "") + Math.round(a.cagr * 100) + "%/yr");
+    if (m) {
+      if (m.roe != null) r.push("ROE " + Math.round(m.roe * 100) + "%");
+      if (m.opm != null) r.push("margin " + Math.round(m.opm * 100) + "%");
+      if (m.intCover != null) r.push("int cover " + (m.intCover >= 100 ? "100+" : m.intCover.toFixed(1)) + "x");
+      if (m.de != null) r.push("D/E " + m.de.toFixed(2));
+      if (m.pledge) r.push("pledged " + m.pledge + "%");
+      if (m.promoterPct != null) r.push("promoter " + Math.round(m.promoterPct) + "%");
+    }
     return r;
   }
 
@@ -528,6 +692,9 @@
     analyzeSeries: analyzeSeries,
     bounceStats: bounceStats,
     protectionMetrics: protectionMetrics,
+    metricsFromUniverse: metricsFromUniverse,
+    qualityFromUniverse: qualityFromUniverse,
+    reasonsFromUniverse: reasonsFromUniverse,
     gates: gates,
     qualityScore: qualityScore,
     aimSuitability: aimSuitability,
