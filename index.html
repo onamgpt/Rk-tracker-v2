@@ -1995,7 +1995,9 @@ function LogisticsTracker({entries,onClose,onUpdateEntry,onNewSalesOrder}){
         const cr=await sheetsAPI("getPortfolio",{key:"tg_contacts"});
         const contacts=(cr&&cr.data&&Array.isArray(cr.data))?cr.data:[];
         const mine=contacts.find(c=>String(c.label||c.name||"").toLowerCase()===String(URL_USER).toLowerCase());
-        const chatId = mine ? mine.chatId : OWNER_CHAT_ID;
+        // A contact row that exists but has no chatId must still fall back to the
+        // owner — otherwise the reminder is dropped silently and nobody finds out.
+        const chatId = (mine && mine.chatId) ? mine.chatId : OWNER_CHAT_ID;
         const days = parseInt(entry.remindDays||"0",10);
         const item = {
           id: tag,
@@ -2012,7 +2014,8 @@ function LogisticsTracker({entries,onClose,onUpdateEntry,onNewSalesOrder}){
         // "Keep reminding for N days" is a window, not a forever-alarm — give
         // the scheduler an end date so it stops nagging once that window closes.
         if(days>0){ const u=new Date(entry.reminder); u.setDate(u.getDate()+days); item.until=u.toISOString(); }
-        if(item.chatIds.length || item.emails.length) list.push(item);
+        if(item.chatIds.length || item.emails.length){ list.push(item); }
+        else { alert("Reminder saved, but it can't be sent: no Telegram chat and no email address for this user. Check Menu \u2192 Telegram."); }
       }
       await sheetsAPI("savePortfolio",{key:"tg_scheduled",data:{scheduled:list}});
     }catch(e){ /* never block a save over this */ }
