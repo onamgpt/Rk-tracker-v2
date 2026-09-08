@@ -686,8 +686,11 @@ function vQuote(v){
 
     var sys = "You read supplier price quotations for a perfumery business in India. "+
       "Return ONLY a JSON array, no prose, no markdown fences. Each element: "+
-      '{"name":string,"pack":string,"rate":number,"uom":string,"moq":string,"notes":string}. '+
+      '{"name":string,"pack":string,"rate":number,"uom":string,"moq":string,"hsn":string,"cas":string,"notes":string}. '+
       "rate must be the price per single unit of measure in INR as a plain number. "+
+      "hsn is the HSN/SAC customs code if the document shows one. cas is a CAS "+
+      "registry number only if the document actually prints one — never infer a "+
+      "CAS number from a chemical name, and never put an HSN code in the cas field. "+
       "If a value is genuinely absent use null. If you cannot find any prices return [].";
 
     var body = {system:sys, prompt: txt || "Extract every material and its rate from this document."};
@@ -734,11 +737,12 @@ function vQuote(v){
         var guess = findMaterial(it.name);
         // Write the guess back into the data, not just the markup — otherwise an
         // auto-matched row looks selected but is skipped when applying.
-        if(guess && !it.mid) it.mid = guess.id;
+        if(!it.mid) it.mid = guess ? guess.id : "__new";
         return '<tr><td>'+esc(it.name||"?")+'</td><td>'+esc(it.pack||"—")+'</td>'+
           '<td class="n"><input data-i="'+i+'" data-k="rate" type="number" step="any" value="'+
             esc(it.rate==null?"":it.rate)+'" style="width:100px"></td>'+
           '<td><select data-i="'+i+'" data-k="mid"><option value="">— skip —</option>'+
+            '<option value="__new"'+(guess?'':' selected')+'>➕ Add as new material</option>'+
             S.materials.map(function(m){
               return '<option value="'+m.id+'"'+(guess&&guess.id===m.id?' selected':'')+'>'+esc(m.name)+'</option>';
             }).join("")+'</select></td></tr>';
@@ -754,10 +758,25 @@ function vQuote(v){
     document.getElementById("q_apply").onclick = function(){
       var sup = document.getElementById("q_sup").value.trim();
       var dt  = document.getElementById("q_date").value || today();
-      var n = 0, learned = 0;
+      var n = 0, learned = 0, created = 0;
       items.forEach(function(it){
         if(!it.mid || !(num(it.rate)>0)) return;
-        var m = matById(it.mid); if(!m) return;
+        var m;
+        if(it.mid === "__new"){
+          if(!String(it.name||"").trim()) return;
+          // Deliberately no stock/reorder: a price document says what something
+          // costs, not how much of it we hold.
+          m = { id:uid("m_"), name:String(it.name).trim(), cat:"aroma chemical",
+                uom:(it.uom||"kg"), rate:0, stock:0, reorder:0, lead:"", supplier:"",
+                alias:"", hist:[],
+                cas:(it.cas||""),
+                notes:("Added from "+(sup||"a supplier document")+" "+dt+
+                       (it.hsn?" · HSN "+it.hsn:"")).trim() };
+          S.materials.push(m); created++;
+        } else {
+          m = matById(it.mid); if(!m) return;
+          if(it.cas && !m.cas) m.cas = it.cas;
+        }
         m.hist = m.hist || [];
         m.hist.push({d:dt, rate:num(it.rate), src:sup||"quote"});
         m.rate = num(it.rate);
@@ -767,7 +786,8 @@ function vQuote(v){
       });
       S.quotes.push({id:uid("q_"), supplier:sup, date:dt, items:items});
       push();
-      alert(n+" rate(s) updated. Formula costs have moved with them."+
+      alert(n+" rate(s) updated"+(created?", "+created+" new material(s) added (stock left at 0)":"")+
+        ". Formula costs have moved with them."+
         (learned ? "\n\n"+learned+" supplier name(s) remembered — next time they will match on their own." : ""));
       render();
     };
