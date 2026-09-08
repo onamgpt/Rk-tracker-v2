@@ -17225,6 +17225,13 @@ function App(){
     entry=auto60Reminder(Object.assign({},entry));
     // STEP 1: Save locally immediately — never wait for Drive
     var finalEntry=Object.assign({},entry);
+    // Paid closes the chase. Every route to Paid — stage reaching Payment
+    // Received, the Ageing Report, the Payment Matcher, the form dropdown —
+    // lands here, so cancelling once covers all of them. syncTelegramReminder
+    // treats remindDone as a cancel and drops the item from the queue.
+    if(finalEntry.paymentStatus==="Paid" && finalEntry.reminder && !finalEntry.remindDone){
+      finalEntry.remindDone=true;
+    }
     setEntries(p=>{const ex=p.find(x=>x.id===finalEntry.id);const updated=ex?p.map(x=>x.id===finalEntry.id?finalEntry:x):[finalEntry,...p];saveCache(updated);return updated;});
     setSaving(false);
     if(!opts||!opts.silent){setShowForm(false);setEditE(null);}
