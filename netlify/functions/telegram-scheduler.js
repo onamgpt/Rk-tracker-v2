@@ -5,6 +5,7 @@ const BOT = process.env.TELEGRAM_BOT_TOKEN || "";
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 const OWNER = "main"; // scheduled messages are stored under the main user
+const ALERT_CHAT = "8632288596"; // where delivery failures get reported
 const RESEND_KEY = process.env.RESEND_API_KEY || "";
 // No hardcoded fallback here: Netlify's secrets scanner fails the build when a
 // configured env var's literal value appears in committed code. MAIL_FROM is
@@ -16,7 +17,8 @@ const MAIL_FROM = process.env.MAIL_FROM || "";
 // email must never stop the Telegram leg from going out.
 function sendMail(to, subject, body) {
   return new Promise((resolve) => {
-    if (!RESEND_KEY || !MAIL_FROM) return resolve(false);
+    if (!RESEND_KEY) return resolve({ ok: false, reason: "RESEND_API_KEY is not set" });
+    if (!MAIL_FROM) return resolve({ ok: false, reason: "MAIL_FROM is not set" });
     const payload = JSON.stringify({
       from: MAIL_FROM,
       to: [to],
@@ -30,9 +32,17 @@ function sendMail(to, subject, body) {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(payload)
       }
-    }, res => { res.on("data", () => {}); res.on("end", () => resolve(res.statusCode < 300)); });
-    req.on("error", () => resolve(false));
-    req.setTimeout(10000, () => { req.destroy(); resolve(false); });
+    }, res => {
+      // Keep Resend's error body. Discarding it is why a rejected sender and a
+      // bad key were indistinguishable from silence.
+      let buf = "";
+      res.on("data", c => { if (buf.length < 600) buf += c; });
+      res.on("end", () => resolve(res.statusCode < 300
+        ? { ok: true }
+        : { ok: false, reason: "Resend " + res.statusCode + " " + buf.slice(0, 300) }));
+    });
+    req.on("error", e => resolve({ ok: false, reason: "network: " + e.message }));
+    req.setTimeout(10000, () => { req.destroy(); resolve({ ok: false, reason: "timed out" }); });
     req.write(payload); req.end();
   });
 }
@@ -82,6 +92,7 @@ exports.handler = async () => {
 
   const now = Date.now();
   let sent = 0;
+  const mailFails = [];
 
   try {
     // Read scheduled messages from kv (columns: owner, k, v ; key prefixed pf_)
@@ -130,7 +141,9 @@ exports.handler = async () => {
           sent++;
         }
         for (const addr of (m.emails || [])) {
-          if (await sendMail(addr, m.subject || "Reminder", m.body || "")) sent++;
+          const r = await sendMail(addr, m.subject || "Reminder", m.body || "");
+          if (r && r.ok) sent++;
+          else mailFails.push(addr + " — " + ((r && r.reason) || "unknown"));
         }
         let next = null;
         if (m.repeat === "daily") {
@@ -156,7 +169,17 @@ exports.handler = async () => {
         { "Prefer": "resolution=merge-duplicates,return=minimal" });
     }
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, sent, remaining: remaining.length }) };
+    // A reminder that fails to send is worse than one that never existed: the
+    // person is relying on it. Report failures to the owner's chat rather than
+    // letting them disappear into a log nobody reads.
+    if (mailFails.length) {
+      await tg("sendMessage", {
+        chat_id: ALERT_CHAT,
+        text: "\u26a0\ufe0f Reminder email failed:\n" + mailFails.join("\n")
+      });
+    }
+
+    return { statusCode: 200, body: JSON.stringify({ ok: true, sent, mailFails, remaining: remaining.length }) };
   } catch (e) {
     return { statusCode: 200, body: JSON.stringify({ ok: false, error: e.message }) };
   }
