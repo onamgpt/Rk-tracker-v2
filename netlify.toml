@@ -36,6 +36,11 @@
 [functions."telegram-scheduler"]
   schedule = "*/5 * * * *"
 
+# Credential health check — Mondays 09:00 IST (03:30 UTC). Messages Telegram
+# only when something is broken, so silence means everything passed.
+[functions."health-check"]
+  schedule = "30 3 * * 1"
+
 # Drain the WhatsApp scheduled queue every 15 minutes.
 # Declared here rather than in the function file: wa-scheduler.js is CommonJS,
 # and Netlify only reads an in-file schedule from an ESM `export const config`.
