@@ -7773,8 +7773,11 @@ function PurchaseSalesCapture({ mode, onSaveEntry, onClose }) {
       id: genId(),
       title: label + (parsed.party ? " — " + parsed.party : "") + (parsed.invoiceNo ? " #" + parsed.invoiceNo : ""),
       date: parsed.date || new Date().toISOString().slice(0, 10),
-      category: isPurchase ? "Purchase" : "Sales",
-      taskType: isPurchase ? "Purchase" : "Sales",
+      // Must match the exact strings Logistics/Ageing/Email-Scan key on -
+      // "Purchase"/"Sales" alone matched nothing, so entries made here never
+      // showed up in Logistics, Ageing, or got a reminder.
+      category: isPurchase ? "Business - Purchase" : "Sales - Order",
+      taskType: isPurchase ? "Purchase" : "Orders Received",
       [isPurchase ? "vendor" : "person"]: parsed.party || "",
       amount: parsed.amount || "",
       paymentStatus: "Pending",
