@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tally — Onam Agarbathi</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --paper:#F4F3EF; --card:#FFF; --ink:#16181C; --muted:#6A6F76; --faint:#9BA1A8;
+    --rule:#DEDCD6; --rail:#B3ADA2; --signal:#C8102E; --green:#1a5a3a;
+    --ok:#1F7A4D; --okBg:#E8F3EC; --warnBg:#FBF3DD; --warnLine:#EBDFB8; --warnInk:#5C4A15;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased;padding:0 0 80px}
+  .wrap{max-width:860px;margin:0 auto;padding:0 14px}
+  a{color:var(--green)}
+  .top{padding:12px 0 0;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .back{color:var(--muted);text-decoration:none;font-size:15px;padding:6px 0}
+  .sync{font-size:12px;color:var(--faint)}
+  .hero{padding:14px 0 16px;border-bottom:1px solid var(--rule)}
+  .hero h1{margin:0;font-size:27px;line-height:1.12;letter-spacing:-.02em;font-weight:640}
+  .hero p{margin:7px 0 0;color:var(--muted);font-size:14px}
+  .tabs{display:flex;gap:6px;overflow-x:auto;padding:12px 0;border-bottom:1px solid var(--rule);
+    -webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{background:none;border:1px solid var(--rule);color:var(--muted);font:inherit;font-size:13px;
+    padding:7px 13px;border-radius:999px;cursor:pointer;white-space:nowrap;flex:0 0 auto}
+  .tab.on{background:var(--green);border-color:var(--green);color:#fff}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:16px 0}
+  .c{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:12px}
+  .c .k{font-size:12px;color:var(--muted)}
+  .c .v{font-size:22px;font-weight:640;margin-top:3px;letter-spacing:-.02em}
+  .c.warn{background:var(--warnBg);border-color:var(--warnLine)}
+  .c.warn .v{color:var(--warnInk)}
+  .c.good{background:var(--okBg);border-color:#CFE6D8}
+  .c.good .v{color:var(--ok)}
+  h2{font-size:16px;margin:22px 0 8px;font-weight:640}
+  h3{font-size:14px;margin:16px 0 6px;font-weight:640;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;background:var(--card);
+    border:1px solid var(--rule);border-radius:10px;overflow:hidden;font-size:14px}
+  th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--rule);vertical-align:top}
+  th{font-size:12px;color:var(--muted);font-weight:600;background:#FAF9F6}
+  tr:last-child td{border-bottom:none}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  input,select{font:inherit;font-size:15px;padding:8px 9px;border:1px solid var(--rule);
+    border-radius:8px;background:#fff;color:var(--ink);width:100%}
+  label{display:block;font-size:12px;color:var(--muted);margin:9px 0 3px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media(max-width:560px){.row{grid-template-columns:1fr}}
+  button{font:inherit;cursor:pointer}
+  .btn{background:var(--green);border:1px solid var(--green);color:#fff;font-size:14px;
+    padding:9px 16px;border-radius:8px}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btn.sec{background:none;color:var(--muted);border-color:var(--rule)}
+  .btn.del{background:none;color:var(--signal);border-color:var(--rule)}
+  .btn.sm{font-size:12px;padding:5px 10px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+  .panel{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:14px;margin:12px 0}
+  .note{font-size:13px;color:var(--muted);margin:8px 0}
+  .flag{background:var(--warnBg);border:1px solid var(--warnLine);color:var(--warnInk);
+    padding:9px 11px;border-radius:8px;font-size:13px;margin:8px 0}
+  .good{background:var(--okBg);border:1px solid #CFE6D8;color:var(--ok);
+    padding:9px 11px;border-radius:8px;font-size:13px;margin:8px 0}
+  .pill{display:inline-block;font-size:11px;padding:2px 7px;border-radius:999px;
+    background:#EFEDE7;color:var(--muted);margin-left:5px}
+  .empty{color:var(--faint);font-size:14px;padding:18px 0;text-align:center}
+  .up{color:var(--signal)} .down{color:var(--ok)}
+  .bars{display:flex;align-items:flex-end;gap:6px;height:120px;margin:10px 0;padding:0 2px}
+  .bars .b{flex:1;background:var(--green);border-radius:3px 3px 0 0;min-height:2px;position:relative}
+  .bars .b.p{background:var(--rail)}
+  .blabel{display:flex;gap:6px;padding:0 2px}
+  .blabel span{flex:1;font-size:10px;color:var(--faint);text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="back" href="/">← Tracker</a>
+    <span class="sync" id="sync">·</span>
+  </div>
+  <div class="hero">
+    <h1>Tally</h1>
+    <p>Upload the month's ledgers once. Everything else reads from here.</p>
+  </div>
+  <div class="tabs" id="tabs"></div>
+  <div id="view"></div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+var DB="/.netlify/functions/db", AI="/.netlify/functions/claude";
+var KEY="tally_v1", LS="rk_tally_v1";
+
+// Aggregates only — never raw rows. A year of registers as full line items
+// would outgrow a single KV value; the dashboard only ever needs the totals
+// and the top parties/items, so that is all that is kept.
+var S={ uploads:[] };
+var tab="upload", note="";
+
+var TYPES=[
+  {id:"sales",     label:"Sales register",     calc:true},
+  {id:"purchase",  label:"Purchase register",  calc:true},
+  {id:"gst",       label:"GST ledger",         calc:false},
+  {id:"financial", label:"Financial report",   calc:false}
+];
+function typeLabel(id){ for(var i=0;i<TYPES.length;i++) if(TYPES[i].id===id) return TYPES[i].label; return id; }
+
+function uid(p){ return p+Math.random().toString(36).slice(2,9); }
+function num(v){
+  if(typeof v==="number") return isFinite(v)?v:0;
+  var n=parseFloat(String(v==null?"":v).replace(/[^0-9.\-]/g,""));
+  return isFinite(n)?n:0;
+}
+function money(n){
+  if(!isFinite(n)) return "—";
+  return "₹"+Math.round(n).toLocaleString("en-IN");
+}
+function esc(s){
+  return String(s==null?"":s).replace(/[&<>"']/g,function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
+function setSync(t){ document.getElementById("sync").textContent=t; }
+function thisMonth(){ return new Date().toISOString().slice(0,7); }
+function monthLabel(m){
+  if(!m) return "?";
+  var p=m.split("-"), names=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return names[(+p[1])-1]+" "+p[0].slice(2);
+}
+
+function post(url,body){
+  return fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+    .then(function(r){ return r.json(); });
+}
+function loadLocal(){
+  try{ var raw=localStorage.getItem(LS); if(raw){ var d=JSON.parse(raw); if(d&&Array.isArray(d.uploads)) S.uploads=d.uploads; } }catch(e){}
+}
+function saveLocal(){ try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){} }
+function pull(){
+  setSync("syncing…");
+  return post(DB,{action:"getPortfolio",user:"main",key:KEY}).then(function(r){
+    if(r&&r.data&&Array.isArray(r.data.uploads)) S.uploads=r.data.uploads;
+    saveLocal(); setSync("synced "+new Date().toLocaleTimeString()); render();
+  }).catch(function(){ setSync("offline — using this device"); });
+}
+var pushT=null;
+function push(){
+  saveLocal(); setSync("saving…");
+  clearTimeout(pushT);
+  pushT=setTimeout(function(){
+    post(DB,{action:"savePortfolio",user:"main",key:KEY,data:S})
+      .then(function(){ setSync("saved "+new Date().toLocaleTimeString()); })
+      .catch(function(){ setSync("not saved to cloud — kept on this device"); });
+  },700);
+}
+
+/* ---------------- parsing ---------------- */
+
+// Excel/CSV is parsed here, in full, with SheetJS. The AI is only ever asked
+// which column means what — never to read the figures. A register can run to
+// thousands of rows, and an AI response is both capped and fallible; column
+// mapping is a small, checkable question that it is genuinely good at.
+function readSheet(file){
+  return new Promise(function(res,rej){
+    var fr=new FileReader();
+    fr.onload=function(e){
+      try{
+        var wb=XLSX.read(new Uint8Array(e.target.result),{type:"array"});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        var rows=XLSX.utils.sheet_to_json(ws,{defval:"",raw:false});
+        res(rows);
+      }catch(err){ rej(new Error("Could not read that spreadsheet.")); }
+    };
+    fr.onerror=function(){ rej(new Error("Could not open the file.")); };
+    fr.readAsArrayBuffer(file);
+  });
+}
+function toBase64(file){
+  return new Promise(function(res,rej){
+    var fr=new FileReader();
+    fr.onload=function(){ res(String(fr.result).split(",")[1]); };
+    fr.onerror=function(){ rej(new Error("Could not open the file.")); };
+    fr.readAsDataURL(file);
+  });
+}
+
+function mapColumns(headers,sample,type){
+  var want = (type==="purchase")
+    ? 'date, party (the supplier), voucher (bill/invoice number), amount (the total value of the row)'
+    : 'date, party (the customer), voucher (invoice number), amount (the total value of the row)';
+  var sys="You map spreadsheet columns for an Indian business ledger. Return ONLY a JSON "+
+    "object, no prose, no markdown fences.";
+  var prompt="These are the column headers from a Tally "+type+" register export:\n"+
+    JSON.stringify(headers)+"\n\nHere are up to three sample rows:\n"+
+    JSON.stringify(sample)+"\n\nReturn {\"date\":\"<header>\",\"party\":\"<header>\","+
+    "\"voucher\":\"<header>\",\"amount\":\"<header>\"} choosing the header that best means "+
+    want+". Use null for anything genuinely absent. Pick the column holding the total "+
+    "value of the row for amount, not tax or quantity.";
+  return post(AI,{system:sys,prompt:prompt}).then(function(r){
+    if(r.error) throw new Error(r.error);
+    var clean=String(r.text||"").replace(/```json|```/g,"").trim();
+    var s=clean.indexOf("{"), e=clean.lastIndexOf("}");
+    return JSON.parse(s>=0?clean.substring(s,e+1):clean);
+  });
+}
+
+// Roll the parsed rows into what the dashboard actually shows.
+function summarise(rows,map){
+  var total=0, byParty={}, byMonth={}, n=0;
+  rows.forEach(function(r){
+    var amt=num(map.amount?r[map.amount]:0);
+    if(!amt) return;
+    n++; total+=amt;
+    var party=String((map.party?r[map.party]:"")||"").trim()||"(unnamed)";
+    byParty[party]=(byParty[party]||0)+amt;
+    var d=String((map.date?r[map.date]:"")||"");
+    var m=d.match(/(\d{4})-(\d{2})/);
+    if(m) byMonth[m[1]+"-"+m[2]]=(byMonth[m[1]+"-"+m[2]]||0)+amt;
+  });
+  var top=Object.keys(byParty).map(function(k){ return {name:k,amount:byParty[k]}; })
+    .sort(function(a,b){ return b.amount-a.amount; }).slice(0,50);
+  return { total:total, rowCount:n, topParties:top, byMonth:byMonth };
+}
+
+// GST and financial reports are summary documents, not long registers, so the
+// AI reads these directly — the numbers wanted are few and named.
+function extractGst(payload){
+  var sys="You read Indian GST ledgers and returns. Return ONLY a JSON object, no prose, "+
+    "no markdown fences. Amounts as plain numbers in rupees, no commas or symbols. Use null "+
+    "for anything the document does not actually state — never estimate or infer a figure.";
+  var prompt="From this GST ledger/return, extract: "+
+    '{"inputTaxCredit":<total ITC available>,"outputLiability":<total output tax payable>,'+
+    '"itcCgst":<or null>,"itcSgst":<or null>,"itcIgst":<or null>,'+
+    '"outCgst":<or null>,"outSgst":<or null>,"outIgst":<or null>,'+
+    '"openingBalance":<ITC carried forward from before, or null>,"period":"<YYYY-MM or blank>"}';
+  payload.system=sys; payload.prompt=prompt;
+  return post(AI,payload).then(function(r){
+    if(r.error) throw new Error(r.error);
+    var clean=String(r.text||"").replace(/```json|```/g,"").trim();
+    var s=clean.indexOf("{"), e=clean.lastIndexOf("}");
+    return JSON.parse(s>=0?clean.substring(s,e+1):clean);
+  });
+}
+function extractFinancial(payload){
+  var sys="You read Tally financial reports (Trial Balance, P&L, Balance Sheet). Return ONLY "+
+    "a JSON object, no prose, no fences. Amounts as plain numbers in rupees. Use null for "+
+    "anything the report does not actually state — never estimate.";
+  var prompt="Extract whichever of these the report actually contains: "+
+    '{"reportName":"<what this report is>","revenue":<or null>,"expenses":<or null>,'+
+    '"netProfit":<or null>,"currentAssets":<or null>,"currentLiabilities":<or null>,'+
+    '"inventory":<or null>,"receivables":<or null>,"payables":<or null>,'+
+    '"cashAndBank":<or null>,"period":"<YYYY-MM or blank>"}';
+  payload.system=sys; payload.prompt=prompt;
+  return post(AI,payload).then(function(r){
+    if(r.error) throw new Error(r.error);
+    var clean=String(r.text||"").replace(/```json|```/g,"").trim();
+    var s=clean.indexOf("{"), e=clean.lastIndexOf("}");
+    return JSON.parse(s>=0?clean.substring(s,e+1):clean);
+  });
+}
+
+/* ---------------- views ---------------- */
+var TABS=[["upload","Upload"],["dash","Dashboard"],["gst","GST"],["history","History"]];
+
+function render(){
+  var t=document.getElementById("tabs");
+  t.innerHTML=TABS.map(function(x){
+    return '<button class="tab'+(tab===x[0]?" on":"")+'" data-t="'+x[0]+'">'+esc(x[1])+"</button>";
+  }).join("");
+  Array.prototype.forEach.call(t.querySelectorAll(".tab"),function(b){
+    b.onclick=function(){ tab=b.getAttribute("data-t"); note=""; render(); window.scrollTo(0,0); };
+  });
+  ({upload:vUpload,dash:vDash,gst:vGst,history:vHistory}[tab])(document.getElementById("view"));
+}
+
+var pending=null; // parsed-but-not-saved upload awaiting review
+
+function vUpload(v){
+  v.innerHTML='<div class="panel">'+
+    '<h2 style="margin-top:0">Upload a ledger</h2>'+
+    '<div class="note">Excel parses exactly as exported. PDF is read by AI, so check the '+
+    'figures on the review screen before saving.</div>'+
+    '<div class="row"><div><label>What is this?</label><select id="u_type">'+
+      TYPES.map(function(t){ return '<option value="'+t.id+'">'+esc(t.label)+"</option>"; }).join("")+
+    '</select></div>'+
+    '<div><label>Month</label><input id="u_month" type="month" value="'+thisMonth()+'"></div></div>'+
+    '<label>File (.xlsx, .xls, .csv or .pdf)</label>'+
+    '<input id="u_file" type="file" accept=".xlsx,.xls,.csv,application/pdf">'+
+    '<div class="bar"><button class="btn" id="u_go">Read it</button></div>'+
+    '<div id="u_status">'+note+'</div><div id="u_review"></div></div>';
+
+  document.getElementById("u_go").onclick=function(){
+    var type=document.getElementById("u_type").value;
+    var month=document.getElementById("u_month").value||thisMonth();
+    var file=document.getElementById("u_file").files[0];
+    var st=document.getElementById("u_status");
+    if(!file){ st.innerHTML='<div class="flag">Pick a file first.</div>'; return; }
+    st.innerHTML='<div class="note">Reading…</div>';
+    var isPdf=(file.type||"").indexOf("pdf")>-1||/\.pdf$/i.test(file.name);
+
+    if(isPdf){
+      toBase64(file).then(function(b64){
+        var fn = (type==="gst") ? extractGst : (type==="financial") ? extractFinancial : extractGst;
+        if(type==="sales"||type==="purchase"){
+          // A register as PDF: ask only for totals and top parties, never line items.
+          var sys="You read Indian sales/purchase registers. Return ONLY JSON, no prose, no fences. "+
+            "Plain numbers, no commas. Never estimate a figure the document does not state.";
+          var prompt="From this "+type+" register, return "+
+            '{"total":<grand total value>,"rowCount":<number of entries, or null>,'+
+            '"topParties":[{"name":"<party>","amount":<number>}]} with at most 20 parties, '+
+            "largest first.";
+          return post(AI,{system:sys,prompt:prompt,pdfBase64:b64}).then(function(r){
+            if(r.error) throw new Error(r.error);
+            var clean=String(r.text||"").replace(/```json|```/g,"").trim();
+            var s=clean.indexOf("{"), e=clean.lastIndexOf("}");
+            var o=JSON.parse(s>=0?clean.substring(s,e+1):clean);
+            return {kind:"register",data:{total:num(o.total),rowCount:o.rowCount||0,
+              topParties:(o.topParties||[]).map(function(p){return {name:p.name,amount:num(p.amount)};}),byMonth:{}}};
+          });
+        }
+        return fn({pdfBase64:b64}).then(function(o){ return {kind:type,data:o}; });
+      }).then(function(res){
+        pending={id:uid("u_"),type:type,month:month,fileName:file.name,format:"pdf",
+                 kind:res.kind,data:res.data};
+        st.innerHTML='<div class="good">Read it. Check the figures below before saving.</div>';
+        showReview();
+      }).catch(function(e){
+        st.innerHTML='<div class="flag">'+esc(e.message||"Could not read that file.")+'</div>';
+      });
+      return;
+    }
+
+    // Spreadsheet path
+    readSheet(file).then(function(rows){
+      if(!rows.length) throw new Error("That sheet appears to be empty.");
+      if(type==="gst"||type==="financial"){
+        // Small summary sheets — hand the whole thing over as text.
+        var txt=JSON.stringify(rows.slice(0,120));
+        var fn=(type==="gst")?extractGst:extractFinancial;
+        return fn({prompt:""}).catch(function(){ return null; }).then(function(){
+          var sys=(type==="gst")
+            ? "You read Indian GST ledgers. Return ONLY JSON, no prose, no fences. Plain numbers. Never estimate."
+            : "You read Tally financial reports. Return ONLY JSON, no prose, no fences. Plain numbers. Never estimate.";
+          var prompt=(type==="gst")
+            ? 'From this sheet return {"inputTaxCredit":<n>,"outputLiability":<n>,"openingBalance":<n or null>,"period":"<YYYY-MM or blank>"}\n\n'+txt
+            : 'From this sheet return {"reportName":"<name>","revenue":<n or null>,"expenses":<n or null>,"netProfit":<n or null>,"currentAssets":<n or null>,"currentLiabilities":<n or null>,"inventory":<n or null>,"receivables":<n or null>,"payables":<n or null>,"cashAndBank":<n or null>}\n\n'+txt;
+          return post(AI,{system:sys,prompt:prompt}).then(function(r){
+            if(r.error) throw new Error(r.error);
+            var clean=String(r.text||"").replace(/```json|```/g,"").trim();
+            var s=clean.indexOf("{"), e=clean.lastIndexOf("}");
+            return {kind:type,data:JSON.parse(s>=0?clean.substring(s,e+1):clean)};
+          });
+        });
+      }
+      var headers=Object.keys(rows[0]||{});
+      return mapColumns(headers,rows.slice(0,3),type).then(function(map){
+        var sum=summarise(rows,map);
+        if(!sum.rowCount) throw new Error("No amounts found. The amount column may have been mapped wrongly.");
+        return {kind:"register",data:sum,map:map,headers:headers};
+      });
+    }).then(function(res){
+      pending={id:uid("u_"),type:type,month:month,fileName:file.name,format:"sheet",
+               kind:res.kind,data:res.data,map:res.map,headers:res.headers};
+      st.innerHTML='<div class="good">Read it. Check the figures below before saving.</div>';
+      showReview();
+    }).catch(function(e){
+      st.innerHTML='<div class="flag">'+esc(e.message||"Could not read that file.")+'</div>';
+    });
+  };
+
+  if(pending) showReview();
+}
+
+function showReview(){
+  var box=document.getElementById("u_review");
+  if(!box||!pending) return;
+  var d=pending.data, h="";
+
+  if(pending.kind==="register"){
+    h+='<h3>'+esc(typeLabel(pending.type))+' — '+esc(monthLabel(pending.month))+'</h3>'+
+      '<div class="cards">'+
+        card("Total value",money(d.total))+
+        card("Entries",d.rowCount||"—")+
+        card("Parties",(d.topParties||[]).length)+
+      '</div>';
+    if(pending.map){
+      h+='<div class="note">Columns read as — date: <b>'+esc(pending.map.date||"none")+
+        '</b>, party: <b>'+esc(pending.map.party||"none")+'</b>, amount: <b>'+
+        esc(pending.map.amount||"none")+'</b>. If the amount column is wrong, everything '+
+        'below is wrong too.</div>';
+    }
+    if((d.topParties||[]).length){
+      h+='<div class="scroll"><table><tr><th>Party</th><th class="n">Value</th></tr>'+
+        d.topParties.slice(0,10).map(function(p){
+          return "<tr><td>"+esc(p.name)+'</td><td class="n">'+money(p.amount)+"</td></tr>";
+        }).join("")+"</table></div>";
+    }
+  } else if(pending.kind==="gst"){
+    var itc=num(d.inputTaxCredit), out=num(d.outputLiability), net=itc-out;
+    h+='<h3>GST — '+esc(monthLabel(pending.month))+'</h3><div class="cards">'+
+      card("Input tax credit",money(itc))+
+      card("Output liability",money(out))+
+      (net>=0 ? cardCls("good","Carried forward",money(net))
+              : cardCls("warn","Payable",money(-net)))+
+    '</div>';
+  } else {
+    h+='<h3>'+esc(d.reportName||"Financial report")+' — '+esc(monthLabel(pending.month))+'</h3>'+
+      '<div class="scroll"><table><tr><th>Figure</th><th class="n">Value</th></tr>'+
+      Object.keys(d).filter(function(k){ return k!=="reportName"&&k!=="period"&&d[k]!=null; })
+        .map(function(k){ return "<tr><td>"+esc(k)+'</td><td class="n">'+money(num(d[k]))+"</td></tr>"; })
+        .join("")+"</table></div>";
+  }
+
+  h+='<div class="bar"><button class="btn" id="u_save">Save this</button>'+
+     '<button class="btn sec" id="u_drop">Discard</button></div>';
+  box.innerHTML=h;
+
+  document.getElementById("u_save").onclick=function(){
+    // Replacing the same report for the same month is the normal case — the
+    // accountant reissues a corrected ledger often enough that silently keeping
+    // both would double every total on the dashboard.
+    S.uploads=S.uploads.filter(function(u){ return !(u.type===pending.type&&u.month===pending.month); });
+    S.uploads.push({id:pending.id,type:pending.type,month:pending.month,fileName:pending.fileName,
+      format:pending.format,kind:pending.kind,data:pending.data,map:pending.map||null,
+      savedAt:new Date().toISOString()});
+    pending=null; push();
+    note='<div class="good">Saved. It now feeds the dashboard.</div>';
+    render();
+  };
+  document.getElementById("u_drop").onclick=function(){ pending=null; note=""; render(); };
+}
+
+function card(k,v){ return '<div class="c"><div class="k">'+esc(k)+'</div><div class="v">'+(typeof v==="number"?v:esc(v))+"</div></div>"; }
+function cardCls(cls,k,v){ return '<div class="c '+cls+'"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+"</div></div>"; }
+
+function byType(t){ return S.uploads.filter(function(u){ return u.type===t; })
+  .sort(function(a,b){ return a.month<b.month?-1:1; }); }
+
+function vDash(v){
+  var sales=byType("sales"), purch=byType("purchase");
+  if(!S.uploads.length){ v.innerHTML='<div class="empty">Nothing uploaded yet. Start on the Upload tab.</div>'; return; }
+  var lastS=sales[sales.length-1], lastP=purch[purch.length-1];
+  var sTot=lastS?num(lastS.data.total):0, pTot=lastP?num(lastP.data.total):0;
+
+  var h='<div class="cards">'+
+    card("Latest month sales",lastS?money(sTot):"—")+
+    card("Latest month purchases",lastP?money(pTot):"—")+
+    (lastS&&lastP ? cardCls(sTot-pTot>=0?"good":"warn","Difference",money(sTot-pTot)) : "")+
+    card("Months on file",new Set(S.uploads.map(function(u){return u.month;})).size)+
+  '</div>';
+
+  if(sales.length>1) h+=trend("Sales by month",sales);
+  if(purch.length>1) h+=trend("Purchases by month",purch);
+
+  if(lastS&&(lastS.data.topParties||[]).length){
+    h+='<h2>Top customers — '+esc(monthLabel(lastS.month))+'</h2>'+
+      '<div class="scroll"><table><tr><th>Customer</th><th class="n">Value</th><th class="n">Share</th></tr>'+
+      lastS.data.topParties.slice(0,12).map(function(p){
+        return "<tr><td>"+esc(p.name)+'</td><td class="n">'+money(p.amount)+
+          '</td><td class="n">'+(sTot?Math.round(p.amount/sTot*100):0)+"%</td></tr>";
+      }).join("")+"</table></div>";
+  }
+  if(lastP&&(lastP.data.topParties||[]).length){
+    h+='<h2>Top suppliers — '+esc(monthLabel(lastP.month))+'</h2>'+
+      '<div class="scroll"><table><tr><th>Supplier</th><th class="n">Value</th></tr>'+
+      lastP.data.topParties.slice(0,12).map(function(p){
+        return "<tr><td>"+esc(p.name)+'</td><td class="n">'+money(p.amount)+"</td></tr>";
+      }).join("")+"</table></div>";
+  }
+  v.innerHTML=h;
+}
+
+function trend(title,list){
+  var max=Math.max.apply(null,list.map(function(u){ return num(u.data.total); }))||1;
+  return "<h2>"+esc(title)+"</h2><div class=\"bars\">"+
+    list.slice(-12).map(function(u){
+      var pct=Math.round(num(u.data.total)/max*100);
+      return '<div class="b" style="height:'+Math.max(2,pct)+'%" title="'+esc(money(num(u.data.total)))+'"></div>';
+    }).join("")+'</div><div class="blabel">'+
+    list.slice(-12).map(function(u){ return "<span>"+esc(monthLabel(u.month))+"</span>"; }).join("")+
+    '</div><div class="note">Tallest bar = '+esc(money(max))+"</div>";
+}
+
+function vGst(v){
+  var g=byType("gst");
+  if(!g.length){ v.innerHTML='<div class="empty">No GST ledger uploaded yet.</div>'; return; }
+  var last=g[g.length-1];
+  var itc=num(last.data.inputTaxCredit), out=num(last.data.outputLiability), net=itc-out;
+
+  var h='<h2>'+esc(monthLabel(last.month))+'</h2><div class="cards">'+
+    card("Input tax credit",money(itc))+
+    card("Output liability",money(out))+
+    (net>=0 ? cardCls("good","Carried forward",money(net)) : cardCls("warn","Payable",money(-net)))+
+  '</div>';
+
+  h+= net>=0
+    ? '<div class="good">Credit exceeds liability by '+esc(money(net))+
+      ' — the inverted-duty position. This carries forward, or can be claimed as a refund.</div>'
+    : '<div class="flag">Liability exceeds credit by '+esc(money(-net))+' this month — tax is payable.</div>';
+
+  if(g.length>1){
+    var cum=0;
+    h+="<h2>Month by month</h2><div class=\"scroll\"><table><tr><th>Month</th>"+
+      '<th class="n">ITC</th><th class="n">Output</th><th class="n">Net</th><th class="n">Running</th></tr>'+
+      g.map(function(u){
+        var i=num(u.data.inputTaxCredit), o=num(u.data.outputLiability), n2=i-o;
+        cum+=n2;
+        return "<tr><td>"+esc(monthLabel(u.month))+'</td><td class="n">'+money(i)+
+          '</td><td class="n">'+money(o)+'</td><td class="n '+(n2>=0?"down":"up")+'">'+money(n2)+
+          '</td><td class="n">'+money(cum)+"</td></tr>";
+      }).join("")+"</table></div>"+
+      '<div class="note">Running column is the accumulated credit position across the months on file — '+
+      'it is a rolling total of what has been uploaded here, not a figure from the portal.</div>';
+  }
+  v.innerHTML=h;
+}
+
+function vHistory(v){
+  if(!S.uploads.length){ v.innerHTML='<div class="empty">Nothing uploaded yet.</div>'; return; }
+  var list=S.uploads.slice().sort(function(a,b){ return a.month<b.month?1:-1; });
+  v.innerHTML='<div class="scroll"><table><tr><th>Month</th><th>Report</th><th>File</th>'+
+    '<th class="n">Total</th><th></th></tr>'+
+    list.map(function(u){
+      var t = u.kind==="gst" ? num(u.data.inputTaxCredit)-num(u.data.outputLiability)
+            : u.kind==="register" ? num(u.data.total) : null;
+      return "<tr><td>"+esc(monthLabel(u.month))+"</td><td>"+esc(typeLabel(u.type))+
+        (u.format==="pdf"?'<span class="pill">PDF</span>':"")+
+        "</td><td>"+esc(u.fileName||"")+'</td><td class="n">'+(t==null?"—":money(t))+
+        '</td><td><button class="btn del sm" data-d="'+u.id+'">Remove</button></td></tr>';
+    }).join("")+"</table></div>";
+  Array.prototype.forEach.call(v.querySelectorAll("[data-d]"),function(b){
+    b.onclick=function(){
+      if(!confirm("Remove this upload?")) return;
+      S.uploads=S.uploads.filter(function(u){ return u.id!==b.getAttribute("data-d"); });
+      push(); render();
+    };
+  });
+}
+
+loadLocal(); render(); pull();
+})();
+</script>
+</body>
+</html>
