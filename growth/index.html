@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Growth — Onam Agarbathi</title>
+<style>
+  :root{
+    --paper:#F4F3EF; --card:#FFF; --ink:#16181C; --muted:#6A6F76; --faint:#9BA1A8;
+    --rule:#DEDCD6; --rail:#B3ADA2; --signal:#C8102E; --green:#1a5a3a;
+    --ok:#1F7A4D; --okBg:#E8F3EC; --warnBg:#FBF3DD; --warnLine:#EBDFB8; --warnInk:#5C4A15;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased;padding:0 0 80px}
+  .wrap{max-width:820px;margin:0 auto;padding:0 14px}
+  a{color:var(--green)}
+  .top{padding:12px 0 0;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .back{color:var(--muted);text-decoration:none;font-size:15px;padding:6px 0}
+  .sync{font-size:12px;color:var(--faint)}
+  .hero{padding:14px 0 16px;border-bottom:1px solid var(--rule)}
+  .hero h1{margin:0;font-size:27px;line-height:1.12;letter-spacing:-.02em;font-weight:640}
+  .hero p{margin:7px 0 0;color:var(--muted);font-size:14px}
+  .count{margin:14px 0;background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:12px}
+  .track{height:7px;background:#EFEDE7;border-radius:99px;overflow:hidden;margin-top:8px}
+  .track i{display:block;height:100%;background:var(--green);border-radius:99px;transition:width .3s}
+  h2{font-size:15px;margin:24px 0 4px;font-weight:640}
+  .sub{font-size:13px;color:var(--muted);margin:0 0 10px}
+  .item{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:13px;margin:9px 0}
+  .item.done{background:#FBFCFB;border-color:#CFE6D8}
+  .item.done .t{text-decoration:line-through;color:var(--faint)}
+  .ihead{display:flex;align-items:flex-start;gap:10px}
+  .ck{width:24px;height:24px;flex:none;border:1.5px solid var(--rail);border-radius:6px;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;
+    background:#fff;color:transparent;margin-top:1px}
+  .ck.on{background:var(--green);border-color:var(--green);color:#fff}
+  .t{font-weight:640;font-size:15px;line-height:1.3}
+  .why{font-size:13px;color:var(--muted);margin-top:5px}
+  .when{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;margin-left:6px;
+    background:#EFEDE7;color:var(--muted);vertical-align:middle}
+  .when.now{background:#FDECEF;color:var(--signal)}
+  .when.soon{background:var(--warnBg);color:var(--warnInk)}
+  .bar{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+  .btn{background:var(--green);border:1px solid var(--green);color:#fff;font:inherit;font-size:13px;
+    padding:8px 14px;border-radius:8px;cursor:pointer;text-decoration:none;display:inline-block}
+  .btn.sec{background:none;color:var(--muted);border-color:var(--rule)}
+  .btn.sec:hover{color:var(--ink);border-color:var(--rail)}
+  .fields{margin-top:10px;border-top:1px solid var(--rule);padding-top:9px}
+  .f{display:flex;gap:8px;align-items:center;padding:4px 0;font-size:13px}
+  .f .k{color:var(--muted);flex:none;min-width:74px}
+  .f .v{flex:1;font-family:ui-monospace,Menlo,monospace;font-size:12.5;word-break:break-word}
+  .f button{font:inherit;font-size:11px;padding:3px 9px;border-radius:6px;border:1px solid var(--rule);
+    background:#fff;color:var(--muted);cursor:pointer;flex:none}
+  .note{background:var(--warnBg);border:1px solid var(--warnLine);color:var(--warnInk);
+    padding:9px 11px;border-radius:8px;font-size:13px;margin:10px 0}
+  .flash{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;background:var(--ink);
+    color:#fff;padding:9px 16px;border-radius:99px;font-size:13px;opacity:0;transition:opacity .2s;
+    pointer-events:none;z-index:9}
+  .flash.on{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><a class="back" href="/">← Tracker</a><span class="sync" id="sync">·</span></div>
+  <div class="hero">
+    <h1>Growth</h1>
+    <p>Every listing, tool and account in one place. Tick as you go.</p>
+  </div>
+  <div id="view"></div>
+</div>
+<div class="flash" id="flash"></div>
+
+<script>
+(function(){
+"use strict";
+
+var DB="/.netlify/functions/db", KEY="growth_v1", LS="rk_growth_v1";
+var S={ done:{} };
+
+// The business details every one of these forms asks for. Kept here so they
+// are copy-ready and identical everywhere — a listing with a different phone
+// number or a different spelling of the address is worse than no listing,
+// because Google treats mismatched details as separate businesses.
+var BIZ=[
+  ["Name","Onam Agarbathi Pvt. Ltd."],
+  ["Address","35/36, N.S. Palya, Bannerghatta Road, Bengaluru, Karnataka 560076"],
+  ["Phone","+91 98455 63633"],
+  ["Website","https://onamagarbathi.com"],
+  ["Founded","1972"],
+  ["GSTIN","29AAACO2213Q1Z8"],
+  ["Category","Incense Manufacturer"]
+];
+
+var ITEMS=[
+  { g:"This week — before Ganesh Chaturthi", gsub:"Monday 14 September. These are the only two that can move the needle in four days.",
+    list:[
+      { id:"gbp", t:"Google Business Profile", when:"now",
+        why:"Free listing that puts you in \u201cagarbathi near me\u201d and on Maps. The fastest visibility available to you. Choose phone or email verification if offered \u2014 postcard takes 5\u201314 days and misses the festival. Add 10+ photos and your products once inside.",
+        url:"https://business.google.com/create", fields:true },
+      { id:"wa_template", t:"WhatsApp festival template", when:"now",
+        why:"Already submitted from Menu \u2192 WhatsApp \u2192 New template. Tick this once Meta approves it. Then the Send tab can broadcast to your customer list.",
+        url:"", inapp:"Menu \u2192 \ud83d\udcac WhatsApp" }
+    ]},
+  { g:"This month — plant for Diwali", gsub:"Diwali is early November. Eight weeks is genuinely enough for search to work; four days was not.",
+    list:[
+      { id:"gsc", t:"Google Search Console", when:"soon",
+        why:"Tells Google the site exists and hands over the sitemap. Verify by HTML tag, then send me the code \u2014 I add it and push, you don\u2019t touch code. Then submit sitemap.xml and Request Indexing.",
+        url:"https://search.google.com/search-console" },
+      { id:"bing", t:"Bing Webmaster Tools", when:"soon",
+        why:"Bing powers Copilot and ChatGPT search, and its index is far less contested than Google\u2019s. One click to import once Search Console is done.",
+        url:"https://www.bing.com/webmasters" },
+      { id:"merchant", t:"Google Merchant Center", when:"soon",
+        why:"Puts your products in Google Shopping results with photo and price. Free listings are available. Needs the same business details as the profile above.",
+        url:"https://merchants.google.com/", fields:true },
+      { id:"gbp_posts", t:"Post a festival update on Business Profile", when:"soon",
+        why:"Posts show directly on your listing and get indexed quickly. One per festival is enough \u2014 Ganesh now, Diwali in November.",
+        url:"https://business.google.com/posts" }
+    ]},
+  { g:"Marketplaces", gsub:"Where people already search for incense with intent to buy. Each takes a day or two to set up.",
+    list:[
+      { id:"amazon", t:"Amazon Seller Central", when:"",
+        why:"The biggest incense buying audience in India. Needs GSTIN and a bank account. Slow to set up, worth it before Diwali.",
+        url:"https://sellercentral.amazon.in/", fields:true },
+      { id:"indiamart", t:"IndiaMART", when:"",
+        why:"Where wholesale and bulk enquiries actually come from in this trade. Free listing tier exists. Good fit for your CSD and distributor side.",
+        url:"https://seller.indiamart.com/" },
+      { id:"jiomart", t:"JioMart / Flipkart", when:"",
+        why:"Worth having, lower priority than Amazon. Same documents.",
+        url:"https://seller.flipkart.com/" }
+    ]},
+  { g:"Social", gsub:"You already have Instagram content from the Vaishak campaign work.",
+    list:[
+      { id:"insta_shop", t:"Instagram Shopping", when:"",
+        why:"Tags products directly in posts so people can buy without leaving the app. Needs a connected catalogue \u2014 the same product feed the site now publishes.",
+        url:"https://business.instagram.com/shopping/" },
+      { id:"fb_page", t:"Facebook Business Page", when:"",
+        why:"Mostly matters because it anchors the Instagram and WhatsApp business accounts you already run.",
+        url:"https://www.facebook.com/pages/create" }
+    ]}
+];
+
+function flash(t){
+  var el=document.getElementById("flash");
+  el.textContent=t; el.className="flash on";
+  setTimeout(function(){ el.className="flash"; },1400);
+}
+function esc(s){
+  return String(s==null?"":s).replace(/[&<>"']/g,function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
+function setSync(t){ document.getElementById("sync").textContent=t; }
+function post(url,body){
+  return fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+    .then(function(r){ return r.json(); });
+}
+function loadLocal(){
+  try{ var r=localStorage.getItem(LS); if(r){ var d=JSON.parse(r); if(d&&d.done) S.done=d.done; } }catch(e){}
+}
+function pull(){
+  setSync("syncing…");
+  return post(DB,{action:"getPortfolio",user:"main",key:KEY}).then(function(r){
+    if(r&&r.data&&r.data.done) S.done=r.data.done;
+    try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){}
+    setSync("synced"); render();
+  }).catch(function(){ setSync("offline — using this device"); });
+}
+var pt=null;
+function push(){
+  try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){}
+  setSync("saving…");
+  clearTimeout(pt);
+  pt=setTimeout(function(){
+    post(DB,{action:"savePortfolio",user:"main",key:KEY,data:S})
+      .then(function(){ setSync("saved"); })
+      .catch(function(){ setSync("not saved to cloud"); });
+  },600);
+}
+
+function total(){ var n=0; ITEMS.forEach(function(g){ n+=g.list.length; }); return n; }
+function doneCount(){
+  var n=0;
+  ITEMS.forEach(function(g){ g.list.forEach(function(i){ if(S.done[i.id]) n++; }); });
+  return n;
+}
+
+function render(){
+  var d=doneCount(), t=total(), pct=t?Math.round(d/t*100):0;
+  var h='<div class="count"><b>'+d+' of '+t+'</b> done'+
+    '<div class="track"><i style="width:'+pct+'%"></i></div></div>';
+
+  h+='<div class="note">Search rankings take weeks. For Ganesh Chaturthi the two items '+
+     'marked <b>now</b> are what actually reach people in four days — the rest is Diwali groundwork.</div>';
+
+  ITEMS.forEach(function(g){
+    h+='<h2>'+esc(g.g)+'</h2><p class="sub">'+esc(g.gsub)+'</p>';
+    g.list.forEach(function(i){
+      var on=!!S.done[i.id];
+      h+='<div class="item'+(on?' done':'')+'">'+
+        '<div class="ihead"><div class="ck'+(on?' on':'')+'" data-ck="'+i.id+'">\u2713</div>'+
+        '<div><div class="t">'+esc(i.t)+
+          (i.when?'<span class="when '+esc(i.when)+'">'+(i.when==="now"?"this week":"this month")+'</span>':'')+
+        '</div><div class="why">'+esc(i.why)+'</div></div></div>';
+      h+='<div class="bar">';
+      if(i.url) h+='<a class="btn" href="'+esc(i.url)+'" target="_blank" rel="noopener">Open \u2197</a>';
+      if(i.inapp) h+='<span class="btn sec">'+esc(i.inapp)+'</span>';
+      if(i.fields) h+='<button class="btn sec" data-f="'+i.id+'">Business details</button>';
+      h+='</div>';
+      if(i.fields) h+='<div class="fields" id="f_'+i.id+'" style="display:none">'+
+        BIZ.map(function(b,ix){
+          return '<div class="f"><span class="k">'+esc(b[0])+'</span><span class="v" id="v_'+i.id+'_'+ix+'">'+
+            esc(b[1])+'</span><button data-cp="'+i.id+'_'+ix+'">Copy</button></div>';
+        }).join("")+'</div>';
+      h+='</div>';
+    });
+  });
+  document.getElementById("view").innerHTML=h;
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-ck]"),function(b){
+    b.onclick=function(){
+      var id=b.getAttribute("data-ck");
+      if(S.done[id]) delete S.done[id]; else S.done[id]=new Date().toISOString();
+      push(); render();
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-f]"),function(b){
+    b.onclick=function(){
+      var el=document.getElementById("f_"+b.getAttribute("data-f"));
+      el.style.display = el.style.display==="none" ? "block" : "none";
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-cp]"),function(b){
+    b.onclick=function(){
+      var txt=document.getElementById("v_"+b.getAttribute("data-cp")).textContent;
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(txt).then(function(){ flash("Copied"); })
+          .catch(function(){ flash("Copy failed — select it by hand"); });
+      } else {
+        // Older mobile browsers: select the text so a long-press copy works.
+        var r=document.createRange();
+        r.selectNodeContents(document.getElementById("v_"+b.getAttribute("data-cp")));
+        var s=window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        flash("Selected — long-press to copy");
+      }
+    };
+  });
+}
+
+loadLocal(); render(); pull();
+})();
+</script>
+</body>
+</html>
