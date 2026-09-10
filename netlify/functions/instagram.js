@@ -16,6 +16,45 @@ exports.handler = async (event) => {
     const body = JSON.parse(event.body || "{}");
     const action = body.action || "ping";
 
+    // Publishing is a two-step handshake: create a media container, wait for
+    // Instagram to finish processing it, then publish. Skipping the wait is the
+    // usual cause of "media not ready" failures.
+    async function publishPost(imageUrl, caption, isVideo) {
+      const base = "https://graph.facebook.com/v21.0/" + IG_USER_ID;
+      const params = new URLSearchParams({ access_token: ACCESS_TOKEN });
+      if (isVideo) { params.set("video_url", imageUrl); params.set("media_type", "REELS"); }
+      else { params.set("image_url", imageUrl); }
+      if (caption) params.set("caption", caption);
+
+      const createRes = await fetch(base + "/media", { method: "POST", body: params });
+      const created = await createRes.json();
+      if (!created.id) {
+        return { ok: false, step: "create", error: (created.error && created.error.message) || "no container id" };
+      }
+
+      // Poll until Instagram reports the container FINISHED. Images are usually
+      // instant; video genuinely needs the wait.
+      let status = "IN_PROGRESS";
+      for (let i = 0; i < 20 && status === "IN_PROGRESS"; i++) {
+        await new Promise((r) => setTimeout(r, isVideo ? 3000 : 1000));
+        const st = await fetch("https://graph.facebook.com/v21.0/" + created.id +
+          "?fields=status_code&access_token=" + encodeURIComponent(ACCESS_TOKEN));
+        const stj = await st.json();
+        status = stj.status_code || "ERROR";
+      }
+      if (status !== "FINISHED") {
+        return { ok: false, step: "processing", error: "container status: " + status };
+      }
+
+      const pubParams = new URLSearchParams({ creation_id: created.id, access_token: ACCESS_TOKEN });
+      const pubRes = await fetch(base + "/media_publish", { method: "POST", body: pubParams });
+      const published = await pubRes.json();
+      if (!published.id) {
+        return { ok: false, step: "publish", error: (published.error && published.error.message) || "no post id" };
+      }
+      return { ok: true, postId: published.id, permalink: "https://www.instagram.com/p/" + published.id };
+    }
+
     const ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN;
     const IG_USER_ID = process.env.INSTAGRAM_USER_ID || "17841461801869834";
 
@@ -24,6 +63,21 @@ exports.handler = async (event) => {
     }
 
     // ── ping — verify connection ──────────────────────────────────────────
+    if (action === "publish") {
+      if (!body.imageUrl) {
+        return { statusCode: 400, headers: h,
+          body: JSON.stringify({ error: "imageUrl is required - Instagram fetches the media from a public URL" }) };
+      }
+      const r = await publishPost(body.imageUrl, body.caption || "", !!body.isVideo);
+      return { statusCode: r.ok ? 200 : 502, headers: h, body: JSON.stringify(r) };
+    }
+
+    if (action === "quota") {
+      const q = await fetch("https://graph.facebook.com/v21.0/" + IG_USER_ID +
+        "/content_publishing_limit?access_token=" + encodeURIComponent(ACCESS_TOKEN));
+      return { statusCode: 200, headers: h, body: JSON.stringify(await q.json()) };
+    }
+
     if (action === "ping") {
       const profile = await igGet("/" + IG_USER_ID + "?fields=id,name,username,followers_count,media_count", ACCESS_TOKEN);
       return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, profile }) };
