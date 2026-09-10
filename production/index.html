@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Production — Onam Agarbathi</title>
+<style>
+  :root{
+    --paper:#F4F3EF; --card:#FFF; --ink:#16181C; --muted:#6A6F76; --faint:#9BA1A8;
+    --rule:#DEDCD6; --rail:#B3ADA2; --signal:#C8102E; --green:#1a5a3a;
+    --ok:#1F7A4D; --okBg:#E8F3EC; --warnBg:#FBF3DD; --warnLine:#EBDFB8; --warnInk:#5C4A15;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased;padding:0 0 80px}
+  .wrap{max-width:840px;margin:0 auto;padding:0 14px}
+  a{color:var(--green)}
+  .top{padding:12px 0 0;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .back{color:var(--muted);text-decoration:none;font-size:15px;padding:6px 0}
+  .sync{font-size:12px;color:var(--faint)}
+  .hero{padding:14px 0 16px;border-bottom:1px solid var(--rule)}
+  .hero h1{margin:0;font-size:27px;line-height:1.12;letter-spacing:-.02em;font-weight:640}
+  .hero p{margin:7px 0 0;color:var(--muted);font-size:14px}
+  .tabs{display:flex;gap:6px;overflow-x:auto;padding:12px 0;border-bottom:1px solid var(--rule);scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{background:none;border:1px solid var(--rule);color:var(--muted);font:inherit;font-size:13px;
+    padding:7px 13px;border-radius:999px;cursor:pointer;white-space:nowrap;flex:0 0 auto}
+  .tab.on{background:var(--green);border-color:var(--green);color:#fff}
+  h2{font-size:16px;margin:22px 0 8px;font-weight:640}
+  .ord{background:var(--card);border:1px solid var(--rule);border-radius:11px;padding:14px;margin:11px 0}
+  .ord.late{border-color:#EBC4C4;background:#FFFCFC}
+  .ord.done{background:#FBFCFB;border-color:#CFE6D8}
+  .oh{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .oname{font-weight:640;font-size:16px;line-height:1.25}
+  .osub{font-size:12.5px;color:var(--muted);margin-top:3px}
+  .pct{font-size:20px;font-weight:640;letter-spacing:-.02em;white-space:nowrap}
+  .track{height:9px;background:#EFEDE7;border-radius:99px;overflow:hidden;margin:11px 0 8px}
+  .track i{display:block;height:100%;background:var(--green);border-radius:99px;transition:width .3s}
+  .track i.late{background:var(--signal)}
+  .nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(94px,1fr));gap:9px;margin:10px 0}
+  .n{background:#FAF9F6;border:1px solid var(--rule);border-radius:8px;padding:8px 9px}
+  .n .k{font-size:11px;color:var(--muted)}
+  .n .v{font-size:15px;font-weight:640;margin-top:2px;font-variant-numeric:tabular-nums}
+  .verdict{padding:9px 11px;border-radius:8px;font-size:13.5px;margin:9px 0 0}
+  .verdict.ok{background:var(--okBg);border:1px solid #CFE6D8;color:var(--ok)}
+  .verdict.warn{background:var(--warnBg);border:1px solid var(--warnLine);color:var(--warnInk)}
+  .verdict.bad{background:#FDECEF;border:1px solid #F3D3D8;color:#8C1B2C}
+  .bar{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+  button{font:inherit;cursor:pointer}
+  .btn{background:var(--green);border:1px solid var(--green);color:#fff;font-size:13px;
+    padding:8px 14px;border-radius:8px}
+  .btn.sec{background:none;color:var(--muted);border-color:var(--rule)}
+  .btn.del{background:none;color:var(--signal);border-color:var(--rule)}
+  .btn.sm{font-size:12px;padding:5px 10px}
+  .panel{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:14px;margin:12px 0}
+  input,select,textarea{font:inherit;font-size:15px;padding:8px 9px;border:1px solid var(--rule);
+    border-radius:8px;background:#fff;color:var(--ink);width:100%}
+  label{display:block;font-size:12px;color:var(--muted);margin:9px 0 3px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+  @media(max-width:560px){.row,.row3{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--rule);
+    border-radius:10px;overflow:hidden;font-size:14px}
+  th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--rule)}
+  th{font-size:12px;color:var(--muted);font-weight:600;background:#FAF9F6}
+  tr:last-child td{border-bottom:none}
+  td.n2,th.n2{text-align:right;font-variant-numeric:tabular-nums}
+  .scroll{overflow-x:auto}
+  .empty{color:var(--faint);font-size:14px;padding:20px 0;text-align:center}
+  .note{font-size:13px;color:var(--muted);margin:8px 0}
+  .flag{background:var(--warnBg);border:1px solid var(--warnLine);color:var(--warnInk);
+    padding:9px 11px;border-radius:8px;font-size:13px;margin:8px 0}
+  .spark{display:flex;align-items:flex-end;gap:3px;height:44px;margin:8px 0 2px}
+  .spark i{flex:1;background:var(--rail);border-radius:2px 2px 0 0;min-height:2px}
+  .spark i.hi{background:var(--green)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><a class="back" href="/">← Tracker</a><span class="sync" id="sync">·</span></div>
+  <div class="hero">
+    <h1>Production</h1>
+    <p>What's made, what's left, and when it will actually be ready.</p>
+  </div>
+  <div class="tabs" id="tabs"></div>
+  <div id="view"></div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+var DB="/.netlify/functions/db", KEY="production_v1", LS="rk_production_v1";
+var S={ orders:[] };
+var tab="live", editing=null, logFor=null, entries=null;
+
+function uid(p){ return p+Math.random().toString(36).slice(2,9); }
+function today(){ return new Date().toISOString().slice(0,10); }
+function num(v){ var n=parseFloat(v); return isFinite(n)?n:0; }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+function setSync(t){ document.getElementById("sync").textContent=t; }
+function fmt(n){ return Math.round(n).toLocaleString("en-IN"); }
+function dLabel(iso){
+  if(!iso) return "—";
+  var d=new Date(iso+"T00:00:00");
+  if(isNaN(d)) return iso;
+  var m=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return d.getDate()+" "+m[d.getMonth()];
+}
+function daysBetween(a,b){
+  var x=new Date(a+"T00:00:00"), y=new Date(b+"T00:00:00");
+  if(isNaN(x)||isNaN(y)) return 0;
+  return Math.round((y-x)/86400000);
+}
+function addDays(iso,n){
+  var d=new Date(iso+"T00:00:00");
+  if(isNaN(d)) return "";
+  d.setDate(d.getDate()+Math.ceil(n));
+  return d.toISOString().slice(0,10);
+}
+
+function post(url,body){
+  return fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+    .then(function(r){ return r.json(); });
+}
+function loadLocal(){
+  try{ var r=localStorage.getItem(LS); if(r){ var d=JSON.parse(r); if(d&&Array.isArray(d.orders)) S.orders=d.orders; } }catch(e){}
+}
+function pull(){
+  setSync("syncing…");
+  return post(DB,{action:"getPortfolio",user:"main",key:KEY}).then(function(r){
+    if(r&&r.data&&Array.isArray(r.data.orders)) S.orders=r.data.orders;
+    try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){}
+    setSync("synced"); render();
+  }).catch(function(){ setSync("offline — using this device"); });
+}
+var pt=null;
+function push(){
+  try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){}
+  setSync("saving…");
+  clearTimeout(pt);
+  pt=setTimeout(function(){
+    post(DB,{action:"savePortfolio",user:"main",key:KEY,data:S})
+      .then(function(){ setSync("saved"); })
+      .catch(function(){ setSync("not saved to cloud"); });
+  },600);
+}
+// Sales - Order entries, so a production order can be tied to the real order.
+function loadEntries(){
+  if(entries) return Promise.resolve(entries);
+  return post(DB,{action:"getAll",user:"main"}).then(function(r){
+    var all=(r&&(r.entries||r.data))||[];
+    entries=all.filter(function(e){ return e && e.category==="Sales - Order"; })
+      .sort(function(a,b){ return (a.date<b.date)?1:-1; }).slice(0,150);
+    return entries;
+  }).catch(function(){ entries=[]; return entries; });
+}
+
+/* ---------------- the maths ----------------
+   Run rate is deliberately measured over ELAPSED CALENDAR DAYS, not over the
+   number of entries. Logging a week's output in one entry would otherwise look
+   like a single enormous day and produce a wildly optimistic finish date.
+--------------------------------------------- */
+function calc(o){
+  var logs=(o.logs||[]).slice().sort(function(a,b){ return a.d<b.d?-1:1; });
+  var made=logs.reduce(function(s,l){ return s+num(l.qty); },0);
+  var target=num(o.targetCases);
+  var balance=Math.max(0,target-made);
+  var pct=target?Math.min(100,made/target*100):0;
+
+  var firstDay=o.startDate||(logs[0]&&logs[0].d)||null;
+  var lastDay=logs.length?logs[logs.length-1].d:null;
+  // Inclusive span: one day of logging counts as one day, not zero.
+  var span=(firstDay&&lastDay)?Math.max(1,daysBetween(firstDay,lastDay)+1):0;
+  var rate=span?made/span:0;
+
+  var daysLeft=(rate>0)?balance/rate:null;
+  var projected=(daysLeft!=null&&balance>0)?addDays(today(),daysLeft):(balance<=0?lastDay:null);
+
+  var slip=null;
+  if(o.promisedDate&&projected) slip=daysBetween(o.promisedDate,projected);
+
+  return { logs:logs, made:made, target:target, balance:balance, pct:pct,
+           rate:rate, span:span, daysLeft:daysLeft, projected:projected, slip:slip,
+           done:target>0&&made>=target };
+}
+
+/* ---------------- views ---------------- */
+var TABS=[["live","Running"],["all","All orders"],["new","+ New order"]];
+
+function render(){
+  var t=document.getElementById("tabs");
+  t.innerHTML=TABS.map(function(x){
+    return '<button class="tab'+(tab===x[0]?" on":"")+'" data-t="'+x[0]+'">'+esc(x[1])+"</button>";
+  }).join("");
+  Array.prototype.forEach.call(t.querySelectorAll(".tab"),function(b){
+    b.onclick=function(){ tab=b.getAttribute("data-t"); editing=null; logFor=null;
+      if(tab==="new"){ editing={id:uid("p_"),unit:"cases",logs:[],startDate:today()}; }
+      render(); window.scrollTo(0,0); };
+  });
+  var v=document.getElementById("view");
+  if(tab==="new"||editing) return form(v);
+  if(logFor) return logView(v);
+  list(v, tab==="live");
+}
+
+function list(v,onlyLive){
+  var orders=S.orders.slice().map(function(o){ return {o:o,c:calc(o)}; })
+    .filter(function(x){ return onlyLive ? !x.c.done : true; })
+    .sort(function(a,b){
+      // Most at risk first - that is what needs a decision today.
+      var as=(a.c.slip==null)?-999:a.c.slip, bs=(b.c.slip==null)?-999:b.c.slip;
+      return bs-as;
+    });
+
+  if(!orders.length){
+    v.innerHTML='<div class="empty">'+(onlyLive?"Nothing in production right now.":"No production orders yet.")+
+      '<br><br><button class="btn" id="add">+ New order</button></div>';
+    document.getElementById("add").onclick=function(){
+      tab="new"; editing={id:uid("p_"),unit:"cases",logs:[],startDate:today()}; render(); };
+    return;
+  }
+
+  v.innerHTML=orders.map(function(x){
+    var o=x.o,c=x.c;
+    var cls=c.done?"done":(c.slip!=null&&c.slip>0?"late":"");
+    var h='<div class="ord '+cls+'">'+
+      '<div class="oh"><div><div class="oname">'+esc(o.customer||"(no customer)")+'</div>'+
+      '<div class="osub">'+esc(o.product||"")+(o.promisedDate?" · promised "+dLabel(o.promisedDate):"")+'</div></div>'+
+      '<div class="pct">'+Math.round(c.pct)+'%</div></div>'+
+      '<div class="track"><i class="'+(c.slip!=null&&c.slip>0?"late":"")+'" style="width:'+c.pct+'%"></i></div>'+
+      '<div class="nums">'+
+        nbox("Made",fmt(c.made))+
+        nbox("Target",fmt(c.target))+
+        nbox("Balance",fmt(c.balance))+
+        nbox("Per day",c.rate?c.rate.toFixed(0):"—")+
+      '</div>';
+
+    if(c.done){
+      h+='<div class="verdict ok">Complete. '+fmt(c.made)+' cases made.</div>';
+    } else if(!c.rate){
+      h+='<div class="verdict warn">No production logged yet — add a day to get a finish date.</div>';
+    } else {
+      var line="At "+c.rate.toFixed(0)+" cases/day, "+fmt(c.balance)+" left \u2192 ready around <b>"+
+        dLabel(c.projected)+"</b>";
+      if(c.slip==null) h+='<div class="verdict warn">'+line+'. No promised date set.</div>';
+      else if(c.slip>0) h+='<div class="verdict bad">'+line+' — <b>'+c.slip+
+        ' day'+(c.slip>1?"s":"")+' past</b> the '+dLabel(o.promisedDate)+' promise. '+
+        'Needs '+Math.ceil(c.balance/Math.max(1,daysBetween(today(),o.promisedDate)))+
+        '/day to recover.</div>';
+      else h+='<div class="verdict ok">'+line+', '+Math.abs(c.slip)+
+        ' day'+(Math.abs(c.slip)===1?"":"s")+' ahead of the promise.</div>';
+    }
+
+    if(c.logs.length>1){
+      var mx=Math.max.apply(null,c.logs.map(function(l){ return num(l.qty); }))||1;
+      h+='<div class="spark">'+c.logs.slice(-21).map(function(l){
+        return '<i class="'+(num(l.qty)>=mx?"hi":"")+'" style="height:'+
+          Math.max(4,num(l.qty)/mx*100)+'%" title="'+esc(dLabel(l.d))+": "+fmt(num(l.qty))+'"></i>';
+      }).join("")+'</div>';
+    }
+
+    h+='<div class="bar"><button class="btn sm" data-log="'+o.id+'">+ Log production</button>'+
+       '<button class="btn sec sm" data-edit="'+o.id+'">Edit</button></div></div>';
+    return h;
+  }).join("");
+
+  Array.prototype.forEach.call(v.querySelectorAll("[data-log]"),function(b){
+    b.onclick=function(){ logFor=b.getAttribute("data-log"); render(); window.scrollTo(0,0); };
+  });
+  Array.prototype.forEach.call(v.querySelectorAll("[data-edit]"),function(b){
+    b.onclick=function(){
+      var id=b.getAttribute("data-edit");
+      editing=JSON.parse(JSON.stringify(S.orders.filter(function(o){ return o.id===id; })[0]));
+      render(); window.scrollTo(0,0);
+    };
+  });
+}
+function nbox(k,v){ return '<div class="n"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+"</div></div>"; }
+
+function form(v){
+  var d=editing, isNew=!S.orders.some(function(o){ return o.id===d.id; });
+  v.innerHTML='<div class="panel"><h2 style="margin-top:0">'+(isNew?"New production order":"Edit order")+'</h2>'+
+    '<label>Link to a Sales - Order entry <span style="color:var(--faint)">(optional)</span></label>'+
+    '<select id="f_entry"><option value="">— loading orders —</option></select>'+
+    '<div class="note">Linking pulls the customer name across and keeps production tied to the real order.</div>'+
+    '<div class="row"><div><label>Customer</label><input id="f_cust" value="'+esc(d.customer||"")+'"></div>'+
+    '<div><label>Product</label><input id="f_prod" value="'+esc(d.product||"")+'" placeholder="Vaishak 100g, mixed…"></div></div>'+
+    '<div class="row3"><div><label>Target (cases)</label><input id="f_target" type="number" step="any" value="'+esc(d.targetCases||"")+'"></div>'+
+    '<div><label>Started</label><input id="f_start" type="date" value="'+esc(d.startDate||today())+'"></div>'+
+    '<div><label>Promised to customer</label><input id="f_prom" type="date" value="'+esc(d.promisedDate||"")+'"></div></div>'+
+    '<label>Notes</label><textarea id="f_notes" rows="2">'+esc(d.notes||"")+'</textarea>'+
+    '<div class="bar"><button class="btn" id="save">Save</button>'+
+    '<button class="btn sec" id="cancel">Cancel</button>'+
+    (isNew?"":'<button class="btn del" id="del">Delete</button>')+'</div></div>';
+
+  loadEntries().then(function(list){
+    var sel=document.getElementById("f_entry");
+    if(!sel) return;
+    sel.innerHTML='<option value="">— not linked —</option>'+list.map(function(e){
+      var lbl=(e.title||"(untitled)")+(e.person?" · "+e.person:"")+(e.date?" · "+e.date:"");
+      return '<option value="'+esc(e.id)+'"'+(d.entryId===e.id?" selected":"")+'>'+esc(lbl.slice(0,70))+"</option>";
+    }).join("");
+    sel.onchange=function(){
+      var e=list.filter(function(x){ return x.id===sel.value; })[0];
+      if(e){
+        if(!document.getElementById("f_cust").value) document.getElementById("f_cust").value=e.person||e.title||"";
+        if(!document.getElementById("f_prod").value) document.getElementById("f_prod").value=e.title||"";
+      }
+    };
+  });
+
+  document.getElementById("save").onclick=function(){
+    var g=function(i){ var el=document.getElementById(i); return el?el.value:""; };
+    d.entryId=g("f_entry")||null;
+    d.customer=g("f_cust").trim(); d.product=g("f_prod").trim();
+    d.targetCases=num(g("f_target")); d.startDate=g("f_start")||today();
+    d.promisedDate=g("f_prom")||null; d.notes=g("f_notes"); d.unit="cases";
+    if(!d.customer&&!d.product){ alert("Give it a customer or a product name."); return; }
+    if(!(d.targetCases>0)){ alert("Target cases is needed — without it there is nothing to count down."); return; }
+    var ex=S.orders.filter(function(o){ return o.id===d.id; })[0];
+    if(ex) S.orders[S.orders.indexOf(ex)]=d; else S.orders.push(d);
+    editing=null; tab="live"; push(); render();
+  };
+  document.getElementById("cancel").onclick=function(){ editing=null; tab="live"; render(); };
+  var db_=document.getElementById("del");
+  if(db_) db_.onclick=function(){
+    if(!confirm("Delete this production order and its log?")) return;
+    S.orders=S.orders.filter(function(o){ return o.id!==d.id; });
+    editing=null; tab="live"; push(); render();
+  };
+}
+
+function logView(v){
+  var o=S.orders.filter(function(x){ return x.id===logFor; })[0];
+  if(!o){ logFor=null; return render(); }
+  var c=calc(o);
+  v.innerHTML='<div class="panel"><h2 style="margin-top:0">'+esc(o.customer||"Order")+'</h2>'+
+    '<div class="note">'+fmt(c.made)+' of '+fmt(c.target)+' cases · '+fmt(c.balance)+' to go</div>'+
+    '<div class="row"><div><label>Date</label><input id="l_date" type="date" value="'+today()+'"></div>'+
+    '<div><label>Cases produced</label><input id="l_qty" type="number" step="any" placeholder="e.g. 250"></div></div>'+
+    '<div class="note">Logging a week at once is fine — put the last day of the week as the date. '+
+    'The rate is worked out over elapsed days, so it stays accurate either way.</div>'+
+    '<label>Note (optional)</label><input id="l_note" placeholder="second shift, machine down…">'+
+    '<div class="bar"><button class="btn" id="l_add">Add</button>'+
+    '<button class="btn sec" id="l_back">Back</button></div></div>';
+
+  if(c.logs.length){
+    v.innerHTML+='<h2>Log</h2><div class="scroll"><table><tr><th>Date</th><th class="n2">Cases</th>'+
+      '<th class="n2">Running</th><th>Note</th><th></th></tr>'+
+      (function(){ var run=0;
+        return c.logs.slice().reverse().map(function(l,i){
+          return l;
+        }), c.logs.map(function(l){ run+=num(l.qty); return {l:l,run:run}; })
+          .reverse().map(function(x){
+            return "<tr><td>"+esc(dLabel(x.l.d))+'</td><td class="n2">'+fmt(num(x.l.qty))+
+              '</td><td class="n2">'+fmt(x.run)+"</td><td>"+esc(x.l.note||"")+
+              '</td><td><button class="btn del sm" data-rm="'+esc(x.l.id||x.l.d)+'">×</button></td></tr>';
+          }).join("");
+      })()+"</table></div>";
+  }
+
+  document.getElementById("l_add").onclick=function(){
+    var q=num(document.getElementById("l_qty").value);
+    if(!(q>0)){ alert("How many cases?"); return; }
+    o.logs=o.logs||[];
+    o.logs.push({id:uid("l_"),d:document.getElementById("l_date").value||today(),
+                 qty:q,note:document.getElementById("l_note").value.trim()});
+    push(); render();
+  };
+  document.getElementById("l_back").onclick=function(){ logFor=null; render(); };
+  Array.prototype.forEach.call(v.querySelectorAll("[data-rm]"),function(b){
+    b.onclick=function(){
+      var k=b.getAttribute("data-rm");
+      o.logs=(o.logs||[]).filter(function(l){ return (l.id||l.d)!==k; });
+      push(); render();
+    };
+  });
+}
+
+loadLocal(); render(); pull();
+})();
+</script>
+</body>
+</html>
