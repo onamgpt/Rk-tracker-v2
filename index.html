@@ -78,6 +78,20 @@ const IS_LOGISTICS_USER=["main","prakash"].includes(URL_USER); // despatch-to-pa
 const FAMILY_USERS=["wife","daughter"];
 const BUILD_STAMP="2026-08-07 06:02 UTC";
 const SALES_USERS=["sunil","satish","sugeesh","sadasivan","sebi","vinod","biju","sooraj","murugan"];
+// Rate cards are kept per channel. CPC and CSD price differently from general
+// trade, so an officer who works both must be able to switch and quote the
+// right card. Satish runs CPC Kerala and Sadasivan CPC Tamil Nadu, so those two
+// open on CPC; everyone else opens on trade. Any officer can switch.
+const RATE_CHANNELS=[{k:"trade",l:"General trade"},{k:"cpc",l:"CPC"},{k:"csd",l:"CSD"}];
+const OFFICER_CHANNEL={satish:"cpc",sadasivan:"cpc"};
+// field_rates was a flat array before channels existed. A plain array is read
+// as the trade card so nothing already published is lost.
+function normaliseRates(d){
+  const out={trade:[],cpc:[],csd:[]};
+  if(Array.isArray(d)) { out.trade=d; return out; }
+  if(d&&typeof d==="object") RATE_CHANNELS.forEach(c=>{ if(Array.isArray(d[c.k])) out[c.k]=d[c.k]; });
+  return out;
+}
 const IS_FAMILY=FAMILY_USERS.includes(URL_USER);
 const IS_SALES=SALES_USERS.includes(URL_USER);
 // Anyone who is not staff and not family is an outside trading user. They get
@@ -5337,7 +5351,9 @@ function FieldConsole({ onClose, rootMode, onOpenFull }) {
   const [busy,setBusy]=useState("");
   const [msg,setMsg]=useState("");
 
-  const [rates,setRates]=useState([]);        // [{name, rate}] selling rate per dozen
+  const [allRates,setAllRates]=useState({trade:[],cpc:[],csd:[]});  // per channel
+  const [channel,setChannel]=useState(OFFICER_CHANNEL[me]||"trade");
+  const rates = allRates[channel]||[];        // [{name, rate}] selling rate per dozen
   const [target,setTarget]=useState(null);    // {user: dailyTarget}
   const [feed,setFeed]=useState([]);          // recent team activity
   const [allOrders,setAllOrders]=useState([]);
@@ -5550,7 +5566,7 @@ function FieldConsole({ onClose, rootMode, onOpenFull }) {
   };
 
   useEffect(()=>{ (async()=>{
-    try{ const r=await sheetsAPI("getPortfolio",{key:"field_rates",user:"main"}); if(r&&r.data&&Array.isArray(r.data)) setRates(r.data); }catch(e){}
+    try{ const r=await sheetsAPI("getPortfolio",{key:"field_rates",user:"main"}); if(r&&r.data) setAllRates(normaliseRates(r.data)); }catch(e){}
     try{ const t=await sheetsAPI("getPortfolio",{key:"field_targets",user:"main"}); if(t&&t.data) setTarget(t.data); }catch(e){}
     try{ const f=await sheetsAPI("getPortfolio",{key:"field_orders",user:"main"}); if(f&&f.data&&Array.isArray(f.data)) setFeed(f.data.slice(0,25)); }catch(e){}
     try{ const a=await sheetsAPI("getPortfolio",{key:"field_orders",user:"main"}); if(a&&a.data&&Array.isArray(a.data)) setAllOrders(a.data); }catch(e){}
@@ -5616,7 +5632,7 @@ function FieldConsole({ onClose, rootMode, onOpenFull }) {
     try{
       const cartTotal=good.reduce((s,l)=>s+rateOf(l.item)*l.qty,0);
       const rec={ id:"fo_"+Date.now(), officer:officer, user:me, date:today, time:new Date().toISOString(),
-        party:party.trim(), town:town.trim(), lines:good, value:cartTotal,
+        party:party.trim(), town:town.trim(), channel:channel, lines:good, value:cartTotal,
         paid:Number(paid)||0, payments:(Number(paid)>0?[{date:today,amount:Number(paid),mode:"on order"}]:[]),
         note:orderNote, status:"Placed", invoiceNo:"", transporter:"", lrNumber:"",
         expectedDelivery:"", verified:false };
@@ -5899,6 +5915,14 @@ function FieldConsole({ onClose, rootMode, onOpenFull }) {
                     + Add an item</button>}
             </div>
           : <div>
+              <div style={{display:"flex",gap:5,marginBottom:7}}>
+                {RATE_CHANNELS.map(c=>{ const on=channel===c.k; const n=(allRates[c.k]||[]).length;
+                  return <button key={c.k} onClick={()=>{setChannel(c.k);setCart({});}}
+                    style={{flex:1,padding:"7px 4px",borderRadius:8,cursor:"pointer",
+                      border:on?"none":"1.5px solid #dde6dd",background:on?"#1a5a3a":"#fff",
+                      color:on?"#fff":(n?"#3a5a3a":"#aab"),fontWeight:on?800:600,fontSize:11.5}}>
+                    {c.l}{n?"":" —"}</button>; })}
+              </div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                 <span style={{fontSize:11.5,fontWeight:800,color:"#1a5a3a"}}>Catalogue — today's rates</span>
                 <span style={{fontSize:10.5,color:"#8a9a8a"}}>{rates.length} items</span>
@@ -6712,7 +6736,10 @@ function FieldConsole({ onClose, rootMode, onOpenFull }) {
 // ============================================================
 function FieldAdmin({ onClose }) {
   const [tab,setTab]=useState("report");
-  const [rates,setRates]=useState([]);
+  const [allRates,setAllRates]=useState({trade:[],cpc:[],csd:[]});
+  const [rchan,setRchan]=useState("trade");
+  const rates=allRates[rchan]||[];
+  const setRates=(v)=>setAllRates(p=>({...p,[rchan]:(typeof v==="function"?v(p[rchan]||[]):v)}));
   const [targets,setTargets]=useState({});
   const [orders,setOrders]=useState([]);
   const [sugg,setSugg]=useState([]);
@@ -6740,7 +6767,7 @@ function FieldAdmin({ onClose }) {
   const put=async(k,v)=>{ await sheetsAPI("savePortfolio",{key:k,user:"main",data:v}); };
 
   useEffect(()=>{ (async()=>{
-    setRates(await get("field_rates",[]));
+    setAllRates(normaliseRates(await get("field_rates",[])));
     setTargets(await get("field_targets",{}));
     setOrders(await get("field_orders",[]));
     setSugg(await get("field_suggestions",[]));
@@ -6759,7 +6786,11 @@ function FieldAdmin({ onClose }) {
     setStock(await get("field_stock",[]));
   })(); },[]);
 
-  const saveRates=async()=>{ setBusy("r"); try{ await put("field_rates",rates.filter(r=>r.name&&r.name.trim())); setMsg("✓ Rates published to the team"); }catch(e){ setMsg("✗ failed"); } setBusy(""); };
+  const saveRates=async()=>{ setBusy("r"); try{
+    const clean={}; RATE_CHANNELS.forEach(c=>{ clean[c.k]=(allRates[c.k]||[]).filter(r=>r.name&&String(r.name).trim()); });
+    await put("field_rates",clean);
+    setMsg("✓ "+RATE_CHANNELS.map(c=>c.l+" "+clean[c.k].length).join(" · ")+" published to the team");
+  }catch(e){ setMsg("✗ failed"); } setBusy(""); };
   const saveTargets=async()=>{ setBusy("t"); try{ await put("field_targets",targets); setMsg("✓ Targets saved"); }catch(e){ setMsg("✗ failed"); } setBusy(""); };
 
   const setSuggStatus=async(id,status)=>{
@@ -7568,6 +7599,18 @@ function FieldAdmin({ onClose }) {
       })()}
 
       {tab==="rates"&&<div>
+        <div style={{display:"flex",gap:5,marginBottom:9}}>
+          {RATE_CHANNELS.map(c=>{ const on=rchan===c.k;
+            return <button key={c.k} onClick={()=>setRchan(c.k)}
+              style={{flex:1,padding:"8px 4px",borderRadius:8,cursor:"pointer",
+                border:on?"none":"1.5px solid #dde6dd",background:on?"#1a5a3a":"#fff",
+                color:on?"#fff":"#3a5a3a",fontWeight:on?800:600,fontSize:12}}>
+              {c.l} ({(allRates[c.k]||[]).length})</button>; })}
+        </div>
+        <div style={{fontSize:11,color:"#8a6a1a",background:"#fdf8ec",padding:"8px 10px",
+          borderRadius:8,marginBottom:9,lineHeight:1.5}}>
+          Editing the <b>{(RATE_CHANNELS.find(c=>c.k===rchan)||{}).l}</b> card. Publish saves all three
+          together. Satish and Sadasivan open on CPC; everyone else on general trade.</div>
         <div style={{fontSize:11.5,color:"#5a7a5a",marginBottom:9}}>
           Selling rate per unit as the team should quote it. They never see cost or margin.
           Linking an item to the master lets the company's earning from it be scored — as a band, never a figure.</div>
