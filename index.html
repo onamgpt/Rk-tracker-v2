@@ -17750,6 +17750,11 @@ function App(){
                 {l:"💬 WhatsApp",fn:()=>setShowWhatsApp(true), ownerOnly:true},
                 {l:"🧭 Field Console",fn:()=>setShowFieldConsole(true)},
                 {l:"🗂️ Field Admin",fn:()=>setShowFieldAdmin(true), ownerOnly:true},
+                // The importer side lives on the shop domain, so these open in a
+                // new tab rather than navigating away from the tracker.
+                {l:"🌍 Importer Orders",fn:()=>{window.open("https://onamagarbathi.com/export-admin","_blank","noopener")}, ownerOnly:true},
+                {l:"🌐 Importer Portal",fn:()=>{window.open("https://onamagarbathi.com/export","_blank","noopener")}, ownerOnly:true},
+                {l:"✈️ Overseas Requests",fn:()=>{window.open("https://onamagarbathi.com/international","_blank","noopener")}, ownerOnly:true},
                 {l:"📝 Field Report",fn:()=>setShowFieldReport(true)},
                 {l:"🔒 PIN Access",fn:()=>setShowPins(true), ownerOnly:true},
                 {l:"📊 Tally",fn:()=>setShowTally(true), ownerOnly:true},
