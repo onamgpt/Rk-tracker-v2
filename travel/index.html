@@ -134,6 +134,9 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   <div class="tabs">
     <button class="tab on" data-tab="board">Board</button>
     <button class="tab" data-tab="binder">Binder</button>
+    <button class="tab" data-tab="vault">Vault</button>
+    <button class="tab" data-tab="packing">Packing</button>
+    <button class="tab" data-tab="money">Money</button>
   </div>
   <div class="saved" id="saved"></div>
 
@@ -158,6 +161,57 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   <div id="binder" style="display:none">
     <div class="toolbar"><button class="iconbtn" id="btnPrint">🖨 Print binder</button></div>
     <div id="days"></div>
+  </div>
+
+  <div id="vault" style="display:none">
+    <div class="card">
+      <div class="f" style="margin-bottom:6px">Research vault — dump screenshots of fares, hotels, anything. Tap <b>Analyse</b> on an item and it reads the details out for you.</div>
+      <label class="mini" style="display:inline-block;cursor:pointer">📎 Add screenshot / PDF<input type="file" id="vaultFile" accept="application/pdf,image/*" multiple style="display:none"></label>
+      <input type="text" id="vaultSearch" placeholder="Search vault — airline, city, price…" style="width:100%;margin-top:8px;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)">
+    </div>
+    <div id="vaultList"></div>
+  </div>
+
+  <div id="packing" style="display:none">
+    <div class="card">
+      <div class="row">
+        <input type="text" id="packNew" placeholder="Add an item…" style="flex:1">
+        <select id="packCat" style="min-width:120px;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)">
+          <option value="Clothes">Clothes</option>
+          <option value="Loungewear">Loungewear</option>
+          <option value="Tech">Tech</option>
+          <option value="Documents">Documents</option>
+          <option value="Health">Health</option>
+          <option value="Misc">Misc</option>
+        </select>
+        <button class="mini" id="packAdd">Add</button>
+      </div>
+      <div class="f" id="packCount" style="margin-top:8px"></div>
+      <button class="iconbtn" id="packSeed" style="margin-top:8px">↻ Load suggested list for this trip</button>
+    </div>
+    <div id="packList"></div>
+  </div>
+
+  <div id="money" style="display:none">
+    <div class="card">
+      <div class="row">
+        <select id="expDay" style="flex:1;min-width:150px;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)"></select>
+        <select id="expCat" style="min-width:120px;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)">
+          <option>Food</option><option>Transport</option><option>Hotel</option>
+          <option>Tickets</option><option>Shopping</option><option>Tips</option><option>Other</option>
+        </select>
+      </div>
+      <div class="row">
+        <input type="text" id="expWhat" placeholder="What was it?" style="flex:1">
+        <input type="number" id="expAmt" placeholder="Amount" style="width:110px">
+        <select id="expCur" style="width:90px;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)">
+          <option>INR</option><option>CHF</option><option>EUR</option><option>USD</option><option>EGP</option>
+        </select>
+      </div>
+      <button class="mini" id="expAdd">Add expense</button>
+      <div class="f" id="expTotal" style="margin-top:10px"></div>
+    </div>
+    <div id="expList"></div>
   </div>
 </div>
 
@@ -184,7 +238,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   function defaultTrip(name){
     return {
       id: uid(), name: name || 'Switzerland, Italy & Egypt 2026',
-      start: '2026-09-25', pax: '3',
+      start: '2026-09-23', pax: '3',
       sectors: [
         {id:uid(), city:'Zürich',   nights:1, mode:'flight'},
         {id:uid(), city:'Venice',   nights:2, mode:'train'},
@@ -194,7 +248,8 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
         {id:uid(), city:'Cairo',    nights:2, mode:'flight'}
       ],
       homeCity:'Bengaluru',
-      binder: seedBinder()
+      binder: seedBinder(),
+      vault: [], packing: [], expenses: []
     };
   }
 
@@ -208,49 +263,50 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       return o;
     };
     return {
-      '2026-09-25': [
+      '2026-09-23': [
         e('other','','PENDING before you fly — Egypt: WhatsApp Kamel','https://visa2egypt.gov.eg','Ask: is he authorised to issue the Letter of Guarantee, does the US visa exemption apply, will he/staff meet at the airport, fee, and documents needed. This gates the Egypt e-visa application.'),
         e('other','','PENDING — Egypt e-visa application','https://visa2egypt.gov.eg','Apply once Kamel confirms the guarantee-letter situation. Needs passport copy, 2 photos, bank statement, flight + hotel proof.'),
         e('other','','PENDING — Turkey e-visa (if transiting Istanbul)','https://www.evisa.gov.tr/en/','Eligible via Schengen/US visa. 1–3 day processing — apply early, not last-minute.'),
         e('other','','PENDING — multi-country travel insurance','','One policy covering the whole trip incl. Egypt (Egypt mandates insurance; Schengen needs \u20AC30,000 min medical cover). Compare ICICI Lombard / Tata AIG / Care Health.'),
         e('other','','PENDING — cards & cash','','Forex card loaded EUR+CHF; 1 backup card, different bank; notify banks of CH/IT/EG travel dates; carry small USD bills for Egypt tipping; withdraw EGP on arrival via ATM.'),
-        e('flight','10:15','Etihad BLR → Abu Dhabi → Zürich','','\u20B963,539 total for 3 (one-way). BLR-AUH 10:15\u201312:35, 1h30m layover, AUH-ZRH 14:05\u201319:00. 12h15m total.', 180),
-        e('hotel','19:00','Zürich — Old Town 3-star','','\u20B918\u201320k/night budget: Hotel Rössli or Hotel Adler, Altstadt — walkable to everything.'),
-        e('taxi','19:10','Airport train to Zürich HB, then walk to hotel','','13 min train + 8 min walk.')
+        e('flight','04:35','EY 233 Bengaluru (BLR T2) → Abu Dhabi (AUH T A)','77AXKM','CONFIRMED. Lands 07:00. Airbus A321, 3h55m nonstop. Cabin 7kg, checked 30kg. Tickets: Ravi Kiran 607 2418550334 · Brunda 607 2418550335 · Tassmai 607 2418550336. ₹25,598 each, ₹76,794 for 3. NON ENDO/NONREF.', 180),
+        e('flight','08:25','EY 139 Abu Dhabi (AUH T A) → Zürich (ZRH)','77AXKM','CONFIRMED. Lands 13:20. Airbus A321neo, 6h55m nonstop. Only 1h25m to connect at AUH — same terminal A, but do not dawdle.', 60),
+        e('hotel','14:30','Zürich — Old Town 3-star','','\u20B918\u201320k/night budget: Hotel Rössli or Hotel Adler, Altstadt — walkable to everything.'),
+        e('taxi','14:00','Airport train to Zürich HB, then walk to hotel','','13 min train + 8 min walk. You land 13:20, so allow for immigration first.')
       ],
-      '2026-09-26': [
+      '2026-09-24': [
         e('train','09:09','EuroCity Zürich HB → Milano Centrale','','Arrive 12:50. Change ~75 min in Milan.', 45),
         e('train','14:05','Frecciarossa Milano Centrale → Venezia S. Lucia','','Arrive 16:22. Vaporetto Line 1 or 2 to hotel.'),
         e('hotel','','Venice — near train station','','\u20AC150\u2013190/night: Hotel Carlton Capri or Hotel Principe, Lista di Spagna — both across the Grand Canal from Santa Lucia station, breakfast included.')
       ],
-      '2026-09-27': [
+      '2026-09-25': [
         e('activity','09:30','Basilica di San Marco',''),
         e('activity','11:00','Doge\u2019s Palace — timed entry',''),
         e('activity','14:00','Rialto + Murano via Vaporetto Line 12','','Sightseeing tickets ~\u20B924,000 total for 3.')
       ],
-      '2026-09-28': [
+      '2026-09-26': [
         e('train','09:25','Frecciarossa Venezia S. Lucia → Roma Termini (direct)','','Arrive 13:12.', 45),
         e('hotel','','Rome — near Termini','','\u20AC150\u2013180/night: UNA Hotels Decò Roma (4-star, right by the station) or Hotel Nazionale / Best Western Plus Universo.')
       ],
-      '2026-09-29': [
+      '2026-09-27': [
         e('activity','08:30','Colosseum — timed entry','','Metro B, Termini→Colosseo, 2 stops. Forum + Palatine on the same ticket.')
       ],
-      '2026-09-30': [
+      '2026-09-28': [
         e('activity','08:00','Vatican Museums','','Metro A, Termini→Ottaviano. Allow 3 hours, then St Peter\u2019s. Tickets ~\u20B921,600 total.')
       ],
-      '2026-10-01': [
+      '2026-09-29': [
         e('train','09:00','Frecciarossa Roma Termini → Napoli Centrale','','Arrive 10:10.', 45),
         e('hotel','','Naples — city centre','','\u20AC100\u2013130/night: UNA Hotels Napoli or Gentile Suite Decumani — cheapest stop on the trip.')
       ],
-      '2026-10-02': [
+      '2026-09-30': [
         e('activity','09:00','Free day in Naples / optional Pompeii day trip','','Circumvesuviana to Pompei Scavi, ~30 min ride, allow 3 hours on site.')
       ],
-      '2026-10-03': [
+      '2026-10-01': [
         e('other','','Onward to Egypt — routing not locked yet','','easyJet Milan\u2013Luxor is seasonal and only starts 24 Nov, so it will not work for these dates. Two options to decide between: (1) Naples → Milan by Frecciarossa (~4h15m), overnight near MXP, then Neos nonstop MXP→Luxor next morning (₹22,362/person, 8:00a\u20131:10p); or (2) fly Milan → Cairo → Luxor via EgyptAir (₹31,500\u201342,000/person, connecting) and see the pyramids on the way in instead of on the way back. Confirm exact Neos/EgyptAir schedule before booking.'),
         e('flight','','Milan (MXP) → Luxor (LXR)','','Neos nonstop, ~4h10m, ₹22,362/person — or EgyptAir via Cairo, ₹31,500\u201342,000/person, 1 stop. Book once the Naples→Milan connection above is settled.'),
         e('other','','Nile cruise Luxor ⇄ Aswan','','4\u20135 nights, $500\u20131,200/person, most packages include accommodation, meals, guided tours (Karnak, Valley of the Kings, Philae, Edfu, Kom Ombo). Domestic transfers usually extra.')
       ],
-      '2026-10-08': [
+      '2026-10-06': [
         e('flight','','Luxor (LXR) → Cairo (CAI)','','Cheapest: Air Cairo ₹4,700\u20139,800/person. EgyptAir ₹9,500\u201314,000/person, more frequent.'),
         e('train','','Alternative: Cairo sleeper train','https://www.abelatrains.com','Abela Trains, overnight 10\u201312h, Bashtil Station (Giza) — not Ramses anymore. Single cabin ~$94.50, double ~$150, incl. dinner + breakfast. Book ahead, site can be glitchy.'),
         e('activity','','Pyramids of Giza + Egyptian Museum','','Dedicated Cairo stop on the way back, as planned — see the pyramids properly rather than just transiting.'),
@@ -285,7 +341,9 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     return 'https://m.uber.com/ul/?action=setPickup&dropoff%5Bformatted_address%5D=' + encodeURIComponent(city);
   }
 
-  /* ---------- persistence ---------- */
+  /* ---------- persistence — Supabase is the source of truth.
+     localStorage stays only as an instant paint cache so the page is not blank
+     while the network round-trip happens. Every write goes to Supabase. ---------- */
   var saveTimer;
   function flash(msg){
     var el = document.getElementById('saved');
@@ -295,14 +353,15 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   }
   function save(){
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(function(){
-      try{
-        localStorage.setItem(KEY, JSON.stringify({active:activeId, trips:trips}));
-        flash('Saved');
-      }catch(e){ flash('Could not save on this device'); }
-    }, 250);
+    saveTimer = setTimeout(async function(){
+      var payload = {active:activeId, trips:trips};
+      try{ localStorage.setItem(KEY, JSON.stringify(payload)); }catch(e){}
+      var r = await dbAPI('savePortfolio', {key:'travel_desk', data:payload});
+      if(r && (r.ok || r.saved)) flash('Saved'); else flash('Saved on this device only');
+    }, 400);
   }
-  function boot(){
+  async function boot(){
+    // 1. instant paint from cache
     try{
       var raw = localStorage.getItem(KEY);
       if(raw){
@@ -316,6 +375,21 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       var t = defaultTrip();
       trips[t.id] = t; activeId = t.id;
     }
+    renderAll();
+    // 2. durable load from Supabase — wins if present
+    try{
+      var res = await dbAPI('getPortfolio', {key:'travel_desk'});
+      var d = res && res.data;
+      if(d && d.trips && Object.keys(d.trips).length){
+        trips = d.trips;
+        activeId = (d.active && d.trips[d.active]) ? d.active : Object.keys(d.trips)[0];
+        try{ localStorage.setItem(KEY, JSON.stringify({active:activeId, trips:trips})); }catch(e){}
+        renderAll();
+        flash('Synced');
+      } else {
+        save(); // first run — push the local/default trip up
+      }
+    }catch(e){ flash('Offline — using this device'); }
   }
 
   function active(){ return trips[activeId]; }
@@ -357,13 +431,16 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   });
 
   /* ---------- tabs ---------- */
+  var PANES = ['board','binder','vault','packing','money'];
   Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(btn){
     btn.addEventListener('click', function(){
       tab = btn.getAttribute('data-tab');
       Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(b){ b.classList.toggle('on', b===btn); });
-      document.getElementById('board').style.display = tab==='board' ? '' : 'none';
-      document.getElementById('binder').style.display = tab==='binder' ? '' : 'none';
+      PANES.forEach(function(p){ document.getElementById(p).style.display = tab===p ? '' : 'none'; });
       if(tab==='binder') renderBinder();
+      if(tab==='vault') renderVault();
+      if(tab==='packing') renderPacking();
+      if(tab==='money') renderMoney();
     });
   });
   document.getElementById('btnPrint').addEventListener('click', function(){ window.print(); });
@@ -466,6 +543,19 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     }catch(e){ return {ok:false, error:String(e)}; }
   }
 
+  async function claudeAPI(prompt, system, imageBase64, imageType, pdfBase64){
+    try{
+      var r = await fetch('/.netlify/functions/claude', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({prompt:prompt, system:system||'', imageBase64:imageBase64||'',
+          imageType:imageType||'', pdfBase64:pdfBase64||''})
+      });
+      var j = await r.json();
+      if(j.error) throw new Error(j.error);
+      return j.text || '';
+    }catch(e){ throw new Error('AI call failed'); }
+  }
+
   async function syncEntryReminder(dateISO, entry){
     var tag = 'tg_travel_' + entry.id;
     var res = await dbAPI('getPortfolio', {key:'tg_scheduled'});
@@ -538,6 +628,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
 
       return '<div class="card day" data-day="'+iso+'">' +
         '<div class="dhead"><div class="dtitle">'+fmt(iso)+'</div><div class="dcity">'+esc(cityForDay(t,iso))+'</div></div>' +
+        '<div class="emeta wx" data-city="'+esc(cityForDay(t,iso))+'" data-iso="'+iso+'">…</div>' +
         entryHtml +
         '<div class="addentry">' +
           '<div class="row">' +
@@ -556,6 +647,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       '</div>';
     }).join('');
     document.getElementById('days').innerHTML = html || '<div class="empty">Set a departure date on the Board tab first.</div>';
+    paintWeather();
 
   async function uploadEntryFile(file){
     var b64 = await new Promise(function(res, rej){
@@ -648,14 +740,261 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     });
   }
 
+  /* ---------- weather (Open-Meteo — free, no key).
+     Inside the 16-day window we show the real forecast; beyond it we show what
+     that city actually did on the same dates last year, labelled as such so the
+     two are never confused. Cached per city+date on the trip. ---------- */
+  var wxCache = {};
+  async function geo(city){
+    if(wxCache['geo_'+city]) return wxCache['geo_'+city];
+    var r = await fetch('https://geocoding-api.open-meteo.com/v1/search?count=1&name='+encodeURIComponent(city));
+    var j = await r.json();
+    var hit = j && j.results && j.results[0];
+    if(!hit) throw new Error('no geo');
+    wxCache['geo_'+city] = {lat:hit.latitude, lon:hit.longitude};
+    return wxCache['geo_'+city];
+  }
+  async function weatherFor(city, iso){
+    var ck = city+'|'+iso;
+    if(wxCache[ck]) return wxCache[ck];
+    var g = await geo(city);
+    var today = toISO(new Date());
+    var daysOut = Math.round((fromISO(iso) - fromISO(today)) / 86400000);
+    var out;
+    if(daysOut >= 0 && daysOut <= 15){
+      var r = await fetch('https://api.open-meteo.com/v1/forecast?latitude='+g.lat+'&longitude='+g.lon+
+        '&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto&start_date='+iso+'&end_date='+iso);
+      var j = await r.json();
+      var d = j && j.daily;
+      if(d && d.time && d.time.length) out = {kind:'forecast', hi:d.temperature_2m_max[0], lo:d.temperature_2m_min[0], rain:d.precipitation_sum[0]};
+    }
+    if(!out){
+      var ly = (fromISO(iso).getFullYear()-1) + iso.slice(4);
+      var r2 = await fetch('https://archive-api.open-meteo.com/v1/archive?latitude='+g.lat+'&longitude='+g.lon+
+        '&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto&start_date='+ly+'&end_date='+ly);
+      var j2 = await r2.json();
+      var d2 = j2 && j2.daily;
+      if(d2 && d2.time && d2.time.length) out = {kind:'lastyear', hi:d2.temperature_2m_max[0], lo:d2.temperature_2m_min[0], rain:d2.precipitation_sum[0]};
+    }
+    if(!out) throw new Error('no wx');
+    wxCache[ck] = out;
+    return out;
+  }
+  function wxText(w){
+    if(w.hi==null) return '';
+    var t = Math.round(w.lo)+'–'+Math.round(w.hi)+'°C';
+    if(w.rain > 1) t += ' · rain '+w.rain.toFixed(1)+'mm';
+    return (w.kind==='forecast' ? '🌤 Forecast ' : '🗓 Last year ') + t;
+  }
+  function paintWeather(){
+    Array.prototype.forEach.call(document.querySelectorAll('.wx'), function(el){
+      var city = el.getAttribute('data-city'), iso = el.getAttribute('data-iso');
+      if(!city || city==='—') return;
+      weatherFor(city, iso).then(function(w){ el.textContent = wxText(w); })
+        .catch(function(){ el.textContent = ''; });
+    });
+  }
+
+  /* ---------- research vault ---------- */
+  function renderVault(){
+    var t = active();
+    t.vault = t.vault || [];
+    var q = (document.getElementById('vaultSearch').value||'').toLowerCase();
+    var items = t.vault.filter(function(v){
+      if(!q) return true;
+      return ((v.name||'')+' '+(v.summary||'')+' '+(v.tags||[]).join(' ')).toLowerCase().indexOf(q) !== -1;
+    });
+    document.getElementById('vaultList').innerHTML = items.length ? items.map(function(v){
+      return '<div class="card">' +
+        '<div class="etitle">'+esc(v.title || v.name)+'</div>' +
+        '<div class="emeta">'+esc(v.added||'')+(v.tags&&v.tags.length?' · '+esc(v.tags.join(', ')):'')+'</div>' +
+        (v.summary ? '<div class="enote">'+esc(v.summary)+'</div>' : '') +
+        '<div class="actions" style="margin-top:8px">' +
+          '<a href="'+esc(v.url)+'" target="_blank" rel="noopener">📎 Open</a>' +
+          (v.summary ? '' : '<button class="mini vanalyse" data-id="'+v.id+'">✨ Analyse</button>') +
+          '<button class="rm vdel" data-id="'+v.id+'">Remove</button>' +
+        '</div>' +
+      '</div>';
+    }).join('') : '<div class="empty">Nothing in the vault yet. Screenshots you add here stay searchable long after the chat is gone.</div>';
+
+    Array.prototype.forEach.call(document.querySelectorAll('.vdel'), function(b){
+      b.addEventListener('click', function(){
+        active().vault = active().vault.filter(function(x){return x.id!==b.getAttribute('data-id')});
+        renderVault(); save();
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.vanalyse'), function(b){
+      b.addEventListener('click', async function(){
+        var v = active().vault.find(function(x){return x.id===b.getAttribute('data-id')});
+        if(!v) return;
+        b.disabled = true; b.textContent = 'Reading…';
+        try{
+          var isPdf = (v.mime||'').indexOf('pdf') !== -1;
+          var prompt = 'This is a travel research screenshot or document (a fare search, booking, hotel listing or similar). '+
+            'Return ONLY valid JSON, no markdown, with keys: title (short, e.g. "Milan→Luxor Neos ₹22,362"), '+
+            'summary (one or two plain sentences of the key facts: route, dates, airline/hotel, price, any conditions), '+
+            'tags (array of short lowercase strings: cities, airlines, "flight"/"hotel"/"train", month).';
+          var txt = await claudeAPI(prompt, 'You extract travel booking details accurately. Return ONLY valid JSON.',
+            isPdf ? '' : v.b64, isPdf ? '' : v.mime, isPdf ? v.b64 : '');
+          var j = JSON.parse(String(txt).replace(/```json|```/g,'').trim());
+          v.title = j.title || v.name; v.summary = j.summary || ''; v.tags = j.tags || [];
+          delete v.b64; // keep the row small once it is read
+          renderVault(); save(); flash('Analysed');
+        }catch(e){
+          b.disabled = false; b.textContent = '✨ Analyse';
+          flash('Could not read that one');
+        }
+      });
+    });
+  }
+  document.getElementById('vaultSearch').addEventListener('input', renderVault);
+  document.getElementById('vaultFile').addEventListener('change', async function(){
+    var files = Array.prototype.slice.call(this.files||[]); if(!files.length) return;
+    var t = active(); t.vault = t.vault || [];
+    for(var i=0;i<files.length;i++){
+      var f = files[i];
+      flash('Uploading '+(i+1)+'/'+files.length+'…');
+      try{
+        var b64 = await new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){res(r.result);}; r.onerror=rej; r.readAsDataURL(f); });
+        var resp = await dbAPI('uploadFile', {file:{name:f.name, type:f.type, data:b64}});
+        var url = resp && (resp.url || resp.link || (resp.data && String(resp.data).indexOf('http')===0 ? resp.data : null));
+        if(!url) throw new Error('upload failed');
+        t.vault.unshift({id:uid(), name:f.name, url:url, mime:f.type,
+          b64:String(b64).split(',')[1], added:fmt(toISO(new Date())), tags:[]});
+      }catch(e){ flash('Failed: '+f.name); }
+    }
+    this.value = '';
+    renderVault(); save(); flash('Added to vault');
+  });
+
+  /* ---------- packing ---------- */
+  var PACK_SEED = [
+    ['Documents','Passports (all 3) + photocopies'],['Documents','Schengen visa printout'],
+    ['Documents','Egypt e-visa + Letter of Guarantee'],['Documents','Travel insurance certificate'],
+    ['Documents','Flight tickets (77AXKM) + hotel confirmations'],['Documents','Forex card + backup card'],
+    ['Clothes','Light layers — Europe mornings are cold, Egypt days are hot'],
+    ['Clothes','1 warm jacket / fleece for Zürich'],['Clothes','Comfortable walking shoes (worn in)'],
+    ['Clothes','Modest cover — shoulders & knees, for churches and mosques'],
+    ['Clothes','Sun hat + sunglasses for Luxor/Cairo'],
+    ['Loungewear','Sleepwear'],['Loungewear','Slippers / hotel flip-flops'],
+    ['Tech','Phone + charger'],['Tech','Universal travel adapter (CH type J is its own shape)'],
+    ['Tech','Power bank (in cabin bag, never checked)'],['Tech','Camera + spare card'],
+    ['Health','Regular medicines + a spare few days'],['Health','Sunscreen SPF50'],
+    ['Health','ORS sachets / electrolytes for Egypt'],['Health','Basic first aid + motion sickness tablets'],
+    ['Misc','Refillable water bottle'],['Misc','Small daypack'],
+    ['Misc','Small USD notes for Egypt tipping'],['Misc','Snacks — vegetarian options can be thin in transit']
+  ];
+  function renderPacking(){
+    var t = active(); t.packing = t.packing || [];
+    var done = t.packing.filter(function(p){return p.done}).length;
+    document.getElementById('packCount').textContent = t.packing.length ? (done+' of '+t.packing.length+' packed') : '';
+    var cats = {};
+    t.packing.forEach(function(p){ (cats[p.cat]=cats[p.cat]||[]).push(p); });
+    document.getElementById('packList').innerHTML = Object.keys(cats).length ? Object.keys(cats).map(function(c){
+      return '<div class="card"><div class="dtitle" style="margin-bottom:8px">'+esc(c)+'</div>' +
+        cats[c].map(function(p){
+          return '<label class="remrow" style="display:flex;gap:8px;align-items:center;padding:3px 0">' +
+            '<input type="checkbox" class="pchk" data-id="'+p.id+'"'+(p.done?' checked':'')+'>' +
+            '<span style="flex:1'+(p.done?';opacity:.45;text-decoration:line-through':'')+'">'+esc(p.item)+'</span>' +
+            '<button class="rm pdel" data-id="'+p.id+'">✕</button></label>';
+        }).join('') + '</div>';
+    }).join('') : '<div class="empty">No packing list yet — tap “Load suggested list” above.</div>';
+
+    Array.prototype.forEach.call(document.querySelectorAll('.pchk'), function(c){
+      c.addEventListener('change', function(){
+        var p = active().packing.find(function(x){return x.id===c.getAttribute('data-id')});
+        if(p){ p.done = c.checked; renderPacking(); save(); }
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.pdel'), function(b){
+      b.addEventListener('click', function(){
+        active().packing = active().packing.filter(function(x){return x.id!==b.getAttribute('data-id')});
+        renderPacking(); save();
+      });
+    });
+  }
+  document.getElementById('packAdd').addEventListener('click', function(){
+    var inp = document.getElementById('packNew'), v = inp.value.trim();
+    if(!v) return;
+    var t = active(); t.packing = t.packing || [];
+    t.packing.push({id:uid(), item:v, cat:document.getElementById('packCat').value, done:false});
+    inp.value=''; renderPacking(); save();
+  });
+  document.getElementById('packSeed').addEventListener('click', function(){
+    var t = active(); t.packing = t.packing || [];
+    var have = t.packing.map(function(p){return p.item});
+    PACK_SEED.forEach(function(row){
+      if(have.indexOf(row[1])===-1) t.packing.push({id:uid(), cat:row[0], item:row[1], done:false});
+    });
+    renderPacking(); save(); flash('List loaded');
+  });
+
+  /* ---------- expenses ---------- */
+  var RATES = {INR:1, CHF:106, EUR:99, USD:88, EGP:1.85}; // rough, editable
+  function renderMoney(){
+    var t = active(); t.expenses = t.expenses || [];
+    var days = [];
+    var cur = t.start, end = tripEnd(t);
+    while(cur <= end){ days.push(cur); cur = addDays(cur,1); }
+    var sel = document.getElementById('expDay');
+    if(sel.options.length !== days.length){
+      sel.innerHTML = days.map(function(d){ return '<option value="'+d+'">'+fmt(d)+' · '+esc(cityForDay(t,d))+'</option>'; }).join('');
+    }
+    var total = t.expenses.reduce(function(a,e){ return a + (e.amt * (RATES[e.cur]||1)); }, 0);
+    var byCity = {};
+    t.expenses.forEach(function(e){
+      var c = cityForDay(t, e.day) || '—';
+      byCity[c] = (byCity[c]||0) + e.amt * (RATES[e.cur]||1);
+    });
+    document.getElementById('expTotal').innerHTML =
+      '<b>Trip total ≈ ₹'+Math.round(total).toLocaleString('en-IN')+'</b>' +
+      (Object.keys(byCity).length ? '<br>' + Object.keys(byCity).map(function(c){
+        return esc(c)+' ₹'+Math.round(byCity[c]).toLocaleString('en-IN');
+      }).join(' · ') : '');
+
+    var grouped = {};
+    t.expenses.forEach(function(e){ (grouped[e.day]=grouped[e.day]||[]).push(e); });
+    document.getElementById('expList').innerHTML = Object.keys(grouped).sort().map(function(d){
+      var dayTotal = grouped[d].reduce(function(a,e){ return a + e.amt*(RATES[e.cur]||1); },0);
+      return '<div class="card">' +
+        '<div class="dhead"><div class="dtitle">'+fmt(d)+' · '+esc(cityForDay(t,d))+'</div>' +
+        '<div class="dcity">₹'+Math.round(dayTotal).toLocaleString('en-IN')+'</div></div>' +
+        grouped[d].map(function(e){
+          return '<div class="entry"><div class="ebody">' +
+            '<div class="etitle">'+esc(e.what)+'</div>' +
+            '<div class="emeta">'+esc(e.cat)+' · '+e.cur+' '+e.amt+(e.cur!=='INR'?' ≈ ₹'+Math.round(e.amt*(RATES[e.cur]||1)).toLocaleString('en-IN'):'')+'</div>' +
+            '</div><button class="edel xdel" data-id="'+e.id+'">✕</button></div>';
+        }).join('') + '</div>';
+    }).join('') || '<div class="empty">No expenses logged yet.</div>';
+
+    Array.prototype.forEach.call(document.querySelectorAll('.xdel'), function(b){
+      b.addEventListener('click', function(){
+        active().expenses = active().expenses.filter(function(x){return x.id!==b.getAttribute('data-id')});
+        renderMoney(); save();
+      });
+    });
+  }
+  document.getElementById('expAdd').addEventListener('click', function(){
+    var what = document.getElementById('expWhat'), amt = document.getElementById('expAmt');
+    if(!what.value.trim() || !amt.value) { what.focus(); return; }
+    var t = active(); t.expenses = t.expenses || [];
+    t.expenses.push({id:uid(), day:document.getElementById('expDay').value,
+      cat:document.getElementById('expCat').value, what:what.value.trim(),
+      amt:parseFloat(amt.value)||0, cur:document.getElementById('expCur').value});
+    what.value=''; amt.value='';
+    renderMoney(); save();
+  });
+
   function renderAll(){
     renderTripSel();
     renderBoard();
     if(tab==='binder') renderBinder();
+    if(tab==='vault') renderVault();
+    if(tab==='packing') renderPacking();
+    if(tab==='money') renderMoney();
   }
 
   boot();
-  renderAll();
 })();
 </script>
 </body>
