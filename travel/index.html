@@ -526,9 +526,11 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
           '<div class="ebody">' +
             '<div class="etitle">'+esc(e.title||'Untitled')+'</div>' +
             '<div class="emeta">'+ (e.time?esc(e.time)+' · ':'') + (e.ref?'Ref '+esc(e.ref):'') +'</div>' +
+            (e.doc ? '<div class="enote"><a href="'+esc(e.doc.url)+'" target="_blank" rel="noopener">📎 '+esc(e.doc.name)+'</a></div>' : '') +
             (e.note?'<div class="enote">'+esc(e.note)+'</div>':'') +
             (bellOn ? '<div class="enote" style="color:var(--go)">🔔 Telegram '+ (e.remindMin||0) +' min before</div>' : '') +
           '</div>' +
+          '<label class="ebell" data-day="'+iso+'" data-eid="'+e.id+'" style="cursor:pointer" title="Attach flight ticket / booking PDF">'+(e.doc?'📎':'📄')+'<input type="file" class="eattach" data-day="'+iso+'" data-eid="'+e.id+'" accept="application/pdf,image/*" style="display:none"></label>' +
           '<button class="ebell" data-day="'+iso+'" data-eid="'+e.id+'" title="'+esc(bellTitle)+'" '+(e.time?'':'disabled')+'>'+(bellOn?'🔔':'🔕')+'</button>' +
           '<button class="edel" data-day="'+iso+'" data-eid="'+e.id+'">✕</button>' +
         '</div>';
@@ -547,12 +549,26 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
             '<input type="text" class="f-ref ae-ref" placeholder="Confirmation / PNR">' +
           '</div>' +
           '<div class="row"><textarea class="ae-note" placeholder="Address, notes…"></textarea></div>' +
+          '<div class="row"><label style="font-size:12px;color:var(--muted,#888)">📎 Attach ticket/booking (PDF or image) <input type="file" class="ae-file" accept="application/pdf,image/*"></label></div>' +
           '<label class="remrow"><input type="checkbox" class="ae-remind"> 🔔 Remind me <input type="number" class="ae-remindmin" value="30" min="0"> min before (Telegram)</label>' +
           '<button class="mini ae-add">Add to '+fmt(iso).split(' ').slice(0,2).join(' ')+'</button>' +
         '</div>' +
       '</div>';
     }).join('');
     document.getElementById('days').innerHTML = html || '<div class="empty">Set a departure date on the Board tab first.</div>';
+
+  async function uploadEntryFile(file){
+    var b64 = await new Promise(function(res, rej){
+      var r = new FileReader();
+      r.onload = function(){ res(r.result); };
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+    var resp = await dbAPI('uploadFile', {file:{name:file.name, type:file.type, data:b64}});
+    var url = resp && (resp.url || resp.link || (resp.data && String(resp.data).indexOf('http')===0 ? resp.data : null));
+    if(!url) throw new Error((resp && resp.error) || 'Upload failed');
+    return {name:file.name, url:url};
+  }
 
     Array.prototype.forEach.call(document.querySelectorAll('.edel'), function(btn){
       btn.addEventListener('click', function(){
@@ -583,17 +599,31 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
         }
       });
     });
+    Array.prototype.forEach.call(document.querySelectorAll('.eattach'), function(inp){
+      inp.addEventListener('change', function(){
+        var file = inp.files && inp.files[0]; if(!file) return;
+        var day = inp.getAttribute('data-day'), eid = inp.getAttribute('data-eid');
+        var entry = (t.binder[day]||[]).find(function(e){return e.id===eid});
+        if(!entry) return;
+        flash('Uploading…');
+        uploadEntryFile(file).then(function(doc){
+          entry.doc = doc; renderBinder(); save(); flash('Attached');
+        }).catch(function(err){ flash('Upload failed: '+err.message); });
+      });
+    });
     Array.prototype.forEach.call(document.querySelectorAll('.day'), function(dayEl){
       var iso = dayEl.getAttribute('data-day');
       var typeSel = dayEl.querySelector('.ae-type');
       var minInp = dayEl.querySelector('.ae-remindmin');
       typeSel.addEventListener('change', function(){ minInp.value = DEFAULT_LEAD[typeSel.value] || 30; });
       var btn = dayEl.querySelector('.ae-add');
-      btn.addEventListener('click', function(){
+      btn.addEventListener('click', async function(){
         var title = dayEl.querySelector('.ae-title').value.trim();
         if(!title){ dayEl.querySelector('.ae-title').focus(); return; }
         var wantsRemind = dayEl.querySelector('.ae-remind').checked;
         var time = dayEl.querySelector('.ae-time').value;
+        var fileInp = dayEl.querySelector('.ae-file');
+        var file = fileInp.files && fileInp.files[0];
         var entry = {
           id: uid(),
           type: typeSel.value,
@@ -604,6 +634,12 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
           remind: wantsRemind && !!time,
           remindMin: Math.max(0, parseInt(minInp.value,10)||0)
         };
+        if(file){
+          btn.disabled = true; btn.textContent = 'Uploading…';
+          try{ entry.doc = await uploadEntryFile(file); }
+          catch(err){ flash('Upload failed: '+err.message); }
+          btn.disabled = false;
+        }
         t.binder[iso] = t.binder[iso] || [];
         t.binder[iso].push(entry);
         renderBinder(); save();
