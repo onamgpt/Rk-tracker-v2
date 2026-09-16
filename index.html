@@ -73,6 +73,7 @@ const SCRIPT_URL="https://script.google.com/macros/s/AKfycbwdvYUZYIGLy2Pf0_7-Dv0
 const OWNER_CHAT_ID="8632288596";
 const URL_USER=new URLSearchParams(window.location.search).get("user")||"main";
 const IS_OWNER=(URL_USER==="main");  // only the owner sees profit/margin figures
+const IS_CSD_USER=["main","prakash","maadhu","virupaksha"].includes(URL_USER); // CSD desk: owner + the three who work it
 const IS_ORDERS_USER=["main","prakash"].includes(URL_USER); // shop order management: owner + Prakash
 const IS_LOGISTICS_USER=["main","prakash"].includes(URL_USER); // despatch-to-payment tracking: owner + Prakash
 const FAMILY_USERS=["wife","daughter"];
@@ -9394,11 +9395,15 @@ function CSDPayments({ orders, onUpdateDepot, onClose }) {
 
 function CSD({ onClose, onSaveEntry }) {
   // Four CSD-exclusive products (COGS to be filled after price revision)
+  // Rates per CSD price revision 4/GS/GP-II/6274-A/PR-2026-27, w.e.f. 17.08.2026.
+  // prevRate is the superseded figure: a PO raised before that date was placed
+  // at the old rate and should still read correctly.
+  const CSD_RATE_EFFECTIVE = "2026-08-17";
   const CSD_PRODUCTS = [
-    { index: "13094", suffix: "L", name: 'ONAM Agarbatti Sandal 7.5" (100 Sticks)', casePack: 240, rate: 7490.40, cogs: 0 },
-    { index: "13095", suffix: "P", name: 'ONAM A/Batti 15 Sticks',                  casePack: 720, rate: 4651.20, cogs: 0 },
-    { index: "13130", suffix: "I", name: 'ONAM Agarbatti Rose 7.5" (100 Sticks)',   casePack: 240, rate: 7999.20, cogs: 0 },
-    { index: "13132", suffix: "T", name: 'ONAM Agarbatti 3 Fragrance 7.5" (100 Sticks)', casePack: 240, rate: 8316.00, cogs: 0 },
+    { index: "13094", suffix: "L", name: 'ONAM Agarbatti Sandal 7.5" (100 Sticks)', casePack: 240, each: 38.60, rate: 9264.00,  prevRate: 7490.40, mrp: 120, tradeRate: 69.25, cogs: 0 },
+    { index: "13095", suffix: "P", name: 'ONAM A/Batti 15 Sticks',                  casePack: 720, each:  7.83, rate: 5637.60,  prevRate: 4651.20, mrp:  25, tradeRate: 14.25, cogs: 0 },
+    { index: "13130", suffix: "I", name: 'ONAM Agarbatti Rose 7.5" (100 Sticks)',   casePack: 240, each: 40.78, rate: 9787.20,  prevRate: 7999.20, mrp: 125, tradeRate: 72.00, cogs: 0 },
+    { index: "13132", suffix: "T", name: 'ONAM Agarbatti 3 Fragrance 7.5" (100 Sticks)', casePack: 240, each: 42.41, rate: 10178.40, prevRate: 8316.00, mrp: 130, tradeRate: 75.00, cogs: 0 },
   ];
   const AGENT1_RATE = 0.145;                 // 14.5% commission, payable on realisation
   const UP_DEPOTS = ["AGRA","BAREILLY","LUCKNOW","MEERUT"];   // Halal restriction depots
@@ -9880,9 +9885,11 @@ function CSD({ onClose, onSaveEntry }) {
             <div style={{ fontSize:12.5, fontWeight:700, color:"#2a4a7a" }}>{p.index}{p.suffix} — {p.name}</div>
             <div style={{ fontSize:11, color:"#666", marginTop:2 }}>
               {p.casePack} per case · {fmt(p.rate)} per case
-              {p.cogs>0
+              {p.each ? <span> · {fmt(p.each)} each</span> : null}
+              {p.prevRate ? <span style={{ color:"#999" }}> · was {fmt(p.prevRate)}</span> : null}
+              {IS_OWNER && (p.cogs>0
                 ? <span style={{ color:"#1a7a3a", fontWeight:700 }}> · GP {fmt(p.rate-p.cogs)}</span>
-                : <span style={{ color:"#b07a2a" }}> · COGS pending</span>}
+                : <span style={{ color:"#b07a2a" }}> · COGS pending</span>)}
             </div>
           </div>
         ))}
@@ -17759,7 +17766,7 @@ function App(){
                 {l:"📦 Orders",fn:()=>setShowOrders(true), ordersOnly:true},
                 {l:"📈 RK Trading",fn:()=>setShowAIM(true), ownerOnly:true},
                 {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true), ownerOnly:true},
-                {l:"🛡️ CSD",fn:()=>setShowCSD(true), ownerOnly:true},
+                {l:"🛡️ CSD",fn:()=>setShowCSD(true), csdOnly:true},
                 {l:"🪔 Kerala",fn:()=>setShowKerala(true), ownerOnly:true},
                 {l:"⚖️ Rules",fn:()=>setShowRules(true), ownerOnly:true},
                 {l:"✈️ Telegram",fn:()=>setShowTelegram(true), ownerOnly:true},
@@ -17793,7 +17800,7 @@ function App(){
                 {l:"📧 Email Scan",fn:()=>setShowEmailScan(true), ownerOnly:true},
                 {l:"🔗 Share",fn:()=>setShowShare(true), notSales:true},
                 {l:"⚙️ Settings",fn:()=>setShowDD(true), notSales:true}
-              ].filter(item => (!item.ownerOnly || IS_OWNER) && (!item.personalOnly || IS_OWNER || IS_FAMILY) && (!item.ordersOnly || IS_ORDERS_USER) && (!item.logisticsOnly || IS_LOGISTICS_USER) && (!item.notSales || !IS_SALES)).map(it=><button key={it.l} onClick={()=>{setNavMenuOpen(false);it.fn();}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:6,border:"none",background:"transparent",color:"#f0dcae",cursor:"pointer",fontSize:13,fontWeight:600}}>{it.l}</button>)}
+              ].filter(item => (!item.ownerOnly || IS_OWNER) && (!item.personalOnly || IS_OWNER || IS_FAMILY) && (!item.ordersOnly || IS_ORDERS_USER) && (!item.csdOnly || IS_CSD_USER) && (!item.logisticsOnly || IS_LOGISTICS_USER) && (!item.notSales || !IS_SALES)).map(it=><button key={it.l} onClick={()=>{setNavMenuOpen(false);it.fn();}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:6,border:"none",background:"transparent",color:"#f0dcae",cursor:"pointer",fontSize:13,fontWeight:600}}>{it.l}</button>)}
             </div>}
           </div>
           <button onClick={()=>setHideDone(h=>!h)} style={{...fSel,background:hideDone?"rgba(200,255,200,.15)":"rgba(255,255,255,.08)",color:hideDone?"#90f090":"#f0cc80",border:"1.5px solid "+(hideDone?"#4a9a4a":"#c8a060"),fontSize:11,fontWeight:600}}>{hideDone?"All":"Hide✅"}</button>
@@ -18041,7 +18048,7 @@ function App(){
     <Modal open={showHealth} onClose={()=>setShowHealth(false)}><HealthFamilyQuick onClose={()=>setShowHealth(false)} onSaveEntry={saveEntry} mode="health" entries={entries}/></Modal>
     <Modal open={showCFO && IS_OWNER} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
     <Modal open={showSpectrum && IS_OWNER} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)} onSaveEntry={saveEntry}/></Modal>
-    <Modal open={showCSD && IS_OWNER} onClose={()=>setShowCSD(false)} wide><CSD onClose={()=>setShowCSD(false)} onSaveEntry={saveEntry}/></Modal>
+    <Modal open={showCSD && IS_CSD_USER} onClose={()=>setShowCSD(false)} wide><CSD onClose={()=>setShowCSD(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showKerala && IS_OWNER} onClose={()=>setShowKerala(false)} wide><Kerala onClose={()=>setShowKerala(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showRules && IS_OWNER} onClose={()=>setShowRules(false)} wide><RulesEngine entries={entries} onSaveEntry={saveEntry} onClose={()=>setShowRules(false)}/></Modal>
     
