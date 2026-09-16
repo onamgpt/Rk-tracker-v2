@@ -183,13 +183,15 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
 
   function defaultTrip(name){
     return {
-      id: uid(), name: name || 'Switzerland & Italy 2026',
+      id: uid(), name: name || 'Switzerland, Italy & Egypt 2026',
       start: '2026-09-25', pax: '3',
       sectors: [
         {id:uid(), city:'Zürich',   nights:1, mode:'flight'},
         {id:uid(), city:'Venice',   nights:2, mode:'train'},
         {id:uid(), city:'Rome',     nights:3, mode:'train'},
-        {id:uid(), city:'Sorrento', nights:2, mode:'train'}
+        {id:uid(), city:'Naples',   nights:2, mode:'train'},
+        {id:uid(), city:'Luxor',    nights:5, mode:'flight'},
+        {id:uid(), city:'Cairo',    nights:2, mode:'flight'}
       ],
       homeCity:'Bengaluru',
       binder: seedBinder()
@@ -207,12 +209,19 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     };
     return {
       '2026-09-25': [
-        e('flight','10:00','Etihad BLR → Abu Dhabi → Zürich','','Round-trip fare, ₹1,26,526 total for 3 — covers the return leg too. Lands ZRH 18:55.', 180),
-        e('taxi','19:10','Airport train to Zürich HB, then walk to hotel','','13 min train + 8 min walk. Hotel Alexander, Niederdorf — ask for a triple room.')
+        e('other','','PENDING before you fly — Egypt: WhatsApp Kamel','https://visa2egypt.gov.eg','Ask: is he authorised to issue the Letter of Guarantee, does the US visa exemption apply, will he/staff meet at the airport, fee, and documents needed. This gates the Egypt e-visa application.'),
+        e('other','','PENDING — Egypt e-visa application','https://visa2egypt.gov.eg','Apply once Kamel confirms the guarantee-letter situation. Needs passport copy, 2 photos, bank statement, flight + hotel proof.'),
+        e('other','','PENDING — Turkey e-visa (if transiting Istanbul)','https://www.evisa.gov.tr/en/','Eligible via Schengen/US visa. 1–3 day processing — apply early, not last-minute.'),
+        e('other','','PENDING — multi-country travel insurance','','One policy covering the whole trip incl. Egypt (Egypt mandates insurance; Schengen needs \u20AC30,000 min medical cover). Compare ICICI Lombard / Tata AIG / Care Health.'),
+        e('other','','PENDING — cards & cash','','Forex card loaded EUR+CHF; 1 backup card, different bank; notify banks of CH/IT/EG travel dates; carry small USD bills for Egypt tipping; withdraw EGP on arrival via ATM.'),
+        e('flight','10:15','Etihad BLR → Abu Dhabi → Zürich','','\u20B963,539 total for 3 (one-way). BLR-AUH 10:15\u201312:35, 1h30m layover, AUH-ZRH 14:05\u201319:00. 12h15m total.', 180),
+        e('hotel','19:00','Zürich — Old Town 3-star','','\u20B918\u201320k/night budget: Hotel Rössli or Hotel Adler, Altstadt — walkable to everything.'),
+        e('taxi','19:10','Airport train to Zürich HB, then walk to hotel','','13 min train + 8 min walk.')
       ],
       '2026-09-26': [
         e('train','09:09','EuroCity Zürich HB → Milano Centrale','','Arrive 12:50. Change ~75 min in Milan.', 45),
-        e('train','14:05','Frecciarossa Milano Centrale → Venezia S. Lucia','','Arrive 16:22. Vaporetto Line 1 or 2 to Hotel Antico Trovatore, San Marco.')
+        e('train','14:05','Frecciarossa Milano Centrale → Venezia S. Lucia','','Arrive 16:22. Vaporetto Line 1 or 2 to hotel.'),
+        e('hotel','','Venice — near train station','','\u20AC150\u2013190/night: Hotel Carlton Capri or Hotel Principe, Lista di Spagna — both across the Grand Canal from Santa Lucia station, breakfast included.')
       ],
       '2026-09-27': [
         e('activity','09:30','Basilica di San Marco',''),
@@ -220,7 +229,8 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
         e('activity','14:00','Rialto + Murano via Vaporetto Line 12','','Sightseeing tickets ~\u20B924,000 total for 3.')
       ],
       '2026-09-28': [
-        e('train','09:25','Frecciarossa Venezia S. Lucia → Roma Termini (direct)','','Arrive 13:12. Yes Hotel — 2 min walk from the Via Marsala exit.', 45)
+        e('train','09:25','Frecciarossa Venezia S. Lucia → Roma Termini (direct)','','Arrive 13:12.', 45),
+        e('hotel','','Rome — near Termini','','\u20AC150\u2013180/night: UNA Hotels Decò Roma (4-star, right by the station) or Hotel Nazionale / Best Western Plus Universo.')
       ],
       '2026-09-29': [
         e('activity','08:30','Colosseum — timed entry','','Metro B, Termini→Colosseo, 2 stops. Forum + Palatine on the same ticket.')
@@ -230,15 +240,21 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       ],
       '2026-10-01': [
         e('train','09:00','Frecciarossa Roma Termini → Napoli Centrale','','Arrive 10:10.', 45),
-        e('train','10:40','Campania Express Napoli Centrale → Sorrento','','Arrive 11:45. Hotel Plaza — 3 min from the station.')
+        e('hotel','','Naples — city centre','','\u20AC100\u2013130/night: UNA Hotels Napoli or Gentile Suite Decumani — cheapest stop on the trip.')
       ],
       '2026-10-02': [
-        e('activity','09:00','Circumvesuviana to Pompei Scavi','','30 min ride, site opens 09:00, allow 3 hours. Capri ferry (25 min from Marina Piccola) is optional — two nights covers one or the other, not both comfortably.')
+        e('activity','09:00','Free day in Naples / optional Pompeii day trip','','Circumvesuviana to Pompei Scavi, ~30 min ride, allow 3 hours on site.')
       ],
       '2026-10-03': [
-        e('taxi','06:30','Curreri coach: Sorrento Piazza Tasso → Naples Capodichino','','Arrives 07:50. Tightest morning of the trip — leave the hotel by 06:15.', 45),
-        e('flight','09:45','Naples → Zürich (easyJet/SWISS)','','Arrive ZRH 11:35. Separate ticket from the Etihad leg — leave at least 4 hours at Zürich for the connection.', 150),
-        e('flight','','Zürich → Abu Dhabi → BLR (Etihad)','','Departure time not yet confirmed on the ticket — check and update once booked.')
+        e('other','','Onward to Egypt — routing not locked yet','','easyJet Milan\u2013Luxor is seasonal and only starts 24 Nov, so it will not work for these dates. Two options to decide between: (1) Naples → Milan by Frecciarossa (~4h15m), overnight near MXP, then Neos nonstop MXP→Luxor next morning (₹22,362/person, 8:00a\u20131:10p); or (2) fly Milan → Cairo → Luxor via EgyptAir (₹31,500\u201342,000/person, connecting) and see the pyramids on the way in instead of on the way back. Confirm exact Neos/EgyptAir schedule before booking.'),
+        e('flight','','Milan (MXP) → Luxor (LXR)','','Neos nonstop, ~4h10m, ₹22,362/person — or EgyptAir via Cairo, ₹31,500\u201342,000/person, 1 stop. Book once the Naples→Milan connection above is settled.'),
+        e('other','','Nile cruise Luxor ⇄ Aswan','','4\u20135 nights, $500\u20131,200/person, most packages include accommodation, meals, guided tours (Karnak, Valley of the Kings, Philae, Edfu, Kom Ombo). Domestic transfers usually extra.')
+      ],
+      '2026-10-08': [
+        e('flight','','Luxor (LXR) → Cairo (CAI)','','Cheapest: Air Cairo ₹4,700\u20139,800/person. EgyptAir ₹9,500\u201314,000/person, more frequent.'),
+        e('train','','Alternative: Cairo sleeper train','https://www.abelatrains.com','Abela Trains, overnight 10\u201312h, Bashtil Station (Giza) — not Ramses anymore. Single cabin ~$94.50, double ~$150, incl. dinner + breakfast. Book ahead, site can be glitchy.'),
+        e('activity','','Pyramids of Giza + Egyptian Museum','','Dedicated Cairo stop on the way back, as planned — see the pyramids properly rather than just transiting.'),
+        e('flight','','Cairo → BLR','','Not yet booked — return routing still open.')
       ]
     };
   }
