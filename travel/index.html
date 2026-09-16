@@ -206,6 +206,21 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
 
   <div id="money" style="display:none">
     <div class="card">
+      <div class="dtitle" style="margin-bottom:8px">Wallets</div>
+      <div class="f" style="margin-bottom:8px;opacity:.7">One row per card or cash pile you're carrying. Opening balance in, spends come off it.</div>
+      <div class="row">
+        <input type="text" id="walName" placeholder="e.g. Forex card / Cash wallet" style="flex:1">
+        <select id="walCur" style="width:90px;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)">
+          <option>EUR</option><option>CHF</option><option>USD</option><option>EGP</option><option>INR</option>
+        </select>
+        <input type="number" id="walOpen" placeholder="Opening" style="width:100px">
+        <button class="mini" id="walAdd">Add</button>
+      </div>
+      <div id="walList" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <div class="dtitle" style="margin-bottom:8px">Log a spend</div>
       <div class="row">
         <select id="expDay" style="flex:1;min-width:150px;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)"></select>
         <select id="expCat" style="min-width:120px;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)">
@@ -216,11 +231,14 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       <div class="row">
         <input type="text" id="expWhat" placeholder="What was it?" style="flex:1">
         <input type="number" id="expAmt" placeholder="Amount" style="width:110px">
+      </div>
+      <div class="row">
+        <select id="expWallet" style="flex:1;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)"></select>
         <select id="expCur" style="width:90px;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)">
           <option>INR</option><option>CHF</option><option>EUR</option><option>USD</option><option>EGP</option>
         </select>
+        <button class="mini" id="expAdd">Add</button>
       </div>
-      <button class="mini" id="expAdd">Add expense</button>
       <div class="f" id="expTotal" style="margin-top:10px"></div>
     </div>
     <div id="expList"></div>
@@ -261,7 +279,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       ],
       homeCity:'Bengaluru',
       binder: seedBinder(),
-      vault: [], packing: [], expenses: []
+      vault: [], packing: [], expenses: [], wallets: []
     };
   }
 
@@ -936,6 +954,9 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     ['Health','Protein powder',1000,'checked'],
     ['Health','Disposable cutlery',150,'checked'],
     ['Health','Novel',300,'cabin'],
+    ['Documents','Passports (all 3)',150,'cabin'],
+    ['Documents','Schengen visa printout',20,'cabin'],
+    ['Documents','Egypt e-visa + Letter of Guarantee',20,'cabin'],
     ['Documents','Agarbatti sample',500,'checked'],
     ['Documents','Copy of the passport insurance, hotel bookings',100,'cabin'],
     ['Documents','Drivers license',10,'cabin'],
@@ -1020,8 +1041,66 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
 
   /* ---------- expenses ---------- */
   var RATES = {INR:1, CHF:106, EUR:99, USD:88, EGP:1.85}; // rough, editable
+  function walletSpent(t, wid){
+    return (t.expenses||[]).filter(function(e){return e.wallet===wid})
+      .reduce(function(a,e){ return a + (e.amt||0); }, 0);
+  }
+  function renderWallets(){
+    var t = active(); t.wallets = t.wallets || [];
+    document.getElementById('walList').innerHTML = t.wallets.length ? t.wallets.map(function(wl){
+      var spent = walletSpent(t, wl.id);
+      var left = (wl.opening||0) - spent;
+      var pct = wl.opening ? Math.max(0, Math.min(100, left/wl.opening*100)) : 0;
+      var low = left <= (wl.opening||0)*0.15;
+      return '<div class="entry" style="align-items:flex-start">' +
+        '<div class="ebody">' +
+          '<div class="etitle">'+esc(wl.name)+' <span style="opacity:.6">'+wl.cur+'</span></div>' +
+          '<div class="emeta">Opening '+wl.cur+' '+(wl.opening||0).toLocaleString()+
+            ' · spent '+wl.cur+' '+spent.toLocaleString()+'</div>' +
+          '<div class="etitle" style="margin-top:2px'+(low?';color:var(--stop,#c0392b)':'')+'">Left '+wl.cur+' '+left.toLocaleString()+
+            ' <span style="opacity:.55;font-weight:normal">≈ ₹'+Math.round(left*(RATES[wl.cur]||1)).toLocaleString('en-IN')+'</span></div>' +
+          '<div style="height:4px;background:var(--rule);border-radius:2px;margin-top:5px">' +
+            '<div style="height:4px;width:'+pct+'%;background:'+(low?'#c0392b':'var(--go,#2e7d32)')+';border-radius:2px"></div></div>' +
+        '</div>' +
+        '<button class="edel waldel" data-id="'+wl.id+'">✕</button>' +
+      '</div>';
+    }).join('') : '<div class="empty">No wallets yet — add your forex card, and a row per cash currency.</div>';
+
+    var sel = document.getElementById('expWallet');
+    var keep = sel.value;
+    sel.innerHTML = '<option value="">— no wallet —</option>' + t.wallets.map(function(wl){
+      return '<option value="'+wl.id+'" data-cur="'+wl.cur+'">'+esc(wl.name)+' ('+wl.cur+')</option>';
+    }).join('');
+    if(keep) sel.value = keep;
+
+    Array.prototype.forEach.call(document.querySelectorAll('.waldel'), function(b){
+      b.addEventListener('click', function(){
+        var id = b.getAttribute('data-id');
+        var used = (active().expenses||[]).some(function(e){return e.wallet===id});
+        if(used && !confirm('Spends are logged against this wallet. Remove it anyway? They will stay in the list but stop counting against a balance.')) return;
+        active().wallets = active().wallets.filter(function(x){return x.id!==id});
+        renderMoney(); save();
+      });
+    });
+  }
+  document.getElementById('walAdd').addEventListener('click', function(){
+    var n = document.getElementById('walName'), o = document.getElementById('walOpen');
+    if(!n.value.trim()){ n.focus(); return; }
+    var t = active(); t.wallets = t.wallets || [];
+    t.wallets.push({id:uid(), name:n.value.trim(), cur:document.getElementById('walCur').value,
+      opening:parseFloat(o.value)||0});
+    n.value=''; o.value='';
+    renderMoney(); save();
+  });
+  // picking a wallet sets the currency to match it
+  document.getElementById('expWallet').addEventListener('change', function(){
+    var opt = this.options[this.selectedIndex];
+    var cur = opt && opt.getAttribute('data-cur');
+    if(cur) document.getElementById('expCur').value = cur;
+  });
   function renderMoney(){
     var t = active(); t.expenses = t.expenses || [];
+    renderWallets();
     var days = [];
     var cur = t.start, end = tripEnd(t);
     while(cur <= end){ days.push(cur); cur = addDays(cur,1); }
@@ -1049,9 +1128,12 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
         '<div class="dhead"><div class="dtitle">'+fmt(d)+' · '+esc(cityForDay(t,d))+'</div>' +
         '<div class="dcity">₹'+Math.round(dayTotal).toLocaleString('en-IN')+'</div></div>' +
         grouped[d].map(function(e){
+          var wl = (t.wallets||[]).find(function(x){return x.id===e.wallet});
           return '<div class="entry"><div class="ebody">' +
             '<div class="etitle">'+esc(e.what)+'</div>' +
-            '<div class="emeta">'+esc(e.cat)+' · '+e.cur+' '+e.amt+(e.cur!=='INR'?' ≈ ₹'+Math.round(e.amt*(RATES[e.cur]||1)).toLocaleString('en-IN'):'')+'</div>' +
+            '<div class="emeta">'+esc(e.cat)+' · '+e.cur+' '+e.amt+
+              (e.cur!=='INR'?' ≈ ₹'+Math.round(e.amt*(RATES[e.cur]||1)).toLocaleString('en-IN'):'')+
+              (wl?' · '+esc(wl.name):'')+'</div>' +
             '</div><button class="edel xdel" data-id="'+e.id+'">✕</button></div>';
         }).join('') + '</div>';
     }).join('') || '<div class="empty">No expenses logged yet.</div>';
@@ -1069,7 +1151,8 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     var t = active(); t.expenses = t.expenses || [];
     t.expenses.push({id:uid(), day:document.getElementById('expDay').value,
       cat:document.getElementById('expCat').value, what:what.value.trim(),
-      amt:parseFloat(amt.value)||0, cur:document.getElementById('expCur').value});
+      amt:parseFloat(amt.value)||0, cur:document.getElementById('expCur').value,
+      wallet:document.getElementById('expWallet').value || ''});
     what.value=''; amt.value='';
     renderMoney(); save();
   });
