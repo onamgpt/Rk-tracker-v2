@@ -119,7 +119,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   <div class="head">
     <div>
       <h1>Travel Desk</h1>
-      <div class="sub">board · booking links · trip binder</div>
+      <div class="sub" id="whoami">board · booking links · trip binder</div>
     </div>
   </div>
 
@@ -200,6 +200,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       </div>
       <div class="f" id="packCount" style="margin-top:8px"></div>
       <button class="iconbtn" id="packSeed" style="margin-top:8px">↻ Load suggested list for this trip</button>
+      <div class="f" style="margin-top:6px;opacity:.7">This list is yours alone — Brunda and Tassmai each keep their own.</div>
     </div>
     <div id="packList"></div>
   </div>
@@ -207,7 +208,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   <div id="money" style="display:none">
     <div class="card">
       <div class="dtitle" style="margin-bottom:8px">Wallets</div>
-      <div class="f" style="margin-bottom:8px;opacity:.7">One row per card or cash pile you're carrying. Opening balance in, spends come off it.</div>
+      <div class="f" style="margin-bottom:8px;opacity:.7">One row per card or cash pile <b>you</b> are carrying. Opening balance in, spends come off it. Private to your login.</div>
       <div class="row">
         <input type="text" id="walName" placeholder="e.g. Forex card / Cash wallet" style="flex:1">
         <select id="walCur" style="width:90px;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)">
@@ -248,6 +249,13 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
 <script>
 (function(){
   var KEY = 'rk_travel_desk_v1';
+  // Who is looking. Same URL-param convention the main tracker uses.
+  var USER = (new URLSearchParams(window.location.search).get('user') || 'main').toLowerCase();
+  // The itinerary is shared — one family trip, one set of tickets, one vault.
+  // Packing and money are personal: each person packs their own bag and carries
+  // their own cards, so those live under that person's own record.
+  var SHARED_KEY = 'travel_desk', PERSONAL_KEY = 'travel_desk_personal';
+  var PERSONAL_FIELDS = ['packing','expenses','wallets'];
   var trips = {};
   var activeId = null;
   var tab = 'board';
@@ -381,19 +389,48 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     clearTimeout(flash._t);
     flash._t = setTimeout(function(){ el.textContent=''; }, 2200);
   }
+  function splitShared(){
+    // itinerary only — personal fields stripped out
+    var out = {};
+    Object.keys(trips).forEach(function(id){
+      var c = {};
+      Object.keys(trips[id]).forEach(function(k){
+        if(PERSONAL_FIELDS.indexOf(k) === -1) c[k] = trips[id][k];
+      });
+      out[id] = c;
+    });
+    return {active:activeId, trips:out};
+  }
+  function splitPersonal(){
+    // just this person's packing, expenses and wallets, keyed by trip
+    var out = {};
+    Object.keys(trips).forEach(function(id){
+      var p = {};
+      PERSONAL_FIELDS.forEach(function(k){ p[k] = trips[id][k] || []; });
+      out[id] = p;
+    });
+    return out;
+  }
+  function mergePersonal(personal){
+    Object.keys(trips).forEach(function(id){
+      var p = (personal && personal[id]) || {};
+      PERSONAL_FIELDS.forEach(function(k){ trips[id][k] = p[k] || []; });
+    });
+  }
+
   function save(){
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async function(){
-      var payload = {active:activeId, trips:trips};
-      try{ localStorage.setItem(KEY, JSON.stringify(payload)); }catch(e){}
-      var r = await dbAPI('savePortfolio', {key:'travel_desk', data:payload});
-      if(r && (r.ok || r.saved)) flash('Saved'); else flash('Saved on this device only');
+      try{ localStorage.setItem(KEY+'_'+USER, JSON.stringify({active:activeId, trips:trips})); }catch(e){}
+      var a = await dbAPI('savePortfolio', {key:SHARED_KEY,   data:splitShared()},   'main');
+      var b = await dbAPI('savePortfolio', {key:PERSONAL_KEY, data:splitPersonal()}, USER);
+      if((a&&(a.ok||a.saved)) && (b&&(b.ok||b.saved))) flash('Saved'); else flash('Saved on this device only');
     }, 400);
   }
   async function boot(){
-    // 1. instant paint from cache
+    // 1. instant paint from this user's cache
     try{
-      var raw = localStorage.getItem(KEY);
+      var raw = localStorage.getItem(KEY+'_'+USER);
       if(raw){
         var data = JSON.parse(raw);
         if(data && data.trips && Object.keys(data.trips).length){
@@ -406,19 +443,20 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       trips[t.id] = t; activeId = t.id;
     }
     renderAll();
-    // 2. durable load from Supabase — wins if present
+    // 2. durable load — shared itinerary, then this person's own packing/money
     try{
-      var res = await dbAPI('getPortfolio', {key:'travel_desk'});
-      var d = res && res.data;
+      var shared = await dbAPI('getPortfolio', {key:SHARED_KEY}, 'main');
+      var d = shared && shared.data;
       if(d && d.trips && Object.keys(d.trips).length){
         trips = d.trips;
         activeId = (d.active && d.trips[d.active]) ? d.active : Object.keys(d.trips)[0];
-        try{ localStorage.setItem(KEY, JSON.stringify({active:activeId, trips:trips})); }catch(e){}
-        renderAll();
-        flash('Synced');
-      } else {
-        save(); // first run — push the local/default trip up
       }
+      var mine = await dbAPI('getPortfolio', {key:PERSONAL_KEY}, USER);
+      mergePersonal(mine && mine.data);
+      try{ localStorage.setItem(KEY+'_'+USER, JSON.stringify({active:activeId, trips:trips})); }catch(e){}
+      renderAll();
+      if(!d || !d.trips) save(); // first run — push the default itinerary up
+      else flash('Synced');
     }catch(e){ flash('Offline — using this device'); }
   }
 
@@ -563,11 +601,11 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   var OWNER_CHAT_ID = "8632288596";
   var DEFAULT_LEAD = {flight:180, train:45, taxi:15, activity:30, hotel:30, other:30};
 
-  async function dbAPI(action, extra){
+  async function dbAPI(action, extra, asUser){
     try{
       var r = await fetch('/.netlify/functions/db', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(Object.assign({action:action, user:'main'}, extra||{}))
+        body: JSON.stringify(Object.assign({action:action, user:(asUser||'main')}, extra||{}))
       });
       return await r.json();
     }catch(e){ return {ok:false, error:String(e)}; }
@@ -1156,6 +1194,11 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     what.value=''; amt.value='';
     renderMoney(); save();
   });
+
+  var NAMES = {main:'Ravi', wife:'Brunda', daughter:'Tassmai'};
+  function whoLabel(){ return NAMES[USER] || USER; }
+  document.getElementById('whoami').textContent =
+    whoLabel() + ' · itinerary shared, packing & money your own';
 
   function renderAll(){
     renderTripSel();
