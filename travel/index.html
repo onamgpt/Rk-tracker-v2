@@ -181,13 +181,20 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     <div class="card">
       <div class="row">
         <input type="text" id="packNew" placeholder="Add an item…" style="flex:1">
-        <select id="packCat" style="min-width:120px;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)">
+        <select id="packCat" style="min-width:110px;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)">
           <option value="Clothes">Clothes</option>
           <option value="Loungewear">Loungewear</option>
           <option value="Tech">Tech</option>
           <option value="Documents">Documents</option>
           <option value="Health">Health</option>
           <option value="Misc">Misc</option>
+        </select>
+      </div>
+      <div class="row">
+        <input type="number" id="packG" placeholder="grams" min="0" step="50" style="width:100px">
+        <select id="packBag" style="min-width:120px;padding:9px 10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper-2);color:var(--ink)">
+          <option value="checked">🧳 Checked</option>
+          <option value="cabin">🎒 Cabin</option>
         </select>
         <button class="mini" id="packAdd">Add</button>
       </div>
@@ -903,33 +910,65 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
 
   /* ---------- packing ---------- */
   var PACK_SEED = [
-    ['Documents','Passports (all 3) + photocopies'],['Documents','Schengen visa printout'],
-    ['Documents','Egypt e-visa + Letter of Guarantee'],['Documents','Travel insurance certificate'],
-    ['Documents','Flight tickets (77AXKM) + hotel confirmations'],['Documents','Forex card + backup card'],
-    ['Clothes','Light layers — Europe mornings are cold, Egypt days are hot'],
-    ['Clothes','1 warm jacket / fleece for Zürich'],['Clothes','Comfortable walking shoes (worn in)'],
-    ['Clothes','Modest cover — shoulders & knees, for churches and mosques'],
-    ['Clothes','Sun hat + sunglasses for Luxor/Cairo'],
-    ['Loungewear','Sleepwear'],['Loungewear','Slippers / hotel flip-flops'],
-    ['Tech','Phone + charger'],['Tech','Universal travel adapter (CH type J is its own shape)'],
-    ['Tech','Power bank (in cabin bag, never checked)'],['Tech','Camera + spare card'],
-    ['Health','Regular medicines + a spare few days'],['Health','Sunscreen SPF50'],
-    ['Health','ORS sachets / electrolytes for Egypt'],['Health','Basic first aid + motion sickness tablets'],
-    ['Misc','Refillable water bottle'],['Misc','Small daypack'],
-    ['Misc','Small USD notes for Egypt tipping'],['Misc','Snacks — vegetarian options can be thin in transit']
+    // [category, item, grams, bag]
+    ['Documents','Passports (all 3) + photocopies',150,'cabin'],
+    ['Documents','Schengen visa printout',20,'cabin'],
+    ['Documents','Egypt e-visa + Letter of Guarantee',20,'cabin'],
+    ['Documents','Travel insurance certificate',20,'cabin'],
+    ['Documents','Flight tickets (77AXKM) + hotel confirmations',30,'cabin'],
+    ['Documents','Forex card + backup card',30,'cabin'],
+    ['Clothes','Light layers — Europe mornings cold, Egypt days hot (5 sets)',2500,'checked'],
+    ['Clothes','1 warm jacket / fleece for Zürich',700,'cabin'],
+    ['Clothes','Comfortable walking shoes (worn in)',900,'checked'],
+    ['Clothes','Spare shoes / sandals',500,'checked'],
+    ['Clothes','Modest cover — shoulders & knees, for churches and mosques',300,'checked'],
+    ['Clothes','Sun hat + sunglasses for Luxor/Cairo',200,'cabin'],
+    ['Clothes','Underwear + socks (7 days)',600,'checked'],
+    ['Loungewear','Sleepwear (2 sets)',500,'checked'],
+    ['Loungewear','Slippers / hotel flip-flops',250,'checked'],
+    ['Tech','Phone + charger',300,'cabin'],
+    ['Tech','Universal travel adapter (CH type J is its own shape)',150,'cabin'],
+    ['Tech','Power bank (cabin only — never checked)',350,'cabin'],
+    ['Tech','Camera + spare card',600,'cabin'],
+    ['Tech','Charging cables + multi-port plug',250,'cabin'],
+    ['Health','Regular medicines + a spare few days',300,'cabin'],
+    ['Health','Sunscreen SPF50',150,'checked'],
+    ['Health','ORS sachets / electrolytes for Egypt',100,'checked'],
+    ['Health','Basic first aid + motion sickness tablets',200,'cabin'],
+    ['Health','Toiletries (under 100ml if in cabin)',800,'checked'],
+    ['Misc','Refillable water bottle (empty through security)',150,'cabin'],
+    ['Misc','Small daypack',350,'cabin'],
+    ['Misc','Small USD notes for Egypt tipping',20,'cabin'],
+    ['Misc','Snacks — vegetarian options thin in transit',400,'cabin'],
+    ['Misc','Laundry bag / packing cubes',200,'checked']
   ];
+  var CABIN_ALLOW = 7000, CHECKED_ALLOW = 30000; // grams, per person, Etihad Value fare
+  function fmtKg(g){ return (g/1000).toFixed(1)+'kg'; }
   function renderPacking(){
     var t = active(); t.packing = t.packing || [];
     var done = t.packing.filter(function(p){return p.done}).length;
-    document.getElementById('packCount').textContent = t.packing.length ? (done+' of '+t.packing.length+' packed') : '';
+    var cabin = t.packing.reduce(function(a,p){ return a + (p.bag==='cabin' ? (p.g||0) : 0); },0);
+    var checked = t.packing.reduce(function(a,p){ return a + (p.bag!=='cabin' ? (p.g||0) : 0); },0);
+    var warn = function(v,lim){ return v>lim ? ' style="color:var(--stop,#c0392b)"' : ''; };
+    document.getElementById('packCount').innerHTML = t.packing.length
+      ? done+' of '+t.packing.length+' packed<br>' +
+        '<span'+warn(cabin,CABIN_ALLOW)+'>🎒 Cabin '+fmtKg(cabin)+' / 7kg'+(cabin>CABIN_ALLOW?' — over':'')+'</span> · ' +
+        '<span'+warn(checked,CHECKED_ALLOW)+'>🧳 Checked '+fmtKg(checked)+' / 30kg'+(checked>CHECKED_ALLOW?' — over':'')+'</span>' +
+        '<br><span style="opacity:.6">Per person. Allowances are your Etihad Value fare: 7kg cabin, 30kg checked.</span>'
+      : '';
     var cats = {};
     t.packing.forEach(function(p){ (cats[p.cat]=cats[p.cat]||[]).push(p); });
     document.getElementById('packList').innerHTML = Object.keys(cats).length ? Object.keys(cats).map(function(c){
-      return '<div class="card"><div class="dtitle" style="margin-bottom:8px">'+esc(c)+'</div>' +
+      var catG = cats[c].reduce(function(a,p){return a+(p.g||0)},0);
+      return '<div class="card"><div class="dhead"><div class="dtitle">'+esc(c)+'</div>' +
+        '<div class="dcity">'+fmtKg(catG)+'</div></div>' +
         cats[c].map(function(p){
           return '<label class="remrow" style="display:flex;gap:8px;align-items:center;padding:3px 0">' +
             '<input type="checkbox" class="pchk" data-id="'+p.id+'"'+(p.done?' checked':'')+'>' +
             '<span style="flex:1'+(p.done?';opacity:.45;text-decoration:line-through':'')+'">'+esc(p.item)+'</span>' +
+            '<button class="pbag" data-id="'+p.id+'" title="Tap to switch bag" style="background:none;border:1px solid var(--rule);border-radius:3px;cursor:pointer;font-size:11px;padding:2px 5px">'+(p.bag==='cabin'?'🎒':'🧳')+'</button>' +
+            '<input type="number" class="pg" data-id="'+p.id+'" value="'+(p.g||0)+'" min="0" step="50" title="grams" style="width:62px;text-align:right;padding:3px 4px;font-size:11px">' +
+            '<span style="font-size:11px;opacity:.6">g</span>' +
             '<button class="rm pdel" data-id="'+p.id+'">✕</button></label>';
         }).join('') + '</div>';
     }).join('') : '<div class="empty">No packing list yet — tap “Load suggested list” above.</div>';
@@ -938,6 +977,19 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       c.addEventListener('change', function(){
         var p = active().packing.find(function(x){return x.id===c.getAttribute('data-id')});
         if(p){ p.done = c.checked; renderPacking(); save(); }
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.pg'), function(n){
+      n.addEventListener('change', function(){
+        var p = active().packing.find(function(x){return x.id===n.getAttribute('data-id')});
+        if(p){ p.g = Math.max(0, parseInt(n.value,10)||0); renderPacking(); save(); }
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.pbag'), function(b){
+      b.addEventListener('click', function(e){
+        e.preventDefault();
+        var p = active().packing.find(function(x){return x.id===b.getAttribute('data-id')});
+        if(p){ p.bag = (p.bag==='cabin' ? 'checked' : 'cabin'); renderPacking(); save(); }
       });
     });
     Array.prototype.forEach.call(document.querySelectorAll('.pdel'), function(b){
@@ -950,15 +1002,18 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   document.getElementById('packAdd').addEventListener('click', function(){
     var inp = document.getElementById('packNew'), v = inp.value.trim();
     if(!v) return;
+    var gi = document.getElementById('packG');
     var t = active(); t.packing = t.packing || [];
-    t.packing.push({id:uid(), item:v, cat:document.getElementById('packCat').value, done:false});
-    inp.value=''; renderPacking(); save();
+    t.packing.push({id:uid(), item:v, cat:document.getElementById('packCat').value,
+      g:Math.max(0, parseInt(gi.value,10)||0), bag:document.getElementById('packBag').value, done:false});
+    inp.value=''; gi.value='';
+    renderPacking(); save();
   });
   document.getElementById('packSeed').addEventListener('click', function(){
     var t = active(); t.packing = t.packing || [];
     var have = t.packing.map(function(p){return p.item});
     PACK_SEED.forEach(function(row){
-      if(have.indexOf(row[1])===-1) t.packing.push({id:uid(), cat:row[0], item:row[1], done:false});
+      if(have.indexOf(row[1])===-1) t.packing.push({id:uid(), cat:row[0], item:row[1], g:row[2], bag:row[3], done:false});
     });
     renderPacking(); save(); flash('List loaded');
   });
