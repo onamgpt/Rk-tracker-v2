@@ -364,6 +364,39 @@ function auto60Reminder(entry){
 // from App's saveEntry, so every call threw ReferenceError and no entry
 // reminder ever reached the queue.
 // Turns an entry's Reminder field into an actual Telegram push, or cancels
+// ── Shared money rules ──────────────────────────────────────────────────────
+// Receivables, Remind and Logistics each used to carry their OWN idea of what
+// counts as a customer sale. Receivables demanded category exactly "Sales";
+// nothing in the app ever writes that, so dispatched orders (category
+// "Sales - Order") never reached it. Remind used a loose regex and saw a
+// different set again. One rule now, used by all three, so the three screens
+// can never disagree about who owes money.
+const RK_SALE_CAT = /^\s*sales\b/i;              // "Sales", "Sales - Order", "Sales - Payment"
+const RK_NOT_INVOICE = /visit|allowance|travel|field|expense|report|salary|complaint/i;
+const rkNum = (v) => { const n = parseFloat(String(v ?? "").replace(/[^0-9.]/g, "")); return isNaN(n) ? 0 : n; };
+
+// Is this entry a customer sale at all (regardless of whether it is paid)?
+const isCustomerSale = (e) => {
+  if (!e) return false;
+  const cat = String(e.category || "");
+  const tt  = String(e.taskType || "");
+  const tags = (e.tags || []).map(t => String(t).toLowerCase());
+  if (!(RK_SALE_CAT.test(cat) || RK_SALE_CAT.test(tt))) return false;
+  // Money we PAY OUT, not money owed to us.
+  if (RK_NOT_INVOICE.test(cat) || RK_NOT_INVOICE.test(tt)) return false;
+  if (tags.some(t => /visit|allowance|travel|field report|expense/.test(t))) return false;
+  return true;
+};
+
+// Owed to us right now. An invoice amount is required: a delivery with no
+// amount recorded is a shipment, not yet a debt.
+const isReceivable = (e) => {
+  if (!isCustomerSale(e)) return false;
+  const total = rkNum(e.amount);
+  if (total <= 0) return false;
+  return rkNum(e.amountPaid) < total - 0.5;
+};
+
 // one that no longer applies. This is what "Reminder -> Telegram (fires
 // 24/7)" on the form was always supposed to do — until now it only drove
 // an in-app badge, which nobody sees unless the tracker happens to be open.
@@ -2072,7 +2105,7 @@ function LogisticsTracker({entries,onClose,onUpdateEntry,onNewSalesOrder}){
     if(/commission|allowance|salary|incentive|expense|reimburse/i.test((e.title||"")+" "+(e.category||""))) return true;
     return false;
   };
-  const isCustomerOrder=(e)=>e.category==="Sales - Order"||e.category==="Sales - Payment";
+  const isCustomerOrder=(e)=>isCustomerSale(e)&&!/complaint/i.test(String(e.category||""));
   const shipments=entries.filter(e=>!isJunk(e) && !isOurOwn(e) && isCustomerOrder(e) && (hasStage(e)||hasValue(e)));
   const junkCount=entries.filter(e=>(e.category==="Sales - Payment"||e.category==="Sales - Order")&&isJunk(e)).length;
   const selected=shipments.find(e=>e.id===selectedId);
@@ -7960,25 +7993,7 @@ function Receivables({ entries, onSaveEntry, onClose }) {
   const daysOld = d => { const t = Date.parse(d); return isNaN(t) ? 0 : Math.floor((Date.now() - t) / 86400000); };
 
   // Sales entries that still have money outstanding
-  const open = (entries || []).filter(e => {
-    if (!e) return false;
-    const cat = String(e.category || "");
-    const tt  = String(e.taskType || "");
-    const tags = (e.tags || []).map(t => String(t).toLowerCase());
-    // Only true customer sales invoices — money owed TO us
-    const isSale = /^\s*sales\s*$/i.test(cat) || /^\s*sales\s*$/i.test(tt);
-    if (!isSale) return false;
-    // Exclude officer visits / travel allowance / field reports — money we PAY OUT
-    const notInvoice =
-      /visit|allowance|travel|field|expense|report|salary/i.test(cat) ||
-      /visit|allowance|travel|field|expense|report|salary/i.test(tt) ||
-      tags.some(t => /visit|allowance|travel|field report|expense/.test(t));
-    if (notInvoice) return false;
-    const total = num(e.amount);
-    if (total <= 0) return false;
-    const paid = num(e.amountPaid);
-    return paid < total - 0.5;   // still something owed
-  });
+  const open = (entries || []).filter(isReceivable);
 
   const withCalc = open.map(e => {
     const total = num(e.amount), paid = num(e.amountPaid);
@@ -12604,7 +12619,8 @@ function PaymentReminders({ onClose, entries, onSaveEntry, onFocusDealer }) {
     const cat=(e.category||"").toLowerCase();
     const tags=(e.tags||[]).join(" ").toLowerCase();
     if(/purchase|payable|vendor bill|buy/.test(cat)||/payable/.test(tags)) return "purchase";
-    if(/sales|receiv|invoice|order/.test(cat)||/receivable|sales/.test(tags)) return "sales";
+    // Same rule Receivables uses, so the two screens never disagree.
+    if(isCustomerSale(e)||/receiv|invoice|order/.test(cat)||/receivable|sales/.test(tags)) return "sales";
     // default: money we asked for = sales(receivable)
     return "sales";
   };
