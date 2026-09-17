@@ -29,7 +29,7 @@ exports.handler = async (event) => {
         res.on("end", function () { resolve(data); });
       });
       req.on("error", reject);
-      req.on("timeout", function() { req.destroy(); reject(new Error("Request timeout")); });
+      req.on("timeout", function() { req.destroy(); reject(new Error("Gmail scan took longer than 25 seconds and was cut off — try a shorter period, or run it again in a moment.")); });
     });
   }
 
@@ -80,8 +80,13 @@ exports.handler = async (event) => {
       const b64 = fileData.buffer.toString("base64");
       return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, base64: b64, mimeType: fileData.type }) };
     } else if (action === "scanLocationEmails") {
-      // Separate scan for #location emails — subject contains "location"
-      raw = await makeGet(INTEL_URL + "?action=scanLocationEmails");
+      // Separate scan for #location emails — subject contains "location".
+      // Bounded on purpose: an unbounded Gmail search on a large mailbox runs
+      // past the 25s ceiling below and the user just sees "Request timeout".
+      // The script ignores parameters it does not know, so this is safe either way.
+      const days = Number(body.days) > 0 ? Number(body.days) : 30;
+      const max  = Number(body.max)  > 0 ? Number(body.max)  : 40;
+      raw = await makeGet(INTEL_URL + "?action=scanLocationEmails&days=" + days + "&max=" + max);
     } else if (action === "scanDayBookEmails") {
       raw = await makeGet(INTEL_URL + "?action=scanDayBookEmails");
     } else if (action === "getAttachment") {
