@@ -2915,7 +2915,7 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
       const res = await fetch("/.netlify/functions/intel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "scanLocationEmails" })
+        body: JSON.stringify({ action: "scanLocationEmails", days: 30, max: 40 })
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "Scan failed");
