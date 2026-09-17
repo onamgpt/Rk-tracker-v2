@@ -9239,10 +9239,16 @@ function CSDPayments({ orders, onUpdateDepot, onClose }) {
 
   const onPick = ev => {
     const f = ev.target.files && ev.target.files[0]; if (!f) return;
-    const r = new FileReader();
-    r.onload = () => setPhoto({ dataUrl: r.result, type: f.type || "image/jpeg" });
-    r.readAsDataURL(f);
     setPending(null); setMsg("");
+    if (f.size > 3.5 * 1024 * 1024) {
+      setPhoto(null);
+      setMsg("❌ That file is " + (f.size/1048576).toFixed(1) + " MB. Anything over 3.5 MB is rejected before it reaches the reader — split it into fewer pages and upload again.");
+      return;
+    }
+    const r = new FileReader();
+    r.onload = () => setPhoto({ dataUrl: r.result, type: f.type || "image/jpeg", name: f.name, size: f.size });
+    r.onerror = () => setMsg("❌ Could not read that file off the device.");
+    r.readAsDataURL(f);
   };
 
   const scan = async () => {
@@ -9261,7 +9267,10 @@ function CSDPayments({ orders, onUpdateDepot, onClose }) {
       const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
       const obj = JSON.parse(s>=0 ? clean.substring(s,e+1) : clean);
       setPending(obj); setMsg("");
-    } catch(e) { setMsg("❌ Couldn't read it clearly — try a sharper image, or split into fewer pages per upload."); }
+    } catch(e) {
+      const m = String(e && e.message || "");
+      setMsg(m ? ("❌ " + m) : "❌ Couldn't read it clearly — try a sharper scan, or split into fewer pages per upload.");
+    }
     setBusy(false);
   };
 
@@ -9349,7 +9358,9 @@ function CSDPayments({ orders, onUpdateDepot, onClose }) {
       </button>
 
       {photo && <div style={{ textAlign:"center", marginBottom:10 }}>
-        <img src={photo.dataUrl} alt="statement" style={{ maxWidth:"100%", maxHeight:160, borderRadius:8, border:"1px solid #ddd" }}/>
+        {String(photo.type||"").indexOf("pdf")>-1
+          ? <div style={{ padding:"10px 12px", background:"#f4f0fa", borderRadius:8, border:"1px solid #d8c8f0", fontSize:13, color:"#5a3a9a", fontWeight:700 }}>📄 PDF ready — {photo.name || "document"}</div>
+          : <img src={photo.dataUrl} alt="statement" style={{ maxWidth:"100%", maxHeight:160, borderRadius:8, border:"1px solid #ddd" }}/>}
         <button onClick={scan} disabled={busy} style={{ width:"100%", marginTop:8, padding:"11px", borderRadius:10, border:"none", background:"#2a4a7a", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>
           {busy ? "⏳ Reading…" : "🔍 Read the statement"}
         </button>
