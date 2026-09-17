@@ -38,7 +38,7 @@ exports.handler = async (event) => {
 
     const reqBody = JSON.stringify({
       model: pdfBase64 ? "claude-sonnet-4-6" : "claude-haiku-4-5-20251001",
-      max_tokens: 1500,
+      max_tokens: pdfBase64 ? 16000 : 1500,
       system: system || "You are a helpful assistant for Onam Agarbathi Pvt. Ltd., a Bangalore incense manufacturer.",
       messages: [{ role: "user", content }]
     });
@@ -57,6 +57,9 @@ exports.handler = async (event) => {
 
     const d = JSON.parse(raw);
     if (d.error) return { statusCode: 200, headers: h, body: JSON.stringify({ text: "", error: d.error.message }) };
+    if (d.stop_reason === "max_tokens")
+      return { statusCode: 200, headers: h, body: JSON.stringify({ text: d.content?.[0]?.text || "",
+        error: "The document is too long to read in one pass — split it into fewer pages and upload again." }) };
     return { statusCode: 200, headers: h, body: JSON.stringify({ text: d.content?.[0]?.text || "" }) };
   } catch (e) {
     return { statusCode: 500, headers: h, body: JSON.stringify({ error: e.message }) };
