@@ -74,6 +74,52 @@ function shape(p, here, kind) {
   };
 }
 
+
+// Fallback: legacy Places API (Nearby Search, GET). Used when the key is not
+// allowed to call Places API (New) — keys restricted to "Places API" only.
+function get(path) {
+  return new Promise((resolve) => {
+    https.get({ hostname: "maps.googleapis.com", path }, (res) => {
+      let d = "";
+      res.on("data", c => d += c);
+      res.on("end", () => { try { resolve(JSON.parse(d)); } catch (e) { resolve({ status: "PARSE_ERROR" }); } });
+    }).on("error", e => resolve({ status: "REQUEST_ERROR", error_message: String(e) }))
+      .setTimeout(12000, function () { this.destroy(); });
+  });
+}
+
+function shapeLegacy(p, here, kind, vegHint) {
+  const loc = p.geometry && p.geometry.location;
+  const types = p.types || [];
+  const nm = (p.name || "").toLowerCase();
+  const pureVeg = /\b(pure veg|vegetarian|vegan|vegetariano|vegano)\b/.test(nm);
+  return {
+    id: p.place_id, kind, name: p.name || "Unnamed", address: p.vicinity || "",
+    rating: p.rating || null, reviews: p.user_ratings_total || 0,
+    type: (types[0] || "").replace(/_/g, " "), summary: "",
+    veg: vegHint || pureVeg || /indian|veg/.test(nm), pureVeg,
+    openNow: p.opening_hours ? p.opening_hours.open_now : null,
+    maps: "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(p.name || "") + "&query_place_id=" + p.place_id,
+    km: loc ? Math.round(km(here, loc) * 100) / 100 : null
+  };
+}
+
+async function legacySearch(here, radius, key) {
+  const base = "/maps/api/place/nearbysearch/json?location=" + here.lat + "," + here.lng + "&radius=" + radius + "&key=" + key;
+  const [food, veg, sights] = await Promise.all([
+    get(base + "&type=restaurant&rankby=prominence"),
+    get(base + "&type=restaurant&keyword=" + encodeURIComponent("vegetarian")),
+    get(base + "&type=tourist_attraction&rankby=prominence")
+  ]);
+  const okS = r => r && (r.status === "OK" || r.status === "ZERO_RESULTS");
+  if (![food, veg, sights].some(okS)) return { ok: false, error: (food && (food.error_message || food.status)) || "legacy failed" };
+  const seen = new Set(), eat = [];
+  (veg.results || []).forEach(p => { if (!seen.has(p.place_id)) { seen.add(p.place_id); eat.push(shapeLegacy(p, here, "eat", true)); } });
+  (food.results || []).forEach(p => { if (!seen.has(p.place_id)) { seen.add(p.place_id); eat.push(shapeLegacy(p, here, "eat", false)); } });
+  const see = (sights.results || []).filter(p => !seen.has(p.place_id)).map(p => shapeLegacy(p, here, "see", false));
+  return { ok: true, eat, see };
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: H, body: "" };
 
@@ -100,7 +146,14 @@ exports.handler = async (event) => {
   const bad = [food, veg, sights].find(r => r.status !== 200);
   if (bad && [food, veg, sights].every(r => r.status !== 200)) {
     const msg = (bad.body && bad.body.error && (bad.body.error.message || bad.body.error)) || "Places request failed";
-    return { statusCode: 200, headers: H, body: JSON.stringify({ ok: false, error: String(msg) }) };
+    const L = await legacySearch(here, radius, key);
+    if (!L.ok) {
+      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: false,
+        error: "New API: " + String(msg) + " | Older API: " + L.error }) };
+    }
+    const f = L.see.filter(p => (p.rating || 0) >= 4).sort((a, b) => b.reviews - a.reviews)[0]
+      || L.see.slice().sort((a, b) => b.reviews - a.reviews)[0] || null;
+    return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "legacy", famousId: f ? f.id : null, eat: L.eat, see: L.see }) };
   }
 
   const seen = new Set();
