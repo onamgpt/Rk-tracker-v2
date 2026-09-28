@@ -111,6 +111,28 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   #board{display:none!important}
   .day .dhead{border-bottom:1px solid #000}
 }
+
+/* ---- Nearby ---- */
+.tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:0 0 auto}
+.nb-go{width:100%;font-family:'Newsreader',serif;font-size:20px;padding:14px;border:1px solid var(--ink);background:var(--ink);color:var(--paper);border-radius:4px;cursor:pointer}
+.nb-go[disabled]{opacity:.55}
+.nb-filters{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:14px}
+.nb-filters label{display:flex;gap:6px;align-items:center;cursor:pointer}
+.nb-sec{font-family:'Newsreader',serif;font-size:19px;margin:18px 0 8px}
+.nb-item{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--rule);border-radius:4px;background:var(--paper-2);margin-bottom:8px}
+.nb-item input{margin-top:4px;width:18px;height:18px;flex:0 0 auto}
+.nb-item .nm{font-weight:700}
+.nb-item .meta{font-size:12.5px;color:var(--ink-soft)}
+.nb-item .why{font-size:13px;margin-top:3px}
+.nb-item a{color:var(--go);font-size:12.5px}
+.nb-badge{display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;margin-left:4px;vertical-align:1px}
+.nb-badge.veg{background:#DCEBDF;color:var(--go)}
+.nb-badge.fam{background:var(--stamp);color:#fff}
+.nb-famous{border-color:var(--stamp);border-width:2px}
+.nb-send{position:sticky;bottom:calc(8px + env(safe-area-inset-bottom));background:var(--paper);padding:10px 0;display:flex;gap:8px}
+.nb-send input{flex:1}
 </style>
 </head>
 <body>
@@ -137,6 +159,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     <button class="tab" data-tab="vault">Vault</button>
     <button class="tab" data-tab="packing">Packing</button>
     <button class="tab" data-tab="money">Money</button>
+    <button class="tab" data-tab="nearby">📍 Nearby</button>
   </div>
   <div class="saved" id="saved"></div>
 
@@ -243,6 +266,23 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       <div class="f" id="expTotal" style="margin-top:10px"></div>
     </div>
     <div id="expList"></div>
+  </div>
+
+  <div id="nearby" style="display:none">
+    <div class="card">
+      <button class="nb-go" id="nbGo">📍 What's near me now</button>
+      <div class="nb-filters">
+        <label><input type="checkbox" id="nbVeg" checked> Veg-friendly only</label>
+        <label><input type="checkbox" id="nbOpen"> Open now</label>
+        <label>Within <select id="nbRad" style="width:auto;padding:4px 6px"><option value="800">800 m</option><option value="1500" selected>1.5 km</option><option value="3000">3 km</option><option value="5000">5 km</option></select></label>
+      </div>
+      <div class="f" id="nbStatus" style="margin-top:8px"></div>
+    </div>
+    <div id="nbList"></div>
+    <div class="nb-send" id="nbSend" style="display:none">
+      <input type="text" id="nbTo" value="onamagarbathi@gmail.com">
+      <button class="mini" id="nbMail">Email picks</button>
+    </div>
   </div>
 </div>
 
@@ -499,7 +539,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   });
 
   /* ---------- tabs ---------- */
-  var PANES = ['board','binder','vault','packing','money'];
+  var PANES = ['board','binder','vault','packing','money','nearby'];
   Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(btn){
     btn.addEventListener('click', function(){
       tab = btn.getAttribute('data-tab');
@@ -1208,6 +1248,88 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     if(tab==='packing') renderPacking();
     if(tab==='money') renderMoney();
   }
+
+  /* ---------- nearby now ---------- */
+  var NB = {eat:[], see:[], famousId:null, picked:{}, where:null};
+  function nbStatus(t){ document.getElementById('nbStatus').textContent = t||''; }
+  function nbItem(p){
+    var fam = p.id===NB.famousId;
+    var dist = p.km==null ? '' : (p.km<1 ? Math.round(p.km*1000)+' m' : p.km.toFixed(1)+' km');
+    var bits = [p.type, dist, p.rating ? '★ '+p.rating+' ('+p.reviews+')' : '', p.openNow===true?'open now':(p.openNow===false?'closed now':'')].filter(Boolean).join(' · ');
+    return '<div class="nb-item'+(fam?' nb-famous':'')+'"><input type="checkbox" data-nb="'+esc(p.id)+'"'+(NB.picked[p.id]?' checked':'')+'>'+
+      '<div><div class="nm">'+esc(p.name)+(fam?'<span class="nb-badge fam">Most famous here</span>':'')+
+      (p.pureVeg?'<span class="nb-badge veg">Pure veg</span>':(p.veg?'<span class="nb-badge veg">Veg options</span>':''))+'</div>'+
+      '<div class="meta">'+esc(bits)+'</div>'+(p.summary?'<div class="why">'+esc(p.summary)+'</div>':'')+
+      '<a href="'+esc(p.maps)+'" target="_blank" rel="noopener">Open in Maps</a></div></div>';
+  }
+  function renderNearby(){
+    var vegOnly = document.getElementById('nbVeg').checked, openOnly = document.getElementById('nbOpen').checked;
+    var eat = NB.eat.filter(function(p){ return (!vegOnly||p.veg) && (!openOnly||p.openNow!==false); })
+      .sort(function(a,b){ return (b.pureVeg-a.pureVeg) || ((b.rating||0)*Math.log(b.reviews+2) - (a.rating||0)*Math.log(a.reviews+2)); });
+    var see = NB.see.filter(function(p){ return !openOnly||p.openNow!==false; })
+      .sort(function(a,b){ return (b.id===NB.famousId)-(a.id===NB.famousId) || b.reviews-a.reviews; });
+    var html = '';
+    if(NB.see.length || NB.eat.length){
+      html += '<div class="nb-sec">See</div>' + (see.map(nbItem).join('') || '<div class="empty">No sights match these filters.</div>');
+      html += '<div class="nb-sec">Eat</div>' + (eat.map(nbItem).join('') || '<div class="empty">No '+(vegOnly?'veg-friendly ':'')+'restaurants match. Try a wider distance.</div>');
+    }
+    document.getElementById('nbList').innerHTML = html;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-nb]'), function(cb){
+      cb.addEventListener('change', function(){ NB.picked[cb.getAttribute('data-nb')] = cb.checked; nbSendBar(); });
+    });
+    nbSendBar();
+  }
+  function nbSendBar(){
+    var n = Object.keys(NB.picked).filter(function(k){ return NB.picked[k]; }).length;
+    document.getElementById('nbSend').style.display = n ? 'flex' : 'none';
+    document.getElementById('nbMail').textContent = 'Email '+n+' pick'+(n===1?'':'s');
+  }
+  document.getElementById('nbVeg').addEventListener('change', renderNearby);
+  document.getElementById('nbOpen').addEventListener('change', renderNearby);
+  document.getElementById('nbGo').addEventListener('click', function(){
+    var btn = this;
+    if(!navigator.geolocation){ nbStatus('This browser cannot share location.'); return; }
+    btn.disabled = true; nbStatus('Getting your location…');
+    navigator.geolocation.getCurrentPosition(async function(pos){
+      NB.where = {lat:pos.coords.latitude, lng:pos.coords.longitude};
+      nbStatus('Finding places nearby…');
+      try{
+        var r = await fetch('/.netlify/functions/nearby', {method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({lat:NB.where.lat, lng:NB.where.lng, radius:+document.getElementById('nbRad').value})});
+        var d = await r.json();
+        if(!d.ok){ nbStatus('Could not load places: '+(d.error||'unknown error')); }
+        else { NB.eat=d.eat; NB.see=d.see; NB.famousId=d.famousId; NB.picked={}; nbStatus(d.see.length+' sights and '+d.eat.length+' places to eat found. Tick any to email them.'); renderNearby(); }
+      }catch(e){ nbStatus('Could not reach the server. Check your connection and try again.'); }
+      btn.disabled = false;
+    }, function(err){
+      btn.disabled = false;
+      nbStatus(err.code===1 ? 'Location is blocked. On iPhone: Settings → Privacy → Location Services → Safari → While Using.' : 'Could not get your location. Try again.');
+    }, {enableHighAccuracy:true, timeout:15000, maximumAge:60000});
+  });
+  document.getElementById('nbMail').addEventListener('click', async function(){
+    var btn = this, to = document.getElementById('nbTo').value.trim();
+    var picks = NB.see.concat(NB.eat).filter(function(p){ return NB.picked[p.id]; });
+    if(!to || !picks.length) return;
+    var rows = picks.map(function(p){
+      return '<tr><td style="padding:10px 0;border-bottom:1px solid #ddd"><b>'+esc(p.name)+'</b>'+(p.id===NB.famousId?' — most famous here':'')+
+        (p.pureVeg?' — pure veg':(p.veg?' — veg options':''))+'<br><span style="color:#555;font-size:13px">'+esc(p.type)+
+        (p.rating?' · ★ '+p.rating+' ('+p.reviews+' reviews)':'')+(p.km!=null?' · '+p.km+' km away':'')+'</span><br>'+
+        (p.summary?esc(p.summary)+'<br>':'')+'<span style="font-size:13px">'+esc(p.address)+'</span><br>'+
+        '<a href="'+esc(p.maps)+'">Open in Google Maps</a></td></tr>';
+    }).join('');
+    var html = '<div style="font-family:Arial,sans-serif;max-width:600px"><h2 style="margin:0 0 6px">Nearby picks</h2>'+
+      '<p style="color:#555;margin:0 0 10px">Sent from Travel Desk by '+esc(whoLabel())+' · '+new Date().toLocaleString()+
+      (NB.where?' · <a href="https://maps.google.com/?q='+NB.where.lat+','+NB.where.lng+'">where you were</a>':'')+'</p><table style="width:100%;border-collapse:collapse">'+rows+'</table></div>';
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try{
+      var r = await fetch('/.netlify/functions/mail', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({to:to, subject:'Nearby picks — '+picks.map(function(p){return p.name;}).slice(0,3).join(', '), html:html})});
+      var d = await r.json();
+      if(d.ok){ flash('Emailed'); nbStatus('Emailed '+picks.length+' pick'+(picks.length===1?'':'s')+' to '+to+'.'); NB.picked={}; renderNearby(); }
+      else nbStatus('Email not sent: '+(d.reason||(d.result&&d.result.message)||'mail error'));
+    }catch(e){ nbStatus('Email not sent: could not reach the server.'); }
+    btn.disabled = false; nbSendBar();
+  });
 
   boot();
 })();
