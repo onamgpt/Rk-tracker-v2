@@ -1,6 +1,6 @@
 // Nearby Now — restaurants + attractions around a GPS point, via Google
 // Places API (New). Key lives only in the Netlify env (GOOGLE_PLACES_KEY),
-// never in the page. Key rotated 2026-09-28 (v3).
+// never in the page. Key rotated 2026-09-28.
 const https = require("https");
 
 const H = {
@@ -120,6 +120,85 @@ async function legacySearch(here, radius, key) {
   return { ok: true, eat, see };
 }
 
+// Fallback 2: OpenStreetMap via Overpass. Free, no key, no card. No ratings.
+function overpass(host, query) {
+  return new Promise((resolve, reject) => {
+    const body = "data=" + encodeURIComponent(query);
+    const req = https.request({
+      hostname: host, path: "/api/interpreter", method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(body),
+                 "User-Agent": "RKTravelDesk/1.0 (personal trip app)" }
+    }, (res) => {
+      let d = "";
+      res.on("data", c => d += c);
+      res.on("end", () => {
+        if (res.statusCode !== 200) return reject(new Error(host + " " + res.statusCode));
+        try { resolve(JSON.parse(d)); } catch (e) { reject(new Error(host + " bad json")); }
+      });
+    });
+    req.on("error", reject);
+    req.setTimeout(8500, () => { req.destroy(); reject(new Error(host + " timeout")); });
+    req.write(body); req.end();
+  });
+}
+
+function anyOk(promises) {
+  return new Promise((resolve, reject) => {
+    let left = promises.length, errs = [];
+    promises.forEach(p => p.then(resolve, e => { errs.push(e.message); if (--left === 0) reject(new Error(errs.join("; "))); }));
+  });
+}
+
+function shapeOsm(el, here) {
+  const t = el.tags || {};
+  const c = el.center || (el.lat != null ? { lat: el.lat, lon: el.lon } : null);
+  if (!c || !t.name) return null;
+  const loc = { lat: c.lat, lng: c.lon };
+  const isFood = t.amenity === "restaurant";
+  const cuisine = (t.cuisine || "").toLowerCase();
+  const dv = t["diet:vegetarian"], dg = t["diet:vegan"];
+  const pureVeg = isFood && (dv === "only" || dg === "only" || /vegetarian|vegan/.test(cuisine));
+  const veg = isFood && (pureVeg || dv === "yes" || dg === "yes" || /indian/.test(cuisine));
+  const kind = isFood ? "eat" : "see";
+  let type = isFood ? (t.cuisine ? t.cuisine.split(";")[0].replace(/_/g, " ") + " restaurant" : "Restaurant")
+    : (t.tourism || t.historic || (t.amenity === "place_of_worship" ? "place of worship" : "sight")).replace(/_/g, " ");
+  const score = (t.wikipedia ? 2 : 0) + (t.wikidata ? 1 : 0) + (/attraction|museum/.test(t.tourism || "") ? 1 : 0);
+  const addr = [t["addr:street"], t["addr:housenumber"], t["addr:city"]].filter(Boolean).join(" ");
+  return {
+    id: el.type + el.id, kind, name: t.name, address: addr, rating: null, reviews: 0, type,
+    summary: (t.description || "").slice(0, 160), veg, pureVeg, openNow: null, _score: score,
+    maps: "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(t.name) + "%20" + loc.lat + "," + loc.lng,
+    km: Math.round(km(here, loc) * 100) / 100
+  };
+}
+
+async function osmSearch(here, radius) {
+  const a = "(around:" + radius + "," + here.lat + "," + here.lng + ")";
+  const q = "[out:json][timeout:8];(" +
+    "nwr" + a + '["amenity"="restaurant"]["name"];' +
+    "nwr" + a + '["tourism"~"^(attraction|museum|gallery|viewpoint)$"]["name"];' +
+    "nwr" + a + '["historic"]["historic"!~"^(memorial|wayside_cross|wayside_shrine|boundary_stone|plaque|stolperstein|milestone)$"]["name"];' +
+    "nwr" + a + '["amenity"="place_of_worship"]["name"]["wikipedia"];' +
+    ");out center tags 250;";
+  let data;
+  try {
+    data = await anyOk([overpass("overpass-api.de", q), overpass("overpass.kumi.systems", q)]);
+  } catch (e) { return { ok: false, error: "OpenStreetMap: " + e.message }; }
+  const seen = new Set(), items = [];
+  (data.elements || []).forEach(el => {
+    const it = shapeOsm(el, here);
+    if (!it) return;
+    const k = it.name.toLowerCase() + "|" + it.kind;
+    if (seen.has(k)) return; seen.add(k); items.push(it);
+  });
+  const eat = items.filter(i => i.kind === "eat").sort((a, b) => (b.pureVeg - a.pureVeg) || (b.veg - a.veg) || a.km - b.km).slice(0, 40);
+  const see = items.filter(i => i.kind === "see").sort((a, b) => (b._score - a._score) || a.km - b.km).slice(0, 40);
+  const famous = see.length && see[0]._score > 0 ? see[0] : (see[0] || null);
+  eat.concat(see).forEach(i => delete i._score);
+  return { ok: true, eat, see, famousId: famous ? famous.id : null };
+}
+
+exports._osmTest = { shapeOsm, osmSearch };
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: H, body: "" };
 
@@ -148,8 +227,12 @@ exports.handler = async (event) => {
     const msg = (bad.body && bad.body.error && (bad.body.error.message || bad.body.error)) || "Places request failed";
     const L = await legacySearch(here, radius, key);
     if (!L.ok) {
-      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: false,
-        error: "New API: " + String(msg) + " | Older API: " + L.error }) };
+      const O = await osmSearch(here, radius);
+      if (!O.ok) {
+        return { statusCode: 200, headers: H, body: JSON.stringify({ ok: false,
+          error: "Google blocked (" + String(msg).slice(0, 80) + "). " + O.error }) };
+      }
+      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", famousId: O.famousId, eat: O.eat, see: O.see }) };
     }
     const f = L.see.filter(p => (p.rating || 0) >= 4).sort((a, b) => b.reviews - a.reviews)[0]
       || L.see.slice().sort((a, b) => b.reviews - a.reviews)[0] || null;
