@@ -60,6 +60,7 @@ input,select,textarea,button{font-family:inherit;}
   .rk-filterbar input{ width:100% !important; }
 }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -5375,6 +5376,92 @@ function TravelPlanner({ onClose }) {
   );
 }
 
+
+// ── CSD STATEMENT READER (deterministic) ─────────────────────────────────────
+// CSD statement PDFs carry a real text layer, so they do not need a model to
+// read them. Sending them to Claude cost 20+ seconds and kept hitting the
+// function timeout (the "Server error: 500"). This parses in the browser and
+// checks its own arithmetic against the statement's declared totals, so a
+// misread can never be saved silently.
+async function csdPdfLines(dataUrl){
+  const lib = window.pdfjsLib || (window.pdfjsDistBuildPdf || null);
+  if(!lib) throw new Error("PDF reader is still loading — try again in a moment.");
+  if(lib.GlobalWorkerOptions && !lib.GlobalWorkerOptions.workerSrc){
+    lib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
+  const raw = atob(String(dataUrl).split(",")[1]);
+  const buf = new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) buf[i]=raw.charCodeAt(i);
+  const doc = await lib.getDocument({ data: buf }).promise;
+  const out = [];
+  for(let p=1;p<=doc.numPages;p++){
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    const rows = {};
+    for(const it of tc.items){
+      if(!it.str || !it.str.trim()) continue;
+      // Group text into visual rows by y. 1.5pt tolerance was tuned against
+      // real statements: looser merges adjacent lines and loses bills.
+      const key = Math.round(it.transform[5]/1.5)*1.5;
+      (rows[key] = rows[key] || []).push({ x: it.transform[4], s: it.str });
+    }
+    Object.keys(rows).map(Number).sort((a,b)=>b-a).forEach(k=>{
+      out.push(rows[k].sort((a,b)=>a.x-b.x).map(o=>o.s).join(" ").replace(/\s+/g," ").trim());
+    });
+  }
+  return out;
+}
+
+function csdParseStatement(lines){
+  const MON={JAN:"01",FEB:"02",MAR:"03",APR:"04",MAY:"05",JUN:"06",
+             JUL:"07",AUG:"08",SEP:"09",OCT:"10",NOV:"11",DEC:"12"};
+  const d=s=>{const m=/^(\d{2})-([A-Z]{3})-(\d{2})$/.exec(s||"");
+              return m?("20"+m[3]+"-"+MON[m[2]]+"-"+m[1]):"";};
+  const txt=lines.join("\n");
+  const per=/period\s+(\d{2}-[A-Z]{3}-\d{2})\s+to\s+(\d{2}-[A-Z]{3}-\d{2})/.exec(txt);
+
+  const bills=[]; let utr=null,utrd=null,memo=null,memod=null;
+  for(let i=0;i<lines.length;i++){
+    const ln=lines[i];
+    const mu=/Utr Num \/ Date\s+(PUNBN\S*)\s+(\d{2}-[A-Z]{3}-\d{2})\s+Memo Num\/Date\s+(\d+)\s+(\d{2}-[A-Z]{3}-\d{2})/.exec(ln);
+    if(mu){
+      utr=mu[1]; utrd=d(mu[2]); memo=mu[3]; memod=d(mu[4]);
+      // The UTR digits wrap onto the next row in the original layout.
+      const tail=(lines[i+1]||"").trim();
+      if(/^\d+$/.test(tail)) utr+=tail;
+      continue;
+    }
+    const mb=/^(BILL|DEBIT|CREDIT)\s+(\S+)\s+(\d{2}-[A-Z]{3}-\d{2})\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(\S+)$/.exec(ln);
+    if(mb && utr){
+      bills.push({ docType:mb[1], billNo:mb[2], billDate:d(mb[3]),
+        billAmt:+mb[4], crNoteAmt:+mb[5], dbNoteAmt:+mb[6],
+        tdsAmt:+mb[7], adjAmt:+mb[8], depot:mb[9],
+        utr:utr, utrDate:utrd, memoNo:memo, memoDate:memod });
+    }
+  }
+
+  const declared={};
+  [["billAmt",/Total Bill Amount\s*:\s*(-?\d+)/],
+   ["crNoteAmt",/Total CR Note Amt\s*:\s*(-?\d+)/],
+   ["dbNoteAmt",/Total DB Note Amt\s*:\s*(-?\d+)/],
+   ["tdsAmt",/Total TDS Note Amt\s*:\s*(-?\d+)/],
+   ["adjAmt",/Total Adj Amt\s*:\s*(-?\d+)/],
+   ["paidAmt",/Total Paid Amt\s*:\s*(-?\d+)/]].forEach(function(p){
+     const m=p[1].exec(txt); declared[p[0]]=m?+m[1]:null; });
+
+  const totals={};
+  ["billAmt","crNoteAmt","dbNoteAmt","tdsAmt","adjAmt"].forEach(function(k){
+    totals[k]=bills.reduce(function(s,b){return s+(b[k]||0);},0); });
+  totals.paidAmt=totals.billAmt+totals.crNoteAmt+totals.dbNoteAmt+totals.tdsAmt+totals.adjAmt;
+
+  const off=Object.keys(totals).filter(function(k){
+    return declared[k]!==null && declared[k]!==totals[k]; });
+
+  return { period: per?(per[1]+" to "+per[2]):"", bills:bills,
+           totals:totals, declared:declared, mismatch:off };
+}
+
 function FieldConsole({ onClose, rootMode, onOpenFull }) {
   const me = (typeof URL_USER!=="undefined"?URL_USER:"main");
   const officer = me.charAt(0).toUpperCase()+me.slice(1);
@@ -9254,6 +9341,26 @@ function CSDPayments({ orders, onUpdateDepot, onClose }) {
   const scan = async () => {
     if (!photo) return;
     setBusy(true); setMsg("📄 Reading the CSD payment statement…");
+
+    // A PDF with a text layer is read here, exactly and instantly.
+    if(String(photo.type||"").indexOf("pdf")>-1){
+      try{
+        const lines = await csdPdfLines(photo.dataUrl);
+        const r = csdParseStatement(lines);
+        if(r.bills.length){
+          if(r.mismatch.length){
+            setMsg("❌ Read " + r.bills.length + " lines but the totals do not agree with the statement (" +
+                   r.mismatch.join(", ") + "). Not saved — send it to Ravikiran to check.");
+            setBusy(false); return;
+          }
+          setPending({ period:r.period, bills:r.bills, totals:r.totals });
+          setMsg("✅ " + r.bills.length + " lines read and reconciled against the statement's own totals.");
+          setBusy(false); return;
+        }
+        // No text layer (a scan): fall through to the model.
+      }catch(e){ /* fall through */ }
+    }
+
     try {
       const b64 = String(photo.dataUrl).split(",")[1];
       const shape = '{"period":"Jan-Feb 2026","bills":[{"billNo":"2025-26/698","billDate":"2025-10-30","billAmt":28479,"crNoteAmt":0,"dbNoteAmt":0,"tdsAmt":-28,"depot":"BDB","docType":"BILL","utr":"PUNBN620260114545899","utrDate":"2026-01-14"}],"totals":{"billAmt":9361908,"crNoteAmt":0,"dbNoteAmt":-34081,"tdsAmt":-8965,"paidAmt":9318862}}';
