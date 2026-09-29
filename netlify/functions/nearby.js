@@ -1,6 +1,6 @@
 // Nearby Now — restaurants + attractions around a GPS point, via Google
 // Places API (New). Key lives only in the Netlify env (GOOGLE_PLACES_KEY),
-// never in the page. Key rotated 2026-09-28.
+// never in the page. Key rotated 2026-09-28 (v3).
 const https = require("https");
 
 const H = {
