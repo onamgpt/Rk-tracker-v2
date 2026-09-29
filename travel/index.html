@@ -1265,9 +1265,9 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   function renderNearby(){
     var vegOnly = document.getElementById('nbVeg').checked, openOnly = document.getElementById('nbOpen').checked;
     var eat = NB.eat.filter(function(p){ return (!vegOnly||p.veg) && (!openOnly||p.openNow!==false); })
-      .sort(function(a,b){ return (b.pureVeg-a.pureVeg) || ((b.rating||0)*Math.log(b.reviews+2) - (a.rating||0)*Math.log(a.reviews+2)); });
+      .sort(function(a,b){ return (b.pureVeg-a.pureVeg) || ((b.rating||0)*Math.log(b.reviews+2) - (a.rating||0)*Math.log(a.reviews+2)) || ((a.km||0)-(b.km||0)); });
     var see = NB.see.filter(function(p){ return !openOnly||p.openNow!==false; })
-      .sort(function(a,b){ return (b.id===NB.famousId)-(a.id===NB.famousId) || b.reviews-a.reviews; });
+      .sort(function(a,b){ return (b.id===NB.famousId)-(a.id===NB.famousId) || b.reviews-a.reviews || ((a.km||0)-(b.km||0)); });
     var html = '';
     if(NB.see.length || NB.eat.length){
       html += '<div class="nb-sec">See</div>' + (see.map(nbItem).join('') || '<div class="empty">No sights match these filters.</div>');
@@ -1298,7 +1298,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
           body: JSON.stringify({lat:NB.where.lat, lng:NB.where.lng, radius:+document.getElementById('nbRad').value})});
         var d = await r.json();
         if(!d.ok){ nbStatus('Could not load places: '+(d.error||'unknown error')); }
-        else { NB.eat=d.eat; NB.see=d.see; NB.famousId=d.famousId; NB.picked={}; nbStatus(d.see.length+' sights and '+d.eat.length+' places to eat found. Tick any to email them.'); renderNearby(); }
+        else { NB.eat=d.eat; NB.see=d.see; NB.famousId=d.famousId; NB.picked={}; nbStatus(d.see.length+' sights and '+d.eat.length+' places to eat found. Tick any to email them.'+(d.via==='osm'?' Using free OpenStreetMap data: no ratings, and veg tags can be patchy. Untick "Veg-friendly only" to see all restaurants.':'')); renderNearby(); }
       }catch(e){ nbStatus('Could not reach the server. Check your connection and try again.'); }
       btn.disabled = false;
     }, function(err){
