@@ -14,7 +14,7 @@ const FIELDS = [
   "places.id", "places.displayName", "places.formattedAddress", "places.location",
   "places.rating", "places.userRatingCount", "places.primaryType",
   "places.primaryTypeDisplayName", "places.googleMapsUri", "places.editorialSummary",
-  "places.servesVegetarianFood", "places.priceLevel", "places.currentOpeningHours.openNow"
+  "places.servesVegetarianFood", "places.websiteUri", "places.priceLevel", "places.currentOpeningHours.openNow"
 ].join(",");
 
 const VEG_TYPES = ["vegetarian_restaurant", "vegan_restaurant", "indian_restaurant"];
@@ -69,6 +69,7 @@ function shape(p, here, kind) {
     veg: p.servesVegetarianFood === true || VEG_TYPES.includes(type),
     pureVeg: type === "vegetarian_restaurant" || type === "vegan_restaurant",
     openNow: p.currentOpeningHours ? p.currentOpeningHours.openNow : null,
+    website: p.websiteUri || "",
     maps: p.googleMapsUri || (loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : ""),
     km: loc ? Math.round(km(here, loc) * 100) / 100 : null
   };
@@ -167,6 +168,7 @@ function shapeOsm(el, here) {
   return {
     id: el.type + el.id, kind, name: t.name, address: addr, rating: null, reviews: 0, type,
     summary: (t.description || "").slice(0, 160), veg, pureVeg, openNow: null, _score: score,
+    website: t["menu:url"] || t.website || t["contact:website"] || "",
     maps: "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(t.name) + "%20" + loc.lat + "," + loc.lng,
     km: Math.round(km(here, loc) * 100) / 100
   };
