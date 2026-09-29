@@ -272,7 +272,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     <div class="card">
       <button class="nb-go" id="nbGo">📍 What's near me now</button>
       <div class="nb-filters">
-        <label><input type="checkbox" id="nbVeg" checked> Veg-friendly only</label>
+        <label><input type="checkbox" id="nbVeg"> Veg-friendly only</label>
         <label><input type="checkbox" id="nbOpen"> Open now</label>
         <label>Within <select id="nbRad" style="width:auto;padding:4px 6px"><option value="800">800 m</option><option value="1500" selected>1.5 km</option><option value="3000">3 km</option><option value="5000">5 km</option></select></label>
       </div>
@@ -1252,6 +1252,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   /* ---------- nearby now ---------- */
   var NB = {eat:[], see:[], famousId:null, picked:{}, where:null};
   function nbStatus(t){ document.getElementById('nbStatus').textContent = t||''; }
+  function menuLink(p){ return p.website || ('https://www.google.com/search?q='+encodeURIComponent(p.name+' menu '+(p.address||''))); }
   function nbItem(p){
     var fam = p.id===NB.famousId;
     var dist = p.km==null ? '' : (p.km<1 ? Math.round(p.km*1000)+' m' : p.km.toFixed(1)+' km');
@@ -1260,7 +1261,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       '<div><div class="nm">'+esc(p.name)+(fam?'<span class="nb-badge fam">Most famous here</span>':'')+
       (p.pureVeg?'<span class="nb-badge veg">Pure veg</span>':(p.veg?'<span class="nb-badge veg">Veg options</span>':''))+'</div>'+
       '<div class="meta">'+esc(bits)+'</div>'+(p.summary?'<div class="why">'+esc(p.summary)+'</div>':'')+
-      '<a href="'+esc(p.maps)+'" target="_blank" rel="noopener">Open in Maps</a></div></div>';
+      '<a href="'+esc(p.maps)+'" target="_blank" rel="noopener">Open in Maps</a>'+(p.kind==='eat'?' &nbsp;·&nbsp; <a href="'+esc(menuLink(p))+'" target="_blank" rel="noopener"><b>View menu</b></a>':'')+'</div></div>';
   }
   function renderNearby(){
     var vegOnly = document.getElementById('nbVeg').checked, openOnly = document.getElementById('nbOpen').checked;
@@ -1315,7 +1316,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
         (p.pureVeg?' — pure veg':(p.veg?' — veg options':''))+'<br><span style="color:#555;font-size:13px">'+esc(p.type)+
         (p.rating?' · ★ '+p.rating+' ('+p.reviews+' reviews)':'')+(p.km!=null?' · '+p.km+' km away':'')+'</span><br>'+
         (p.summary?esc(p.summary)+'<br>':'')+'<span style="font-size:13px">'+esc(p.address)+'</span><br>'+
-        '<a href="'+esc(p.maps)+'">Open in Google Maps</a></td></tr>';
+        '<a href="'+esc(p.maps)+'">Open in Google Maps</a>'+(p.kind==='eat'?' · <a href="'+esc(menuLink(p))+'">View menu</a>':'')+'</td></tr>';
     }).join('');
     var html = '<div style="font-family:Arial,sans-serif;max-width:600px"><h2 style="margin:0 0 6px">Nearby picks</h2>'+
       '<p style="color:#555;margin:0 0 10px">Sent from Travel Desk by '+esc(whoLabel())+' · '+new Date().toLocaleString()+
