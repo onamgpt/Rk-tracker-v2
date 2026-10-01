@@ -277,6 +277,8 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
         <label><input type="checkbox" id="nbOpen"> Open now</label>
         <label>Within <select id="nbRad" style="width:auto;padding:4px 6px"><option value="800">800 m</option><option value="1500" selected>1.5 km</option><option value="3000">3 km</option><option value="5000">5 km</option></select></label>
       </div>
+      <div style="display:flex;gap:8px;margin-top:12px"><input type="text" id="nbPlace" placeholder="Or type a place, e.g. Colosseum, Rome" style="flex:1"><button class="mini" id="nbPlaceGo">Search here</button></div>
+      <div class="f" id="nbWhere" style="margin-top:8px"></div>
       <div class="f" id="nbStatus" style="margin-top:8px"></div>
     </div>
     <div id="nbList"></div>
@@ -1296,25 +1298,45 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   document.getElementById('nbVeg').addEventListener('change', renderNearby);
   document.getElementById('nbOpen').addEventListener('change', renderNearby);
   document.getElementById('nbRated').addEventListener('change', renderNearby);
+  function nbWhereText(lat, lng, acc, label){
+    document.getElementById('nbWhere').innerHTML = 'Searching near <a href="https://www.google.com/maps/search/?api=1&query='+lat+','+lng+'" target="_blank" rel="noopener">'+
+      esc(label || ('your phone location'+(acc ? ' (±'+Math.round(acc)+' m)' : '')))+'</a>. Wrong spot? Type the place above and tap Search here.';
+  }
+  async function nbFetch(lat, lng, label, acc){
+    NB.where = {lat:lat, lng:lng};
+    nbWhereText(lat, lng, acc, label);
+    nbStatus('Finding places nearby…');
+    try{
+      var r = await fetch('/.netlify/functions/nearby', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({lat:lat, lng:lng, radius:+document.getElementById('nbRad').value})});
+      var d = await r.json();
+      if(!d.ok){ nbStatus('Could not load places: '+(d.error||'unknown error')); }
+      else { NB.eat=d.eat; NB.coffee=d.coffee||[]; NB.dessert=d.dessert||[]; NB.see=d.see; NB.famousId=d.famousId; NB.picked={}; nbStatus(d.see.length+' sights, '+d.eat.length+' restaurants, '+(d.coffee||[]).length+' coffee and '+(d.dessert||[]).length+' dessert places found. Tick any to email them.'+(d.via==='osm'?' Using free OpenStreetMap data (no ratings). Tap View menu on a restaurant to check its veg options.'+(d.partial?' Some categories were slow to load; tap again to refresh.':''):'')); renderNearby(); }
+    }catch(e){ nbStatus('Could not reach the server. Check your connection and try again.'); }
+  }
   document.getElementById('nbGo').addEventListener('click', function(){
     var btn = this;
     if(!navigator.geolocation){ nbStatus('This browser cannot share location.'); return; }
     btn.disabled = true; nbStatus('Getting your location…');
     navigator.geolocation.getCurrentPosition(async function(pos){
-      NB.where = {lat:pos.coords.latitude, lng:pos.coords.longitude};
-      nbStatus('Finding places nearby…');
-      try{
-        var r = await fetch('/.netlify/functions/nearby', {method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({lat:NB.where.lat, lng:NB.where.lng, radius:+document.getElementById('nbRad').value})});
-        var d = await r.json();
-        if(!d.ok){ nbStatus('Could not load places: '+(d.error||'unknown error')); }
-        else { NB.eat=d.eat; NB.coffee=d.coffee||[]; NB.dessert=d.dessert||[]; NB.see=d.see; NB.famousId=d.famousId; NB.picked={}; nbStatus(d.see.length+' sights, '+d.eat.length+' restaurants, '+(d.coffee||[]).length+' coffee and '+(d.dessert||[]).length+' dessert places found. Tick any to email them.'+(d.via==='osm'?' Using free OpenStreetMap data (no ratings). Tap View menu on a restaurant to check its veg options.'+(d.partial?' Some categories were slow to load; tap again to refresh.':''):'')); renderNearby(); }
-      }catch(e){ nbStatus('Could not reach the server. Check your connection and try again.'); }
+      await nbFetch(pos.coords.latitude, pos.coords.longitude, null, pos.coords.accuracy);
       btn.disabled = false;
     }, function(err){
       btn.disabled = false;
-      nbStatus(err.code===1 ? 'Location is blocked. On iPhone: Settings → Privacy → Location Services → Safari → While Using.' : 'Could not get your location. Try again.');
-    }, {enableHighAccuracy:true, timeout:15000, maximumAge:60000});
+      nbStatus(err.code===1 ? 'Location is blocked. On iPhone: Settings → Privacy → Location Services → Safari → While Using.' : 'Could not get your location. Type a place below instead.');
+    }, {enableHighAccuracy:true, timeout:15000, maximumAge:0});
+  });
+  document.getElementById('nbPlaceGo').addEventListener('click', async function(){
+    var btn = this, q = document.getElementById('nbPlace').value.trim();
+    if(!q) return;
+    btn.disabled = true; nbStatus('Finding that place…');
+    try{
+      var r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q));
+      var a = await r.json();
+      if(!a.length){ nbStatus('Could not find "'+q+'". Try adding the city, e.g. Colosseum, Rome.'); }
+      else { await nbFetch(+a[0].lat, +a[0].lon, a[0].display_name.split(',').slice(0,2).join(','), null); }
+    }catch(e){ nbStatus('Could not look up that place. Check your connection and try again.'); }
+    btn.disabled = false;
   });
   document.getElementById('nbMail').addEventListener('click', async function(){
     var btn = this, to = document.getElementById('nbTo').value.trim();
