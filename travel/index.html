@@ -273,6 +273,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       <button class="nb-go" id="nbGo">📍 What's near me now</button>
       <div class="nb-filters">
         <label><input type="checkbox" id="nbVeg"> Veg-friendly only</label>
+        <label><input type="checkbox" id="nbRated"> 4★ and above</label>
         <label><input type="checkbox" id="nbOpen"> Open now</label>
         <label>Within <select id="nbRad" style="width:auto;padding:4px 6px"><option value="800">800 m</option><option value="1500" selected>1.5 km</option><option value="3000">3 km</option><option value="5000">5 km</option></select></label>
       </div>
@@ -1250,18 +1251,18 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   }
 
   /* ---------- nearby now ---------- */
-  var NB = {eat:[], see:[], famousId:null, picked:{}, where:null};
+  var NB = {eat:[], coffee:[], dessert:[], see:[], famousId:null, picked:{}, where:null};
   function nbStatus(t){ document.getElementById('nbStatus').textContent = t||''; }
   function menuLink(p){ return p.website || ('https://www.google.com/search?q='+encodeURIComponent(p.name+' menu '+(p.address||''))); }
   function nbItem(p){
     var fam = p.id===NB.famousId;
     var dist = p.km==null ? '' : (p.km<1 ? Math.round(p.km*1000)+' m' : p.km.toFixed(1)+' km');
-    var bits = [p.type, dist, p.rating ? '★ '+p.rating+' ('+p.reviews+')' : '', p.openNow===true?'open now':(p.openNow===false?'closed now':'')].filter(Boolean).join(' · ');
+    var bits = [p.type, dist, p.rating ? '★ '+p.rating+' ('+p.reviews+' reviews)' : '', p.openNow===true?'open now':(p.openNow===false?'closed now':'')].filter(Boolean).join(' · ');
     return '<div class="nb-item'+(fam?' nb-famous':'')+'"><input type="checkbox" data-nb="'+esc(p.id)+'"'+(NB.picked[p.id]?' checked':'')+'>'+
       '<div><div class="nm">'+esc(p.name)+(fam?'<span class="nb-badge fam">Most famous here</span>':'')+
       (p.pureVeg?'<span class="nb-badge veg">Pure veg</span>':(p.veg?'<span class="nb-badge veg">Veg options</span>':''))+'</div>'+
       '<div class="meta">'+esc(bits)+'</div>'+(p.summary?'<div class="why">'+esc(p.summary)+'</div>':'')+
-      '<a href="'+esc(p.maps)+'" target="_blank" rel="noopener">Open in Maps</a>'+(p.kind==='eat'?' &nbsp;·&nbsp; <a href="'+esc(menuLink(p))+'" target="_blank" rel="noopener"><b>View menu</b></a>':'')+'</div></div>';
+      '<a href="'+esc(p.maps)+'" target="_blank" rel="noopener">Open in Maps</a>'+(p.kind!=='see'?' &nbsp;·&nbsp; <a href="'+esc(menuLink(p))+'" target="_blank" rel="noopener"><b>View menu</b></a>':'')+'</div></div>';
   }
   function renderNearby(){
     var vegOnly = document.getElementById('nbVeg').checked, openOnly = document.getElementById('nbOpen').checked;
@@ -1269,10 +1270,17 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       .sort(function(a,b){ return (b.pureVeg-a.pureVeg) || ((b.rating||0)*Math.log(b.reviews+2) - (a.rating||0)*Math.log(a.reviews+2)) || ((a.km||0)-(b.km||0)); });
     var see = NB.see.filter(function(p){ return !openOnly||p.openNow!==false; })
       .sort(function(a,b){ return (b.id===NB.famousId)-(a.id===NB.famousId) || b.reviews-a.reviews || ((a.km||0)-(b.km||0)); });
+    var rated = document.getElementById('nbRated').checked;
+    function keep(p){ return (!openOnly||p.openNow!==false) && (!rated||p.rating==null||p.rating>=4); }
+    function byRating(a,b){ return ((b.rating||0)*Math.log(b.reviews+2) - (a.rating||0)*Math.log(a.reviews+2)) || ((a.km||0)-(b.km||0)); }
+    var coffee = NB.coffee.filter(keep).sort(byRating), dessert = NB.dessert.filter(keep).sort(byRating);
+    eat = eat.filter(keep); see = see.filter(keep);
     var html = '';
-    if(NB.see.length || NB.eat.length){
-      html += '<div class="nb-sec">See</div>' + (see.map(nbItem).join('') || '<div class="empty">No sights match these filters.</div>');
-      html += '<div class="nb-sec">Eat</div>' + (eat.map(nbItem).join('') || '<div class="empty">No '+(vegOnly?'veg-friendly ':'')+'restaurants match. Try a wider distance.</div>');
+    if(NB.see.length || NB.eat.length || NB.coffee.length || NB.dessert.length){
+      html += '<div class="nb-sec">Eat ('+eat.length+')</div>' + (eat.map(nbItem).join('') || '<div class="empty">No '+(vegOnly?'veg-friendly ':'')+'restaurants match. Try a wider distance.</div>');
+      html += '<div class="nb-sec">Coffee ('+coffee.length+')</div>' + (coffee.map(nbItem).join('') || '<div class="empty">No coffee places match.</div>');
+      html += '<div class="nb-sec">Dessert ('+dessert.length+')</div>' + (dessert.map(nbItem).join('') || '<div class="empty">No dessert places match.</div>');
+      html += '<div class="nb-sec">See ('+see.length+')</div>' + (see.map(nbItem).join('') || '<div class="empty">No sights match these filters.</div>');
     }
     document.getElementById('nbList').innerHTML = html;
     Array.prototype.forEach.call(document.querySelectorAll('[data-nb]'), function(cb){
@@ -1287,6 +1295,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   }
   document.getElementById('nbVeg').addEventListener('change', renderNearby);
   document.getElementById('nbOpen').addEventListener('change', renderNearby);
+  document.getElementById('nbRated').addEventListener('change', renderNearby);
   document.getElementById('nbGo').addEventListener('click', function(){
     var btn = this;
     if(!navigator.geolocation){ nbStatus('This browser cannot share location.'); return; }
@@ -1299,7 +1308,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
           body: JSON.stringify({lat:NB.where.lat, lng:NB.where.lng, radius:+document.getElementById('nbRad').value})});
         var d = await r.json();
         if(!d.ok){ nbStatus('Could not load places: '+(d.error||'unknown error')); }
-        else { NB.eat=d.eat; NB.see=d.see; NB.famousId=d.famousId; NB.picked={}; nbStatus(d.see.length+' sights and '+d.eat.length+' places to eat found. Tick any to email them.'+(d.via==='osm'?' Using free OpenStreetMap data (no ratings). Tap View menu on a restaurant to check its veg options.':'')); renderNearby(); }
+        else { NB.eat=d.eat; NB.coffee=d.coffee||[]; NB.dessert=d.dessert||[]; NB.see=d.see; NB.famousId=d.famousId; NB.picked={}; nbStatus(d.see.length+' sights, '+d.eat.length+' restaurants, '+(d.coffee||[]).length+' coffee and '+(d.dessert||[]).length+' dessert places found. Tick any to email them.'+(d.via==='osm'?' Using free OpenStreetMap data (no ratings). Tap View menu on a restaurant to check its veg options.':'')); renderNearby(); }
       }catch(e){ nbStatus('Could not reach the server. Check your connection and try again.'); }
       btn.disabled = false;
     }, function(err){
@@ -1309,14 +1318,14 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   });
   document.getElementById('nbMail').addEventListener('click', async function(){
     var btn = this, to = document.getElementById('nbTo').value.trim();
-    var picks = NB.see.concat(NB.eat).filter(function(p){ return NB.picked[p.id]; });
+    var picks = NB.see.concat(NB.eat, NB.coffee, NB.dessert).filter(function(p){ return NB.picked[p.id]; });
     if(!to || !picks.length) return;
     var rows = picks.map(function(p){
       return '<tr><td style="padding:10px 0;border-bottom:1px solid #ddd"><b>'+esc(p.name)+'</b>'+(p.id===NB.famousId?' — most famous here':'')+
         (p.pureVeg?' — pure veg':(p.veg?' — veg options':''))+'<br><span style="color:#555;font-size:13px">'+esc(p.type)+
         (p.rating?' · ★ '+p.rating+' ('+p.reviews+' reviews)':'')+(p.km!=null?' · '+p.km+' km away':'')+'</span><br>'+
         (p.summary?esc(p.summary)+'<br>':'')+'<span style="font-size:13px">'+esc(p.address)+'</span><br>'+
-        '<a href="'+esc(p.maps)+'">Open in Google Maps</a>'+(p.kind==='eat'?' · <a href="'+esc(menuLink(p))+'">View menu</a>':'')+'</td></tr>';
+        '<a href="'+esc(p.maps)+'">Open in Google Maps</a>'+(p.kind!=='see'?' · <a href="'+esc(menuLink(p))+'">View menu</a>':'')+'</td></tr>';
     }).join('');
     var html = '<div style="font-family:Arial,sans-serif;max-width:600px"><h2 style="margin:0 0 6px">Nearby picks</h2>'+
       '<p style="color:#555;margin:0 0 10px">Sent from Travel Desk by '+esc(whoLabel())+' · '+new Date().toLocaleString()+
