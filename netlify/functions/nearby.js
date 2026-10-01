@@ -228,13 +228,16 @@ exports.handler = async (event) => {
   const here = { lat, lng };
   const area = { circle: { center: { latitude: lat, longitude: lng }, radius } };
 
-  const [food, veg, sights, coffeeR, dessertR] = await Promise.all([
+  const [food, veg, sights, coffeeR, dessertR, sights2, sights3] = await Promise.all([
     post({ includedTypes: ["restaurant"], maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
     post({ includedTypes: VEG_TYPES, maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
-    post({ includedTypes: ["tourist_attraction", "museum", "historical_landmark", "church", "hindu_temple", "park", "art_gallery"],
-           maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
+    post({ includedTypes: ["tourist_attraction"], maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
     post({ includedTypes: ["cafe", "coffee_shop"], maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
     post({ includedTypes: ["dessert_shop", "dessert_restaurant", "ice_cream_shop", "bakery", "confectionery"],
+           maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
+    post({ includedTypes: ["historical_landmark", "monument", "museum", "cultural_landmark", "historical_place"],
+           maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
+    post({ includedTypes: ["church", "hindu_temple", "park", "art_gallery", "plaza", "observation_deck"],
            maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key)
   ]);
 
@@ -260,8 +263,11 @@ exports.handler = async (event) => {
   [food, veg].forEach(r => ((r.body && r.body.places) || []).forEach(p => {
     if (seen.has(p.id)) return; seen.add(p.id); eat.push(shape(p, here, "eat"));
   }));
-  const see = ((sights.body && sights.body.places) || [])
-    .filter(p => !seen.has(p.id)).map(p => shape(p, here, "see"));
+  const sMap = new Map();
+  [sights, sights2, sights3].forEach(r => ((r && r.body && r.body.places) || []).forEach(p => {
+    if (!seen.has(p.id) && !sMap.has(p.id)) sMap.set(p.id, p);
+  }));
+  const see = Array.from(sMap.values()).map(p => shape(p, here, "see")).sort((a, b) => b.reviews - a.reviews);
 
   const coffee = ((coffeeR.body && coffeeR.body.places) || []).filter(p => !seen.has(p.id))
     .map(p => { seen.add(p.id); return shape(p, here, "coffee"); });
