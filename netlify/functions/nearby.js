@@ -155,13 +155,14 @@ function shapeOsm(el, here) {
   const c = el.center || (el.lat != null ? { lat: el.lat, lon: el.lon } : null);
   if (!c || !t.name) return null;
   const loc = { lat: c.lat, lng: c.lon };
-  const isFood = t.amenity === "restaurant";
+  const kind = t.amenity === "restaurant" ? "eat" : t.amenity === "cafe" ? "coffee"
+    : (t.amenity === "ice_cream" || /^(pastry|bakery|confectionery)$/.test(t.shop || "")) ? "dessert" : "see";
+  const isFood = kind === "eat";
   const cuisine = (t.cuisine || "").toLowerCase();
   const dv = t["diet:vegetarian"], dg = t["diet:vegan"];
   const pureVeg = isFood && (dv === "only" || dg === "only" || /vegetarian|vegan/.test(cuisine));
   const veg = isFood && (pureVeg || dv === "yes" || dg === "yes" || /indian/.test(cuisine));
-  const kind = isFood ? "eat" : "see";
-  let type = isFood ? (t.cuisine ? t.cuisine.split(";")[0].replace(/_/g, " ") + " restaurant" : "Restaurant")
+  let type = kind === "coffee" ? "Cafe" : kind === "dessert" ? (t.shop || "ice cream").replace(/_/g, " ") : isFood ? (t.cuisine ? t.cuisine.split(";")[0].replace(/_/g, " ") + " restaurant" : "Restaurant")
     : (t.tourism || t.historic || (t.amenity === "place_of_worship" ? "place of worship" : "sight")).replace(/_/g, " ");
   const score = (t.wikipedia ? 2 : 0) + (t.wikidata ? 1 : 0) + (/attraction|museum/.test(t.tourism || "") ? 1 : 0);
   const addr = [t["addr:street"], t["addr:housenumber"], t["addr:city"]].filter(Boolean).join(" ");
@@ -181,6 +182,8 @@ async function osmSearch(here, radius) {
     "nwr" + a + '["tourism"~"^(attraction|museum|gallery|viewpoint)$"]["name"];' +
     "nwr" + a + '["historic"]["historic"!~"^(memorial|wayside_cross|wayside_shrine|boundary_stone|plaque|stolperstein|milestone)$"]["name"];' +
     "nwr" + a + '["amenity"="place_of_worship"]["name"]["wikipedia"];' +
+    "nwr" + a + '["amenity"~"^(cafe|ice_cream)$"]["name"];' +
+    "nwr" + a + '["shop"~"^(pastry|bakery|confectionery)$"]["name"];' +
     ");out center tags 250;";
   let data;
   try {
@@ -194,10 +197,12 @@ async function osmSearch(here, radius) {
     if (seen.has(k)) return; seen.add(k); items.push(it);
   });
   const eat = items.filter(i => i.kind === "eat").sort((a, b) => (b.pureVeg - a.pureVeg) || (b.veg - a.veg) || a.km - b.km).slice(0, 40);
+  const coffee = items.filter(i => i.kind === "coffee").sort((a, b) => a.km - b.km).slice(0, 30);
+  const dessert = items.filter(i => i.kind === "dessert").sort((a, b) => a.km - b.km).slice(0, 30);
   const see = items.filter(i => i.kind === "see").sort((a, b) => (b._score - a._score) || a.km - b.km).slice(0, 40);
   const famous = see.length && see[0]._score > 0 ? see[0] : (see[0] || null);
-  eat.concat(see).forEach(i => delete i._score);
-  return { ok: true, eat, see, famousId: famous ? famous.id : null };
+  eat.concat(see, coffee, dessert).forEach(i => delete i._score);
+  return { ok: true, eat, coffee, dessert, see, famousId: famous ? famous.id : null };
 }
 
 exports._osmTest = { shapeOsm, osmSearch };
@@ -217,10 +222,13 @@ exports.handler = async (event) => {
   const here = { lat, lng };
   const area = { circle: { center: { latitude: lat, longitude: lng }, radius } };
 
-  const [food, veg, sights] = await Promise.all([
+  const [food, veg, sights, coffeeR, dessertR] = await Promise.all([
     post({ includedTypes: ["restaurant"], maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
     post({ includedTypes: VEG_TYPES, maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
     post({ includedTypes: ["tourist_attraction", "museum", "historical_landmark", "church", "hindu_temple", "park", "art_gallery"],
+           maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
+    post({ includedTypes: ["cafe", "coffee_shop"], maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
+    post({ includedTypes: ["dessert_shop", "dessert_restaurant", "ice_cream_shop", "bakery", "confectionery"],
            maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key)
   ]);
 
@@ -234,7 +242,7 @@ exports.handler = async (event) => {
         return { statusCode: 200, headers: H, body: JSON.stringify({ ok: false,
           error: "Google blocked (" + String(msg).slice(0, 80) + "). " + O.error }) };
       }
-      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", famousId: O.famousId, eat: O.eat, see: O.see }) };
+      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", famousId: O.famousId, eat: O.eat, coffee: O.coffee, dessert: O.dessert, see: O.see }) };
     }
     const f = L.see.filter(p => (p.rating || 0) >= 4).sort((a, b) => b.reviews - a.reviews)[0]
       || L.see.slice().sort((a, b) => b.reviews - a.reviews)[0] || null;
@@ -249,6 +257,10 @@ exports.handler = async (event) => {
   const see = ((sights.body && sights.body.places) || [])
     .filter(p => !seen.has(p.id)).map(p => shape(p, here, "see"));
 
+  const coffee = ((coffeeR.body && coffeeR.body.places) || []).filter(p => !seen.has(p.id))
+    .map(p => { seen.add(p.id); return shape(p, here, "coffee"); });
+  const dessert = ((dessertR.body && dessertR.body.places) || []).filter(p => !seen.has(p.id))
+    .map(p => { seen.add(p.id); return shape(p, here, "dessert"); });
   // "Most famous" = most-reviewed attraction with a decent rating.
   const famous = see.filter(p => (p.rating || 0) >= 4)
     .sort((a, b) => b.reviews - a.reviews)[0] || see.sort((a, b) => b.reviews - a.reviews)[0] || null;
@@ -256,6 +268,6 @@ exports.handler = async (event) => {
   return {
     statusCode: 200,
     headers: H,
-    body: JSON.stringify({ ok: true, famousId: famous ? famous.id : null, eat, see })
+    body: JSON.stringify({ ok: true, famousId: famous ? famous.id : null, eat, coffee, dessert, see })
   };
 };
