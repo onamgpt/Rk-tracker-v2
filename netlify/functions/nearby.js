@@ -138,7 +138,7 @@ function overpass(host, query) {
       });
     });
     req.on("error", reject);
-    req.setTimeout(8500, () => { req.destroy(); reject(new Error(host + " timeout")); });
+    req.setTimeout(9500, () => { req.destroy(); reject(new Error(host + " timeout")); });
     req.write(body); req.end();
   });
 }
@@ -175,34 +175,40 @@ function shapeOsm(el, here) {
   };
 }
 
+const MIRRORS = ["overpass-api.de", "overpass.kumi.systems", "overpass.private.coffee", "lz4.overpass-api.de"];
+
 async function osmSearch(here, radius) {
   const a = "(around:" + radius + "," + here.lat + "," + here.lng + ")";
-  const q = "[out:json][timeout:8];(" +
-    "nwr" + a + '["amenity"="restaurant"]["name"];' +
-    "nwr" + a + '["tourism"~"^(attraction|museum|gallery|viewpoint)$"]["name"];' +
-    "nwr" + a + '["historic"]["historic"!~"^(memorial|wayside_cross|wayside_shrine|boundary_stone|plaque|stolperstein|milestone)$"]["name"];' +
-    "nwr" + a + '["amenity"="place_of_worship"]["name"]["wikipedia"];' +
-    "nwr" + a + '["amenity"~"^(cafe|ice_cream)$"]["name"];' +
-    "nwr" + a + '["shop"~"^(pastry|bakery|confectionery)$"]["name"];' +
-    ");out center tags 250;";
-  let data;
-  try {
-    data = await anyOk([overpass("overpass-api.de", q), overpass("overpass.kumi.systems", q)]);
-  } catch (e) { return { ok: false, error: "OpenStreetMap: " + e.message }; }
+  const wrap = body => "[out:json][timeout:9];(" + body + ");out center tags 150;";
+  // Three small queries in parallel are far more reliable than one big one.
+  const queries = [
+    wrap("nwr" + a + '["amenity"="restaurant"]["name"];'),
+    wrap("nwr" + a + '["amenity"~"^(cafe|ice_cream)$"]["name"];' +
+         "nwr" + a + '["shop"~"^(pastry|bakery|confectionery)$"]["name"];'),
+    wrap("nwr" + a + '["tourism"~"^(attraction|museum|gallery|viewpoint)$"]["name"];' +
+         "nwr" + a + '["historic"]["historic"!~"^(memorial|wayside_cross|wayside_shrine|boundary_stone|plaque|stolperstein|milestone)$"]["name"];' +
+         "nwr" + a + '["amenity"="place_of_worship"]["name"]["wikipedia"];')
+  ];
+  const settled = await Promise.allSettled(queries.map(q => anyOk(MIRRORS.map(m => overpass(m, q)))));
+  const good = settled.filter(r => r.status === "fulfilled").map(r => r.value);
+  if (!good.length) {
+    return { ok: false, error: "OpenStreetMap servers are busy. Tap again in a few seconds." };
+  }
+  const partial = good.length < queries.length;
   const seen = new Set(), items = [];
-  (data.elements || []).forEach(el => {
+  good.forEach(data => (data.elements || []).forEach(el => {
     const it = shapeOsm(el, here);
     if (!it) return;
     const k = it.name.toLowerCase() + "|" + it.kind;
     if (seen.has(k)) return; seen.add(k); items.push(it);
-  });
+  }));
   const eat = items.filter(i => i.kind === "eat").sort((a, b) => (b.pureVeg - a.pureVeg) || (b.veg - a.veg) || a.km - b.km).slice(0, 40);
   const coffee = items.filter(i => i.kind === "coffee").sort((a, b) => a.km - b.km).slice(0, 30);
   const dessert = items.filter(i => i.kind === "dessert").sort((a, b) => a.km - b.km).slice(0, 30);
   const see = items.filter(i => i.kind === "see").sort((a, b) => (b._score - a._score) || a.km - b.km).slice(0, 40);
   const famous = see.length && see[0]._score > 0 ? see[0] : (see[0] || null);
   eat.concat(see, coffee, dessert).forEach(i => delete i._score);
-  return { ok: true, eat, coffee, dessert, see, famousId: famous ? famous.id : null };
+  return { ok: true, partial, eat, coffee, dessert, see, famousId: famous ? famous.id : null };
 }
 
 exports._osmTest = { shapeOsm, osmSearch };
@@ -242,7 +248,7 @@ exports.handler = async (event) => {
         return { statusCode: 200, headers: H, body: JSON.stringify({ ok: false,
           error: "Google blocked (" + String(msg).slice(0, 80) + "). " + O.error }) };
       }
-      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", famousId: O.famousId, eat: O.eat, coffee: O.coffee, dessert: O.dessert, see: O.see }) };
+      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", partial: O.partial, famousId: O.famousId, eat: O.eat, coffee: O.coffee, dessert: O.dessert, see: O.see }) };
     }
     const f = L.see.filter(p => (p.rating || 0) >= 4).sort((a, b) => b.reviews - a.reviews)[0]
       || L.see.slice().sort((a, b) => b.reviews - a.reviews)[0] || null;
