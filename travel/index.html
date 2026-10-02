@@ -1259,7 +1259,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   /* ---------- nearby now ---------- */
   var NB = {eat:[], coffee:[], dessert:[], see:[], famousId:null, picked:{}, where:null};
   function nbStatus(t){ document.getElementById('nbStatus').textContent = t||''; }
-  function menuLink(p){ return p.website || ('https://www.google.com/search?q='+encodeURIComponent(p.name+' menu '+(p.address||''))); }
+  function menuLink(p){ return p.website || p.maps; }
   function nbItem(p){
     var fam = p.id===NB.famousId;
     var dist = p.km==null ? '' : (p.km<1 ? Math.round(p.km*1000)+' m' : p.km.toFixed(1)+' km');
