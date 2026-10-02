@@ -1364,6 +1364,33 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     return out;
   }
   function nearestOf(from, list){ return nearestOrder(from, list)[0] || null; }
+  function pathLen(start, order){ var t=0, c=start; order.forEach(function(p){ t+=hav(c,p); c=p; }); return t; }
+  // Remove crossings / back-and-forth: reverse any stretch that makes the walk shorter.
+  function twoOpt(start, order){
+    var p=[start].concat(order), n=p.length, improved=true, pass=0;
+    while(improved && pass++<60){
+      improved=false;
+      for(var i=1;i<n-1;i++){ for(var k=i+1;k<n;k++){
+        var before=hav(p[i-1],p[i])+(k<n-1?hav(p[k],p[k+1]):0);
+        var after=hav(p[i-1],p[k])+(k<n-1?hav(p[i],p[k+1]):0);
+        if(after+1e-9<before){ p=p.slice(0,i).concat(p.slice(i,k+1).reverse(), p.slice(k+1)); improved=true; }
+      } }
+    }
+    return p.slice(1);
+  }
+  // Shortest one-way walk through all stops: exact for up to 7 stops, otherwise nearest-first + 2-opt.
+  function bestOrder(start, list){
+    if(list.length<2) return list.slice();
+    if(list.length<=7){
+      var best=null, bestLen=1e9;
+      (function perm(done, rest){
+        if(!rest.length){ var L=pathLen(start, done); if(L<bestLen){ bestLen=L; best=done; } return; }
+        for(var i=0;i<rest.length;i++) perm(done.concat([rest[i]]), rest.slice(0,i).concat(rest.slice(i+1)));
+      })([], list);
+      return best;
+    }
+    return twoOpt(start, nearestOrder(start, list));
+  }
   function showRoute(stops){
     if(!NB.where || stops.length<2){ nbStatus('Need at least 2 places with locations to plan a route.'); return; }
     var prev=NB.where, total=0, rows='';
@@ -1406,7 +1433,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     var dessert = pool(NB.dessert).sort(function(a,b){ return pScore(b)-pScore(a) || a.km-b.km; }).slice(0,5);
     var stops=[], cur=NB.where;
     var c = nearestOf(cur, coffee); if(c){ stops.push(c); cur=c; }
-    nearestOrder(cur, sights).forEach(function(p){ stops.push(p); cur=p; });
+    bestOrder(cur, sights).forEach(function(p){ stops.push(p); cur=p; });
     var e = nearestOf(cur, eat); if(e){ stops.push(e); cur=e; }
     var d = nearestOf(cur, dessert); if(d){ stops.push(d); cur=d; }
     showRoute(stops);
@@ -1414,7 +1441,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   document.getElementById('nbPlanTicked').addEventListener('click', function(){
     var picks = NB.see.concat(NB.eat, NB.coffee, NB.dessert, NB.perfume).filter(function(p){ return NB.picked[p.id] && p.lat!=null; });
     if(picks.length<2){ nbStatus('Tick at least 2 places, then tap Route.'); return; }
-    showRoute(nearestOrder(NB.where, picks));
+    showRoute(bestOrder(NB.where, picks));
   });
   document.getElementById('nbMail').addEventListener('click', async function(){
     var btn = this, to = document.getElementById('nbTo').value.trim();
