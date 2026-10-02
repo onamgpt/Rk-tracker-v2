@@ -1257,7 +1257,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   }
 
   /* ---------- nearby now ---------- */
-  var NB = {eat:[], coffee:[], dessert:[], see:[], famousId:null, picked:{}, where:null};
+  var NB = {eat:[], coffee:[], dessert:[], perfume:[], see:[], famousId:null, picked:{}, where:null};
   function nbStatus(t){ document.getElementById('nbStatus').textContent = t||''; }
   function menuLink(p){ return p.website || p.maps; }
   function nbItem(p){
@@ -1268,27 +1268,25 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       '<div><div class="nm">'+esc(p.name)+(fam?'<span class="nb-badge fam">Most famous here</span>':'')+
       (p.pureVeg?'<span class="nb-badge veg">Pure veg</span>':(p.veg?'<span class="nb-badge veg">Veg options</span>':''))+'</div>'+
       '<div class="meta">'+esc(bits)+'</div>'+(p.summary?'<div class="why">'+esc(p.summary)+'</div>':'')+
-      '<a href="'+esc(p.maps)+'" target="_blank" rel="noopener">Open in Maps</a>'+(p.kind!=='see'?' &nbsp;·&nbsp; <a href="'+esc(menuLink(p))+'" target="_blank" rel="noopener"><b>View menu</b></a>':'')+'</div></div>';
+      '<a href="'+esc(p.maps)+'" target="_blank" rel="noopener">Open in Maps</a>'+(p.kind==='perfume'&&p.website?' &nbsp;·&nbsp; <a href="'+esc(p.website)+'" target="_blank" rel="noopener">Website</a>':'')+((p.kind!=='see'&&p.kind!=='perfume')?' &nbsp;·&nbsp; <a href="'+esc(menuLink(p))+'" target="_blank" rel="noopener"><b>View menu</b></a>':'')+'</div></div>';
   }
   function renderNearby(){
-    var vegOnly = document.getElementById('nbVeg').checked, openOnly = document.getElementById('nbOpen').checked;
-    var eat = NB.eat.filter(function(p){ return (!vegOnly||p.veg) && (!openOnly||p.openNow!==false); })
-      .sort(function(a,b){ return (b.pureVeg-a.pureVeg) || ((b.rating||0)*Math.log(b.reviews+2) - (a.rating||0)*Math.log(a.reviews+2)) || ((a.km||0)-(b.km||0)); });
-    var see = NB.see.filter(function(p){ return !openOnly||p.openNow!==false; })
-      .sort(function(a,b){ return (b.id===NB.famousId)-(a.id===NB.famousId) || b.reviews-a.reviews || ((a.km||0)-(b.km||0)); });
-    var rated = document.getElementById('nbRated').checked;
+    var vegOnly = document.getElementById('nbVeg').checked, openOnly = document.getElementById('nbOpen').checked, rated = document.getElementById('nbRated').checked;
     function keep(p){ return (!openOnly||p.openNow!==false) && (!rated||p.rating==null||p.rating>=4); }
-    function byRating(a,b){ return ((b.rating||0)*Math.log(b.reviews+2) - (a.rating||0)*Math.log(a.reviews+2)) || ((a.km||0)-(b.km||0)); }
-    var coffee = NB.coffee.filter(keep).sort(byRating), dessert = NB.dessert.filter(keep).sort(byRating);
-    eat = eat.filter(keep); see = see.filter(keep);
+    var see = NB.see.filter(keep).sort(function(a,b){ return (b.id===NB.famousId)-(a.id===NB.famousId) || a._i-b._i; });
+    var eat = NB.eat.filter(function(p){ return keep(p) && (!vegOnly||p.veg); });
+    var coffee = NB.coffee.filter(keep), dessert = NB.dessert.filter(keep), perfume = NB.perfume.filter(keep);
+    var any = NB.see.length||NB.eat.length||NB.coffee.length||NB.dessert.length||NB.perfume.length;
+    function sec(title, list, empty){ return '<div class="nb-sec">'+title+' ('+list.length+')</div>' + (list.map(nbItem).join('') || '<div class="empty">'+empty+'</div>'); }
     var html = '';
-    if(NB.see.length || NB.eat.length || NB.coffee.length || NB.dessert.length){
-      html += '<div class="nb-sec">Eat ('+eat.length+')</div>' + (eat.map(nbItem).join('') || '<div class="empty">No '+(vegOnly?'veg-friendly ':'')+'restaurants match. Try a wider distance.</div>');
-      html += '<div class="nb-sec">Coffee ('+coffee.length+')</div>' + (coffee.map(nbItem).join('') || '<div class="empty">No coffee places match.</div>');
-      html += '<div class="nb-sec">Dessert ('+dessert.length+')</div>' + (dessert.map(nbItem).join('') || '<div class="empty">No dessert places match.</div>');
-      html += '<div class="nb-sec">See ('+see.length+')</div>' + (see.map(nbItem).join('') || '<div class="empty">No sights match these filters.</div>');
+    if(any){
+      html += sec('See', see, 'No sights match these filters.');
+      html += sec('Eat', eat, 'No '+(vegOnly?'veg-friendly ':'')+'restaurants match. Try a wider distance.');
+      html += sec('Coffee', coffee, 'No coffee places match.');
+      html += sec('Dessert', dessert, 'No dessert places match.');
+      html += sec('Perfumery &amp; incense', perfume, 'No artisan perfumers or incense suppliers found nearby. Try 5 km.');
     }
-    document.getElementById('nbPlan').style.display = (NB.see.length||NB.eat.length||NB.coffee.length||NB.dessert.length) ? 'block' : 'none';
+    document.getElementById('nbPlan').style.display = any ? 'block' : 'none';
     document.getElementById('nbList').innerHTML = html;
     Array.prototype.forEach.call(document.querySelectorAll('[data-nb]'), function(cb){
       cb.addEventListener('change', function(){ NB.picked[cb.getAttribute('data-nb')] = cb.checked; NB.routeIds=null; NB.routeLink=null; nbSendBar(); });
@@ -1319,7 +1317,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       var d = await r.json();
       if(d.ok && d.via==='osm' && d.partial && !retried){ nbStatus('Some categories were slow. Retrying…'); return nbFetch(lat, lng, label, acc, true); }
       if(!d.ok){ nbStatus('Could not load places: '+(d.error||'unknown error')); }
-      else { NB.eat=d.eat; NB.coffee=d.coffee||[]; NB.dessert=d.dessert||[]; NB.see=d.see; NB.famousId=d.famousId; NB.picked={}; nbStatus(d.see.length+' sights, '+d.eat.length+' restaurants, '+(d.coffee||[]).length+' coffee and '+(d.dessert||[]).length+' dessert places found. Tick any to email them.'+(d.via==='osm'?(d.googleError?' Google said: '+d.googleError+' (key ending '+(d.keyTail||'?')+').':'')+' Using free OpenStreetMap data (no ratings). Tick "Use Google (ratings)" once your Google account is approved. Tap View menu on a restaurant to check its veg options.'+(d.partial?' Some categories were slow to load; tap again to refresh.':''):'')); renderNearby(); }
+      else { NB.eat=d.eat; NB.coffee=d.coffee||[]; NB.dessert=d.dessert||[]; NB.perfume=d.perfume||[]; NB.see=d.see; NB.famousId=d.famousId; NB.picked={}; [NB.see,NB.eat,NB.coffee,NB.dessert,NB.perfume].forEach(function(l){ l.forEach(function(x,i){ x._i=i; }); }); nbStatus(d.see.length+' sights, '+d.eat.length+' restaurants, '+(d.coffee||[]).length+' coffee, '+(d.dessert||[]).length+' dessert and '+(d.perfume||[]).length+' perfumery/incense places found. Tick any to email them.'+(d.via==='osm'?(d.googleError?' Google said: '+d.googleError+' (key ending '+(d.keyTail||'?')+').':'')+' Using free OpenStreetMap data (no ratings). Tick "Use Google (ratings)" once your Google account is approved. Tap View menu on a restaurant to check its veg options.'+(d.partial?' Some categories were slow to load; tap again to refresh.':''):'')); renderNearby(); }
     }catch(e){ nbStatus('Could not reach the server. Check your connection and try again.'); }
   }
   document.getElementById('nbGo').addEventListener('click', function(){
@@ -1354,7 +1352,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     var s=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLng/2)*Math.sin(dLng/2);
     return 2*R*Math.asin(Math.sqrt(s));
   }
-  function stopIcon(p){ return p.kind==='coffee'?'☕':p.kind==='dessert'?'🍨':p.kind==='eat'?'🍽️':'🏛️'; }
+  function stopIcon(p){ return p.kind==='perfume'?'🪔':p.kind==='coffee'?'☕':p.kind==='dessert'?'🍨':p.kind==='eat'?'🍽️':'🏛️'; }
   function pScore(p){ return (p.rating||0)*Math.log((p.reviews||0)+2); }
   function nearestOrder(start, list){
     var out=[], cur=start, rest=list.slice();
@@ -1377,7 +1375,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
         '<div class="nm">'+stopIcon(p)+' '+esc(p.name)+(p.id===NB.famousId?'<span class="nb-badge fam">Most famous here</span>':'')+'</div>'+
         '<div class="meta">'+esc([p.type, p.rating?'★ '+p.rating:'', leg].filter(Boolean).join(' · '))+'</div>'+
         '<a href="'+esc(p.maps)+'" target="_blank" rel="noopener">Open in Maps</a>'+
-        (p.kind!=='see'?' &nbsp;·&nbsp; <a href="'+esc(menuLink(p))+'" target="_blank" rel="noopener"><b>View menu</b></a>':'')+'</div></div>';
+        ((p.kind!=='see'&&p.kind!=='perfume')?' &nbsp;·&nbsp; <a href="'+esc(menuLink(p))+'" target="_blank" rel="noopener"><b>View menu</b></a>':'')+'</div></div>';
     });
     var way = stops.slice(0,-1).map(function(p){ return p.lat+','+p.lng; }).join('|');
     var last = stops[stops.length-1];
@@ -1406,13 +1404,13 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     showRoute(stops);
   });
   document.getElementById('nbPlanTicked').addEventListener('click', function(){
-    var picks = NB.see.concat(NB.eat, NB.coffee, NB.dessert).filter(function(p){ return NB.picked[p.id] && p.lat!=null; });
+    var picks = NB.see.concat(NB.eat, NB.coffee, NB.dessert, NB.perfume).filter(function(p){ return NB.picked[p.id] && p.lat!=null; });
     if(picks.length<2){ nbStatus('Tick at least 2 places, then tap Route.'); return; }
     showRoute(nearestOrder(NB.where, picks));
   });
   document.getElementById('nbMail').addEventListener('click', async function(){
     var btn = this, to = document.getElementById('nbTo').value.trim();
-    var picks = NB.see.concat(NB.eat, NB.coffee, NB.dessert).filter(function(p){ return NB.picked[p.id]; });
+    var picks = NB.see.concat(NB.eat, NB.coffee, NB.dessert, NB.perfume).filter(function(p){ return NB.picked[p.id]; });
     if(NB.routeIds){ picks.sort(function(a,b){ var x=NB.routeIds.indexOf(a.id), y=NB.routeIds.indexOf(b.id); return (x<0?99:x)-(y<0?99:y); }); }
     if(!to || !picks.length) return;
     var rows = picks.map(function(p){
@@ -1420,7 +1418,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
         (p.pureVeg?' — pure veg':(p.veg?' — veg options':''))+'<br><span style="color:#555;font-size:13px">'+esc(p.type)+
         (p.rating?' · ★ '+p.rating+' ('+p.reviews+' reviews)':'')+(p.km!=null?' · '+p.km+' km away':'')+'</span><br>'+
         (p.summary?esc(p.summary)+'<br>':'')+'<span style="font-size:13px">'+esc(p.address)+'</span><br>'+
-        '<a href="'+esc(p.maps)+'">Open in Google Maps</a>'+(p.kind!=='see'?' · <a href="'+esc(menuLink(p))+'">View menu</a>':'')+'</td></tr>';
+        '<a href="'+esc(p.maps)+'">Open in Google Maps</a>'+((p.kind!=='see'&&p.kind!=='perfume')?' · <a href="'+esc(menuLink(p))+'">View menu</a>':'')+'</td></tr>';
     }).join('');
     var html = '<div style="font-family:Arial,sans-serif;max-width:600px"><h2 style="margin:0 0 6px">Nearby picks</h2>'+
       '<p style="color:#555;margin:0 0 10px">Sent from Travel Desk by '+esc(whoLabel())+' · '+new Date().toLocaleString()+
