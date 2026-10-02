@@ -1311,7 +1311,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
         body: JSON.stringify({lat:lat, lng:lng, radius:+document.getElementById('nbRad').value})});
       var d = await r.json();
       if(!d.ok){ nbStatus('Could not load places: '+(d.error||'unknown error')); }
-      else { NB.eat=d.eat; NB.coffee=d.coffee||[]; NB.dessert=d.dessert||[]; NB.see=d.see; NB.famousId=d.famousId; NB.picked={}; nbStatus(d.see.length+' sights, '+d.eat.length+' restaurants, '+(d.coffee||[]).length+' coffee and '+(d.dessert||[]).length+' dessert places found. Tick any to email them.'+(d.via==='osm'?' Using free OpenStreetMap data (no ratings). Tap View menu on a restaurant to check its veg options.'+(d.partial?' Some categories were slow to load; tap again to refresh.':''):'')); renderNearby(); }
+      else { NB.eat=d.eat; NB.coffee=d.coffee||[]; NB.dessert=d.dessert||[]; NB.see=d.see; NB.famousId=d.famousId; NB.picked={}; nbStatus(d.see.length+' sights, '+d.eat.length+' restaurants, '+(d.coffee||[]).length+' coffee and '+(d.dessert||[]).length+' dessert places found. Tick any to email them.'+(d.via==='osm'?' Google said: '+(d.googleError||'unknown')+' (key ending '+(d.keyTail||'?')+'). Using free OpenStreetMap data (no ratings). Tap View menu on a restaurant to check its veg options.'+(d.partial?' Some categories were slow to load; tap again to refresh.':''):'')); renderNearby(); }
     }catch(e){ nbStatus('Could not reach the server. Check your connection and try again.'); }
   }
   document.getElementById('nbGo').addEventListener('click', function(){
