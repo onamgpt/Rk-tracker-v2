@@ -71,6 +71,7 @@ function shape(p, here, kind) {
     openNow: p.currentOpeningHours ? p.currentOpeningHours.openNow : null,
     website: p.websiteUri || "",
     maps: p.googleMapsUri || (loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : ""),
+    lat: loc ? loc.lat : null, lng: loc ? loc.lng : null,
     km: loc ? Math.round(km(here, loc) * 100) / 100 : null
   };
 }
@@ -101,6 +102,7 @@ function shapeLegacy(p, here, kind, vegHint) {
     veg: vegHint || pureVeg || /indian|veg/.test(nm), pureVeg,
     openNow: p.opening_hours ? p.opening_hours.open_now : null,
     maps: "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(p.name || "") + "&query_place_id=" + p.place_id,
+    lat: loc ? loc.lat : null, lng: loc ? loc.lng : null,
     km: loc ? Math.round(km(here, loc) * 100) / 100 : null
   };
 }
@@ -171,6 +173,7 @@ function shapeOsm(el, here) {
     summary: (t.description || "").slice(0, 160), veg, pureVeg, openNow: null, _score: score,
     website: t["menu:url"] || t.website || t["contact:website"] || "",
     maps: "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(t.name) + "%20" + loc.lat + "," + loc.lng,
+    lat: loc.lat, lng: loc.lng,
     km: Math.round(km(here, loc) * 100) / 100
   };
 }
