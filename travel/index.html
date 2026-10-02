@@ -1377,14 +1377,22 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
         '<a href="'+esc(p.maps)+'" target="_blank" rel="noopener">Open in Maps</a>'+
         ((p.kind!=='see'&&p.kind!=='perfume')?' &nbsp;·&nbsp; <a href="'+esc(menuLink(p))+'" target="_blank" rel="noopener"><b>View menu</b></a>':'')+'</div></div>';
     });
-    var way = stops.slice(0,-1).map(function(p){ return p.lat+','+p.lng; }).join('|');
-    var last = stops[stops.length-1];
-    NB.routeLink = 'https://www.google.com/maps/dir/?api=1&travelmode=walking&origin='+NB.where.lat+','+NB.where.lng+
-      '&destination='+last.lat+','+last.lng+(way?'&waypoints='+encodeURIComponent(way):'');
+    // Google results carry real place IDs, so Maps shows names and walks to the right entrance.
+    function isG(p){ return p.id && !/^(node|way|relation)\d/.test(p.id); }
+    var last = stops[stops.length-1], mid = stops.slice(0,-1), allG = mid.every(isG);
+    var url = 'https://www.google.com/maps/dir/?api=1&travelmode=walking&origin='+NB.where.lat+','+NB.where.lng;
+    url += isG(last) ? '&destination='+encodeURIComponent(last.name)+'&destination_place_id='+encodeURIComponent(last.id) : '&destination='+last.lat+','+last.lng;
+    if(mid.length){
+      url += '&waypoints='+encodeURIComponent(mid.map(function(p){ return allG ? p.name.replace(/\|/g,' ') : p.lat+','+p.lng; }).join('|'));
+      if(allG) url += '&waypoint_place_ids='+encodeURIComponent(mid.map(function(p){ return p.id; }).join('|'));
+    }
+    NB.routeLink = url;
+    NB.routeApp = 'comgooglemaps://?saddr='+NB.where.lat+','+NB.where.lng+'&daddr='+stops.map(function(p){ return p.lat+','+p.lng; }).join('+to:')+'&directionsmode=walking';
     NB.routeIds = stops.map(function(p){ return p.id; });
     NB.picked = {}; stops.forEach(function(p){ NB.picked[p.id]=true; });
     document.getElementById('nbRoute').innerHTML = '<div class="nb-sec">Your route · about '+total.toFixed(1)+' km on foot</div>'+rows+
-      '<a class="nb-go" style="display:block;text-align:center;text-decoration:none;margin-bottom:8px" href="'+esc(NB.routeLink)+'" target="_blank" rel="noopener">Open full route in Google Maps</a>';
+      '<a class="nb-go" style="display:block;text-align:center;text-decoration:none;margin-bottom:8px" href="'+esc(NB.routeApp)+'">Open route in Google Maps app</a>'+
+      '<a class="mini" style="display:block;text-align:center;text-decoration:none;margin-bottom:8px" href="'+esc(NB.routeLink)+'" target="_blank" rel="noopener">Open in browser instead</a>';
     renderNearby();
     document.getElementById('nbRoute').scrollIntoView({behavior:'smooth', block:'start'});
   }
