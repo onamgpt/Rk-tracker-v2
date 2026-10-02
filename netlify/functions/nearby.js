@@ -251,7 +251,7 @@ exports.handler = async (event) => {
         return { statusCode: 200, headers: H, body: JSON.stringify({ ok: false,
           error: "Google blocked (" + String(msg).slice(0, 80) + "). " + O.error }) };
       }
-      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", partial: O.partial, famousId: O.famousId, eat: O.eat, coffee: O.coffee, dessert: O.dessert, see: O.see }) };
+      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", googleError: String(msg).slice(0, 220) + " | older API: " + String(L.error).slice(0, 160), keyTail: key.slice(-5), partial: O.partial, famousId: O.famousId, eat: O.eat, coffee: O.coffee, dessert: O.dessert, see: O.see }) };
     }
     const f = L.see.filter(p => (p.rating || 0) >= 4).sort((a, b) => b.reviews - a.reviews)[0]
       || L.see.slice().sort((a, b) => b.reviews - a.reviews)[0] || null;
