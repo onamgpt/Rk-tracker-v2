@@ -1301,8 +1301,8 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   document.getElementById('nbVeg').addEventListener('change', renderNearby);
   document.getElementById('nbOpen').addEventListener('change', renderNearby);
   document.getElementById('nbRated').addEventListener('change', renderNearby);
-  try{ document.getElementById('nbGoogle').checked = localStorage.getItem('nbGoogle')==='1'; }catch(e){}
-  document.getElementById('nbGoogle').addEventListener('change', function(){ try{ localStorage.setItem('nbGoogle', this.checked?'1':'0'); }catch(e){} });
+  document.getElementById('nbGoogle').checked = true; try{ if(localStorage.getItem('nbGoogle2')==='0') document.getElementById('nbGoogle').checked = false; }catch(e){}
+  document.getElementById('nbGoogle').addEventListener('change', function(){ try{ localStorage.setItem('nbGoogle2', this.checked?'1':'0'); }catch(e){} });
   function nbWhereText(lat, lng, acc, label){
     document.getElementById('nbWhere').innerHTML = 'Searching near <a href="https://www.google.com/maps/search/?api=1&query='+lat+','+lng+'" target="_blank" rel="noopener">'+
       esc(label || ('your phone location'+(acc ? ' (±'+Math.round(acc)+' m)' : '')))+'</a>. Wrong spot? Type the place above and tap Search here.';
