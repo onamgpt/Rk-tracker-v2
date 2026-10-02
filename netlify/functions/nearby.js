@@ -19,12 +19,12 @@ const FIELDS = [
 
 const VEG_TYPES = ["vegetarian_restaurant", "vegan_restaurant", "indian_restaurant"];
 
-function post(body, key) {
+function post(body, key, path) {
   const payload = JSON.stringify(body);
   return new Promise((resolve) => {
     const req = https.request({
       hostname: "places.googleapis.com",
-      path: "/v1/places:searchNearby",
+      path: path || "/v1/places:searchNearby",
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -152,25 +152,47 @@ function anyOk(promises) {
   });
 }
 
+const CHAIN_RE = /sephora|douglas|kiko|marionnaud|limoni|pinalli|occitane|lush|rinascente|naima|acqua di parma|yves rocher|benetton|zara/i;
+const PERFUME_NAME = /incens|incenso|essenz|aromat|profum|perfum|fragran|\boud\b|attar/i;
+
+function osmKind(t) {
+  if (t.amenity === "restaurant") return "eat";
+  if (t.amenity === "cafe") return "coffee";
+  if (t.amenity === "ice_cream" || /^(pastry|bakery|confectionery)$/.test(t.shop || "")) return "dessert";
+  if (/perfum/.test(t.craft || "")) return "perfume";
+  if (t.shop === "perfumery") return "perfume";
+  if (t.shop && PERFUME_NAME.test(t.name || "")) return "perfume";
+  return "see";
+}
+
 function shapeOsm(el, here) {
   const t = el.tags || {};
   const c = el.center || (el.lat != null ? { lat: el.lat, lon: el.lon } : null);
   if (!c || !t.name) return null;
   const loc = { lat: c.lat, lng: c.lon };
-  const kind = t.amenity === "restaurant" ? "eat" : t.amenity === "cafe" ? "coffee"
-    : (t.amenity === "ice_cream" || /^(pastry|bakery|confectionery)$/.test(t.shop || "")) ? "dessert" : "see";
+  const kind = osmKind(t);
+  if (kind === "perfume" && (t.brand || t["brand:wikidata"] || CHAIN_RE.test(t.name))) return null;
   const isFood = kind === "eat";
   const cuisine = (t.cuisine || "").toLowerCase();
   const dv = t["diet:vegetarian"], dg = t["diet:vegan"];
   const pureVeg = isFood && (dv === "only" || dg === "only" || /vegetarian|vegan/.test(cuisine));
   const veg = isFood && (pureVeg || dv === "yes" || dg === "yes" || /indian/.test(cuisine));
-  let type = kind === "coffee" ? "Cafe" : kind === "dessert" ? (t.shop || "ice cream").replace(/_/g, " ") : isFood ? (t.cuisine ? t.cuisine.split(";")[0].replace(/_/g, " ") + " restaurant" : "Restaurant")
-    : (t.tourism || t.historic || (t.amenity === "place_of_worship" ? "place of worship" : "sight")).replace(/_/g, " ");
-  const score = (t.wikipedia ? 2 : 0) + (t.wikidata ? 1 : 0) + (/attraction|museum/.test(t.tourism || "") ? 1 : 0);
+  let type;
+  if (kind === "coffee") type = "Cafe";
+  else if (kind === "dessert") type = (t.shop || "ice cream").replace(/_/g, " ");
+  else if (kind === "eat") type = t.cuisine ? t.cuisine.split(";")[0].replace(/_/g, " ") + " restaurant" : "Restaurant";
+  else if (kind === "perfume") type = /perfum/.test(t.craft || "") ? "artisan perfumer" : /incens|incenso/i.test(t.name) ? "incense" : t.shop === "perfumery" ? "artisan perfumery" : (t.shop || "shop").replace(/_/g, " ");
+  else type = (t.tourism || t.historic || (t.amenity === "place_of_worship" ? "place of worship" : "landmark")).replace(/_/g, " ");
+  // Quality score stands in for ratings (OpenStreetMap has none). Higher = bigger / better known.
+  let score;
+  if (kind === "see") score = (t.wikipedia ? 2 : 0) + (t.wikidata ? 1 : 0) + (/attraction|museum/.test(t.tourism || "") ? 1 : 0) + (t.heritage ? 1 : 0);
+  else if (kind === "perfume") score = (/incens|incenso/i.test(t.name) ? 2 : 0) + (/perfum/.test(t.craft || "") ? 2 : 0) + (t.website ? 1 : 0);
+  else score = (t.wikidata ? 2 : 0) + (t.website || t["contact:website"] ? 1 : 0) + (t.opening_hours ? 1 : 0) + (t.cuisine ? 0.5 : 0) + (t.phone || t["contact:phone"] ? 0.5 : 0) + (dv || dg ? 0.5 : 0);
+  const small = kind === "see" ? score < 1 : kind === "perfume" ? false : score < 1.5;
   const addr = [t["addr:street"], t["addr:housenumber"], t["addr:city"]].filter(Boolean).join(" ");
   return {
     id: el.type + el.id, kind, name: t.name, address: addr, rating: null, reviews: 0, type,
-    summary: (t.description || "").slice(0, 160), veg, pureVeg, openNow: null, _score: score,
+    summary: (t.description || "").slice(0, 160), veg, pureVeg, openNow: null, _score: score, _small: small,
     website: t["menu:url"] || t.website || t["contact:website"] || "",
     maps: "https://www.google.com/maps/search/" + encodeURIComponent(t.name) + "/@" + loc.lat + "," + loc.lng + ",18z",
     lat: loc.lat, lng: loc.lng,
@@ -179,20 +201,33 @@ function shapeOsm(el, here) {
 }
 
 const MIRRORS = ["overpass-api.de", "overpass.kumi.systems", "overpass.private.coffee", "lz4.overpass-api.de"];
+const PER_CAT = 15;
+
+// Keep the big / well-known ones; fall back to all if that leaves too few.
+function pickTop(list) {
+  const big = list.filter(i => !i._small);
+  return (big.length >= 5 ? big : list).slice(0, PER_CAT);
+}
 
 async function osmSearch(here, radius) {
-  const a = "(around:" + radius + "," + here.lat + "," + here.lng + ")";
-  const wrap = body => "[out:json][timeout:9];(" + body + ");out center tags 150;";
-  // Three small queries in parallel are far more reliable than one big one.
+  const A = r => "(around:" + r + "," + here.lat + "," + here.lng + ")";
+  const a = A(radius), pr = A(Math.max(radius, 3000));
+  const wrap = (body, n) => "[out:json][timeout:9];(" + body + ");out center tags " + n + ";";
   const queries = [
-    wrap("nwr" + a + '["amenity"="restaurant"]["name"];'),
+    wrap("nwr" + a + '["amenity"="restaurant"]["name"];', 400),
     wrap("nwr" + a + '["amenity"~"^(cafe|ice_cream)$"]["name"];' +
-         "nwr" + a + '["shop"~"^(pastry|bakery|confectionery)$"]["name"];'),
-    wrap("nwr" + a + '["tourism"~"^(attraction|museum|gallery|viewpoint)$"]["name"];' +
-         "nwr" + a + '["historic"]["historic"!~"^(memorial|wayside_cross|wayside_shrine|boundary_stone|plaque|stolperstein|milestone)$"]["name"];' +
-         "nwr" + a + '["amenity"="place_of_worship"]["name"]["wikipedia"];')
+         "nwr" + a + '["shop"~"^(pastry|bakery|confectionery)$"]["name"];', 400),
+    // Sights: well-known landmarks (wikidata) first, so big ones like the Colosseum are never cut off.
+    wrap("nwr" + a + '["name"]["wikidata"][!"highway"][!"railway"][!"public_transport"][!"place"][!"boundary"][!"route"][!"landuse"][!"natural"][!"shop"][!"office"]["amenity"!~"^(restaurant|cafe|ice_cream|school|university|college|hospital|bank|pharmacy|bar|pub|fast_food)$"];' +
+         "nwr" + a + '["tourism"~"^(attraction|museum|gallery|viewpoint)$"]["name"];', 300),
+    wrap("nwr" + pr + '["craft"~"perfum"]["name"];' +
+         "nwr" + pr + '["shop"="perfumery"]["name"~"artistic|laborator|atelier|nicchia|niche|officina|essenz",i];' +
+         "nwr" + pr + '["shop"]["name"~"incens|incenso",i];' +
+         "nwr" + pr + '["shop"~"^(religion|esoteric|herbalist|wholesale)$"]["name"~"essenz|aromat|profum|perfum|oud|attar",i];', 100)
   ];
-  const settled = await Promise.allSettled(queries.map(q => anyOk(MIRRORS.map(m => overpass(m, q)))));
+  // Spread queries across mirrors (2 each) so no single server gets flooded.
+  const settled = await Promise.allSettled(queries.map((q, i) =>
+    anyOk([overpass(MIRRORS[i % MIRRORS.length], q), overpass(MIRRORS[(i + 1) % MIRRORS.length], q)])));
   const good = settled.filter(r => r.status === "fulfilled").map(r => r.value);
   if (!good.length) {
     return { ok: false, error: "OpenStreetMap servers are busy. Tap again in a few seconds." };
@@ -205,16 +240,15 @@ async function osmSearch(here, radius) {
     const k = it.name.toLowerCase() + "|" + it.kind;
     if (seen.has(k)) return; seen.add(k); items.push(it);
   }));
-  const eat = items.filter(i => i.kind === "eat").sort((a, b) => (b.pureVeg - a.pureVeg) || (b.veg - a.veg) || a.km - b.km).slice(0, 40);
-  const coffee = items.filter(i => i.kind === "coffee").sort((a, b) => a.km - b.km).slice(0, 30);
-  const dessert = items.filter(i => i.kind === "dessert").sort((a, b) => a.km - b.km).slice(0, 30);
-  const see = items.filter(i => i.kind === "see").sort((a, b) => (b._score - a._score) || a.km - b.km).slice(0, 40);
-  const famous = see.length && see[0]._score > 0 ? see[0] : (see[0] || null);
-  eat.concat(see, coffee, dessert).forEach(i => delete i._score);
-  return { ok: true, partial, eat, coffee, dessert, see, famousId: famous ? famous.id : null };
+  const byScore = (a, b) => (b._score - a._score) || a.km - b.km;
+  const cat = k => pickTop(items.filter(i => i.kind === k).sort(byScore));
+  const see = cat("see"), eat = cat("eat"), coffee = cat("coffee"), dessert = cat("dessert"), perfume = cat("perfume");
+  const famous = see[0] || null;
+  eat.concat(see, coffee, dessert, perfume).forEach(i => { delete i._score; delete i._small; });
+  return { ok: true, partial, eat, coffee, dessert, perfume, see, famousId: famous ? famous.id : null };
 }
 
-exports._osmTest = { shapeOsm, osmSearch };
+exports._osmTest = { shapeOsm, osmSearch, osmKind };
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: H, body: "" };
 
@@ -237,12 +271,13 @@ exports.handler = async (event) => {
   if (b.prefer !== "google") {
     osmTried = true;
     const O1 = await osmSearch(here, radius);
-    if (O1.ok && (O1.eat.length || O1.see.length || O1.coffee.length || O1.dessert.length)) {
+    if (O1.ok && (O1.eat.length || O1.see.length || O1.coffee.length || O1.dessert.length || O1.perfume.length)) {
       return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", partial: O1.partial,
-        famousId: O1.famousId, eat: O1.eat, coffee: O1.coffee, dessert: O1.dessert, see: O1.see }) };
+        famousId: O1.famousId, eat: O1.eat, coffee: O1.coffee, dessert: O1.dessert, perfume: O1.perfume, see: O1.see }) };
     }
   }
-  const [food, veg, sights, coffeeR, dessertR, sights2, sights3] = await Promise.all([
+  const tbias = { circle: { center: { latitude: lat, longitude: lng }, radius: Math.max(radius, 3000) } };
+  const [food, veg, sights, coffeeR, dessertR, sights2, sights3, pf1, pf2, pf3] = await Promise.all([
     post({ includedTypes: ["restaurant"], maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
     post({ includedTypes: VEG_TYPES, maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
     post({ includedTypes: ["tourist_attraction"], maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
@@ -252,7 +287,10 @@ exports.handler = async (event) => {
     post({ includedTypes: ["historical_landmark", "monument", "museum", "cultural_landmark", "historical_place"],
            maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
     post({ includedTypes: ["church", "hindu_temple", "park", "art_gallery", "plaza", "observation_deck"],
-           maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key)
+           maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
+    post({ textQuery: "incense importer", maxResultCount: 20, locationBias: tbias }, key, "/v1/places:searchText"),
+    post({ textQuery: "incense wholesale", maxResultCount: 20, locationBias: tbias }, key, "/v1/places:searchText"),
+    post({ textQuery: "profumeria artistica laboratorio", maxResultCount: 20, locationBias: tbias }, key, "/v1/places:searchText")
   ]);
 
   const bad = [food, veg, sights].find(r => r.status !== 200);
@@ -265,7 +303,7 @@ exports.handler = async (event) => {
         return { statusCode: 200, headers: H, body: JSON.stringify({ ok: false,
           error: "Google blocked (" + String(msg).slice(0, 80) + "). " + O.error }) };
       }
-      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", googleError: String(msg).slice(0, 220) + " | older API: " + String(L.error).slice(0, 160), keyTail: key.slice(-5) + " from " + keySource, partial: O.partial, famousId: O.famousId, eat: O.eat, coffee: O.coffee, dessert: O.dessert, see: O.see }) };
+      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", googleError: String(msg).slice(0, 220) + " | older API: " + String(L.error).slice(0, 160), keyTail: key.slice(-5) + " from " + keySource, partial: O.partial, famousId: O.famousId, eat: O.eat, coffee: O.coffee, dessert: O.dessert, perfume: O.perfume, see: O.see }) };
     }
     const f = L.see.filter(p => (p.rating || 0) >= 4).sort((a, b) => b.reviews - a.reviews)[0]
       || L.see.slice().sort((a, b) => b.reviews - a.reviews)[0] || null;
@@ -287,13 +325,34 @@ exports.handler = async (event) => {
     .map(p => { seen.add(p.id); return shape(p, here, "coffee"); });
   const dessert = ((dessertR.body && dessertR.body.places) || []).filter(p => !seen.has(p.id))
     .map(p => { seen.add(p.id); return shape(p, here, "dessert"); });
+  const pMax = Math.max(radius, 3000) / 1000 * 1.5;
+  const perfumeAll = [];
+  [pf1, pf2, pf3].forEach(r => ((r && r.body && r.body.places) || []).forEach(p => {
+    if (seen.has(p.id)) return;
+    const it = shape(p, here, "perfume");
+    if (CHAIN_RE.test(it.name) || /drugstore|department_store|shopping_mall|beauty_salon|pharmacy|supermarket/.test(p.primaryType || "")) return;
+    if (it.km != null && it.km > pMax) return;
+    seen.add(p.id); perfumeAll.push(it);
+  }));
+
   // "Most famous" = most-reviewed attraction with a decent rating.
   const famous = see.filter(p => (p.rating || 0) >= 4)
-    .sort((a, b) => b.reviews - a.reviews)[0] || see.sort((a, b) => b.reviews - a.reviews)[0] || null;
+    .sort((a, b) => b.reviews - a.reviews)[0] || see.slice().sort((a, b) => b.reviews - a.reviews)[0] || null;
+
+  // Rank by rating weighted by review count; drop small places (few reviews); 15 per category.
+  const w = p => (p.rating || 0) * Math.log((p.reviews || 0) + 2);
+  const top = (list, minReviews) => {
+    const sorted = list.slice().sort((a, b) => w(b) - w(a));
+    const big = sorted.filter(p => (p.reviews || 0) >= minReviews);
+    return (big.length >= 5 ? big : sorted).slice(0, PER_CAT);
+  };
+  let seeTop = top(see, 300);
+  if (famous && !seeTop.some(p => p.id === famous.id)) seeTop = [famous].concat(seeTop).slice(0, PER_CAT);
 
   return {
     statusCode: 200,
     headers: H,
-    body: JSON.stringify({ ok: true, famousId: famous ? famous.id : null, eat, coffee, dessert, see })
+    body: JSON.stringify({ ok: true, famousId: famous ? famous.id : null,
+      eat: top(eat, 100), coffee: top(coffee, 50), dessert: top(dessert, 50), perfume: top(perfumeAll, 0), see: seeTop })
   };
 };
