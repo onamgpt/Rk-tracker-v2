@@ -266,9 +266,9 @@ exports.handler = async (event) => {
   const here = { lat, lng };
   const area = { circle: { center: { latitude: lat, longitude: lng }, radius } };
 
-  // Default: free OpenStreetMap first, Google second. Send prefer:"google" to reverse.
+  // Default: Google first, OpenStreetMap second. Send prefer:"osm" to reverse.
   let osmTried = false;
-  if (b.prefer !== "google") {
+  if (b.prefer === "osm") {
     osmTried = true;
     const O1 = await osmSearch(here, radius);
     if (O1.ok && (O1.eat.length || O1.see.length || O1.coffee.length || O1.dessert.length || O1.perfume.length)) {
