@@ -271,6 +271,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   <div id="nearby" style="display:none">
     <div class="card">
       <button class="nb-go" id="nbGo">📍 What's near me now</button>
+      <button class="nb-go" id="nbPlan" style="display:none;margin-top:8px;background:var(--stamp);border-color:var(--stamp)">🧭 Plan a route for me</button>
       <div class="nb-filters">
         <label><input type="checkbox" id="nbVeg"> Veg-friendly only</label>
         <label><input type="checkbox" id="nbRated"> 4★ and above</label>
@@ -281,9 +282,11 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       <div class="f" id="nbWhere" style="margin-top:8px"></div>
       <div class="f" id="nbStatus" style="margin-top:8px"></div>
     </div>
+    <div id="nbRoute"></div>
     <div id="nbList"></div>
     <div class="nb-send" id="nbSend" style="display:none">
       <input type="text" id="nbTo" value="onamagarbathi@gmail.com">
+      <button class="mini" id="nbPlanTicked" style="background:var(--stamp);border-color:var(--stamp)">Route</button>
       <button class="mini" id="nbMail">Email picks</button>
     </div>
   </div>
@@ -1284,9 +1287,10 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       html += '<div class="nb-sec">Dessert ('+dessert.length+')</div>' + (dessert.map(nbItem).join('') || '<div class="empty">No dessert places match.</div>');
       html += '<div class="nb-sec">See ('+see.length+')</div>' + (see.map(nbItem).join('') || '<div class="empty">No sights match these filters.</div>');
     }
+    document.getElementById('nbPlan').style.display = (NB.see.length||NB.eat.length||NB.coffee.length||NB.dessert.length) ? 'block' : 'none';
     document.getElementById('nbList').innerHTML = html;
     Array.prototype.forEach.call(document.querySelectorAll('[data-nb]'), function(cb){
-      cb.addEventListener('change', function(){ NB.picked[cb.getAttribute('data-nb')] = cb.checked; nbSendBar(); });
+      cb.addEventListener('change', function(){ NB.picked[cb.getAttribute('data-nb')] = cb.checked; NB.routeIds=null; NB.routeLink=null; nbSendBar(); });
     });
     nbSendBar();
   }
@@ -1339,9 +1343,74 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     }catch(e){ nbStatus('Could not look up that place. Check your connection and try again.'); }
     btn.disabled = false;
   });
+
+  /* ---------- route planner ---------- */
+  function hav(a, b){
+    var R=6371, r=function(x){ return x*Math.PI/180; };
+    var dLat=r(b.lat-a.lat), dLng=r(b.lng-a.lng);
+    var s=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLng/2)*Math.sin(dLng/2);
+    return 2*R*Math.asin(Math.sqrt(s));
+  }
+  function stopIcon(p){ return p.kind==='coffee'?'☕':p.kind==='dessert'?'🍨':p.kind==='eat'?'🍽️':'🏛️'; }
+  function pScore(p){ return (p.rating||0)*Math.log((p.reviews||0)+2); }
+  function nearestOrder(start, list){
+    var out=[], cur=start, rest=list.slice();
+    while(rest.length){
+      var bi=0, bd=1e9;
+      rest.forEach(function(p,i){ var d=hav(cur,p); if(d<bd){ bd=d; bi=i; } });
+      var n=rest.splice(bi,1)[0]; out.push(n); cur=n;
+    }
+    return out;
+  }
+  function nearestOf(from, list){ return nearestOrder(from, list)[0] || null; }
+  function showRoute(stops){
+    if(!NB.where || stops.length<2){ nbStatus('Need at least 2 places with locations to plan a route.'); return; }
+    var prev=NB.where, total=0, rows='';
+    stops.forEach(function(p,i){
+      var d=hav(prev,p); total+=d; prev=p;
+      var mins=Math.max(1,Math.round(d*1000*1.3/80));
+      var leg = d<0.05 ? 'start here' : (d<1 ? Math.round(d*1000)+' m' : d.toFixed(1)+' km')+' · about '+mins+' min walk';
+      rows += '<div class="nb-item"><div style="font-family:Newsreader,serif;font-size:22px;min-width:22px">'+(i+1)+'</div><div>'+
+        '<div class="nm">'+stopIcon(p)+' '+esc(p.name)+(p.id===NB.famousId?'<span class="nb-badge fam">Most famous here</span>':'')+'</div>'+
+        '<div class="meta">'+esc([p.type, p.rating?'★ '+p.rating:'', leg].filter(Boolean).join(' · '))+'</div>'+
+        '<a href="'+esc(p.maps)+'" target="_blank" rel="noopener">Open in Maps</a>'+
+        (p.kind!=='see'?' &nbsp;·&nbsp; <a href="'+esc(menuLink(p))+'" target="_blank" rel="noopener"><b>View menu</b></a>':'')+'</div></div>';
+    });
+    var way = stops.slice(0,-1).map(function(p){ return p.lat+','+p.lng; }).join('|');
+    var last = stops[stops.length-1];
+    NB.routeLink = 'https://www.google.com/maps/dir/?api=1&travelmode=walking&origin='+NB.where.lat+','+NB.where.lng+
+      '&destination='+last.lat+','+last.lng+(way?'&waypoints='+encodeURIComponent(way):'');
+    NB.routeIds = stops.map(function(p){ return p.id; });
+    NB.picked = {}; stops.forEach(function(p){ NB.picked[p.id]=true; });
+    document.getElementById('nbRoute').innerHTML = '<div class="nb-sec">Your route · about '+total.toFixed(1)+' km on foot</div>'+rows+
+      '<a class="nb-go" style="display:block;text-align:center;text-decoration:none;margin-bottom:8px" href="'+esc(NB.routeLink)+'" target="_blank" rel="noopener">Open full route in Google Maps</a>';
+    renderNearby();
+    document.getElementById('nbRoute').scrollIntoView({behavior:'smooth', block:'start'});
+  }
+  document.getElementById('nbPlan').addEventListener('click', function(){
+    if(!NB.where) return;
+    var open=document.getElementById('nbOpen').checked, vegOnly=document.getElementById('nbVeg').checked;
+    function pool(l){ return l.filter(function(p){ return p.lat!=null && (!open||p.openNow!==false); }); }
+    var sights = pool(NB.see).sort(function(a,b){ return (b.id===NB.famousId)-(a.id===NB.famousId) || b.reviews-a.reviews || a.km-b.km; }).slice(0,3);
+    var coffee = pool(NB.coffee).sort(function(a,b){ return pScore(b)-pScore(a) || a.km-b.km; }).slice(0,5);
+    var eat = pool(NB.eat).filter(function(p){ return !vegOnly||p.veg; }).sort(function(a,b){ return pScore(b)-pScore(a) || a.km-b.km; }).slice(0,5);
+    var dessert = pool(NB.dessert).sort(function(a,b){ return pScore(b)-pScore(a) || a.km-b.km; }).slice(0,5);
+    var stops=[], cur=NB.where;
+    var c = nearestOf(cur, coffee); if(c){ stops.push(c); cur=c; }
+    nearestOrder(cur, sights).forEach(function(p){ stops.push(p); cur=p; });
+    var e = nearestOf(cur, eat); if(e){ stops.push(e); cur=e; }
+    var d = nearestOf(cur, dessert); if(d){ stops.push(d); cur=d; }
+    showRoute(stops);
+  });
+  document.getElementById('nbPlanTicked').addEventListener('click', function(){
+    var picks = NB.see.concat(NB.eat, NB.coffee, NB.dessert).filter(function(p){ return NB.picked[p.id] && p.lat!=null; });
+    if(picks.length<2){ nbStatus('Tick at least 2 places, then tap Route.'); return; }
+    showRoute(nearestOrder(NB.where, picks));
+  });
   document.getElementById('nbMail').addEventListener('click', async function(){
     var btn = this, to = document.getElementById('nbTo').value.trim();
     var picks = NB.see.concat(NB.eat, NB.coffee, NB.dessert).filter(function(p){ return NB.picked[p.id]; });
+    if(NB.routeIds){ picks.sort(function(a,b){ var x=NB.routeIds.indexOf(a.id), y=NB.routeIds.indexOf(b.id); return (x<0?99:x)-(y<0?99:y); }); }
     if(!to || !picks.length) return;
     var rows = picks.map(function(p){
       return '<tr><td style="padding:10px 0;border-bottom:1px solid #ddd"><b>'+esc(p.name)+'</b>'+(p.id===NB.famousId?' — most famous here':'')+
@@ -1352,7 +1421,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     }).join('');
     var html = '<div style="font-family:Arial,sans-serif;max-width:600px"><h2 style="margin:0 0 6px">Nearby picks</h2>'+
       '<p style="color:#555;margin:0 0 10px">Sent from Travel Desk by '+esc(whoLabel())+' · '+new Date().toLocaleString()+
-      (NB.where?' · <a href="https://maps.google.com/?q='+NB.where.lat+','+NB.where.lng+'">where you were</a>':'')+'</p><table style="width:100%;border-collapse:collapse">'+rows+'</table></div>';
+      (NB.where?' · <a href="https://maps.google.com/?q='+NB.where.lat+','+NB.where.lng+'">where you were</a>':'')+'</p>'+(NB.routeLink?'<p><a href="'+esc(NB.routeLink)+'"><b>Open the full walking route in Google Maps</b></a></p>':'')+'<table style="width:100%;border-collapse:collapse">'+rows+'</table></div>';
     btn.disabled = true; btn.textContent = 'Sending…';
     try{
       var r = await fetch('/.netlify/functions/mail', {method:'POST', headers:{'Content-Type':'application/json'},
