@@ -232,6 +232,16 @@ exports.handler = async (event) => {
   const here = { lat, lng };
   const area = { circle: { center: { latitude: lat, longitude: lng }, radius } };
 
+  // Default: free OpenStreetMap first, Google second. Send prefer:"google" to reverse.
+  let osmTried = false;
+  if (b.prefer !== "google") {
+    osmTried = true;
+    const O1 = await osmSearch(here, radius);
+    if (O1.ok && (O1.eat.length || O1.see.length || O1.coffee.length || O1.dessert.length)) {
+      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", partial: O1.partial,
+        famousId: O1.famousId, eat: O1.eat, coffee: O1.coffee, dessert: O1.dessert, see: O1.see }) };
+    }
+  }
   const [food, veg, sights, coffeeR, dessertR, sights2, sights3] = await Promise.all([
     post({ includedTypes: ["restaurant"], maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
     post({ includedTypes: VEG_TYPES, maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
@@ -250,7 +260,7 @@ exports.handler = async (event) => {
     const msg = (bad.body && bad.body.error && (bad.body.error.message || bad.body.error)) || "Places request failed";
     const L = await legacySearch(here, radius, key);
     if (!L.ok) {
-      const O = await osmSearch(here, radius);
+      const O = osmTried ? { ok: false, error: "OpenStreetMap servers were busy. Tap again in a few seconds." } : await osmSearch(here, radius);
       if (!O.ok) {
         return { statusCode: 200, headers: H, body: JSON.stringify({ ok: false,
           error: "Google blocked (" + String(msg).slice(0, 80) + "). " + O.error }) };
