@@ -4,5 +4,11 @@
   "description": "RK Life Tracker v2",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0"
+  },
+  "devDependencies": {
+    "@babel/standalone": "7.23.2"
+  },
+  "scripts": {
+    "build": "node build.js"
   }
 }

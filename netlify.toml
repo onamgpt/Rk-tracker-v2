@@ -1,5 +1,5 @@
 [build]
-  command = ""
+  command = "npm run build"
   functions = "netlify/functions"
 
 # Netlify's secrets scanner was failing the build on APPS_SCRIPT_ID.

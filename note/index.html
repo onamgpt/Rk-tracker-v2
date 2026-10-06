@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="RK Note"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="theme-color" content="#2a1800"/>
+<link rel="apple-touch-icon" href="/note/icon.png"/>
+<title>RK Note</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:#2a1800;color:#2a1a00;font-family:-apple-system,system-ui,sans-serif;
+  padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+.wrap{max-width:640px;margin:0 auto;padding:14px 14px 20px;display:flex;flex-direction:column;min-height:100%}
+.top{display:flex;align-items:center;gap:10px;color:#f5d890;margin-bottom:10px}
+.top h1{font-family:Palatino,'Book Antiqua',serif;font-size:20px;flex:1}
+.top a{color:#c8a060;font-size:13px;text-decoration:none;border:1px solid #6a4a1a;border-radius:8px;padding:6px 10px}
+textarea{width:100%;min-height:42vh;border:none;border-radius:14px;padding:14px;font-size:18px;line-height:1.45;
+  background:#fdf8ef;color:#2a1a00;outline:none;resize:vertical;font-family:inherit}
+.row{display:flex;gap:10px;margin-top:10px}
+button{font-family:inherit;border:none;border-radius:12px;font-weight:700;cursor:pointer}
+#save{flex:1;padding:16px;font-size:18px;color:#fff;background:linear-gradient(135deg,#c8860a,#a06010)}
+#save:disabled{opacity:.5}
+#status{color:#c8f0c8;font-size:13px;min-height:18px;margin-top:8px}
+.hint{color:#a08860;font-size:12px;margin-top:4px}
+.list{margin-top:14px}
+.list h2{color:#c8a060;font-size:12px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
+.item{background:rgba(253,248,239,.08);color:#f0e4c8;border-radius:10px;padding:9px 11px;margin-bottom:6px;font-size:14px;line-height:1.35}
+.item small{display:block;color:#a08860;font-size:11px;margin-top:3px}
+.pin{display:none;flex-direction:column;align-items:center;gap:12px;margin-top:18vh;color:#f5d890}
+.pin input{width:200px;padding:14px;font-size:24px;text-align:center;letter-spacing:8px;border-radius:12px;border:none}
+.pin button{width:200px;padding:13px;font-size:16px;background:#1a7a4a;color:#fff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><h1>✍️ RK Note</h1><a id="full" href="/">Open tracker →</a></div>
+
+  <div id="pinBox" class="pin">
+    <div>🔒 Enter your PIN</div>
+    <input id="pin" type="password" inputmode="numeric" placeholder="••••"/>
+    <button id="pinGo">Unlock</button>
+    <div id="pinErr" style="color:#f88;font-size:13px"></div>
+  </div>
+
+  <div id="main">
+    <textarea id="txt" placeholder="Jot it down… (tap 🎤 on the keyboard to speak)" autofocus></textarea>
+    <div class="row"><button id="save">Save to tracker</button></div>
+    <div id="status"></div>
+    <div class="hint">Saves instantly on this phone, then syncs. Works offline.</div>
+    <div class="list"><h2>Recent notes</h2><div id="recent"></div></div>
+  </div>
+</div>
+<script>
+(function(){
+  var Q=new URLSearchParams(location.search);
+  var USER=Q.get("user")||"main";
+  var QUEUE="rk_note_queue_"+USER, RECENT="rk_note_recent_"+USER, PINOK="rkpin_ok_"+USER;
+  var $=function(id){return document.getElementById(id);};
+  $("full").href="/"+(USER!=="main"?"?user="+encodeURIComponent(USER):"");
+
+  function get(k,d){try{return JSON.parse(localStorage.getItem(k))||d;}catch(e){return d;}}
+  function put(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+  function genId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+  function localDate(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+  function api(action,data){
+    return fetch("/.netlify/functions/db",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(Object.assign({action:action,user:USER},data||{}))}).then(function(r){
+        if(!r.ok) throw new Error("HTTP "+r.status); return r.json();});
+  }
+  function status(t){$("status").textContent=t;}
+
+  function render(){
+    var r=get(RECENT,[]), q=get(QUEUE,[]), pend={};
+    q.forEach(function(e){pend[e.id]=1;});
+    $("recent").innerHTML=r.slice(0,10).map(function(e){
+      var t=new Date(e.createdAt).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
+      return '<div class="item">'+esc(e.notes).slice(0,240)+'<small>'+t+' · '+(pend[e.id]?'⏳ waiting to sync':'✅ in tracker')+'</small></div>';
+    }).join("")||'<div class="hint">Nothing yet.</div>';
+  }
+  function esc(s){return String(s||"").replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+
+  var flushing=false;
+  function flush(){
+    if(flushing) return; var q=get(QUEUE,[]); if(!q.length){render();return;}
+    flushing=true;
+    var e=q[0];
+    api("save",{entry:e}).then(function(r){
+      if(r&&r.error) throw new Error(r.error);
+      var q2=get(QUEUE,[]).filter(function(x){return x.id!==e.id;}); put(QUEUE,q2);
+      flushing=false; status("✅ Saved to tracker"); render(); flush();
+    }).catch(function(){ flushing=false; status("📱 Saved on phone · will sync when online"); render(); });
+  }
+
+  function save(text){
+    text=String(text||"").trim(); if(!text) return;
+    var first=text.split("\n")[0];
+    var e={id:genId(),title:first.length>60?first.slice(0,57)+"…":first,date:localDate(),category:"",
+      tags:["Quick Note"],notes:text,createdAt:new Date().toISOString()};
+    var q=get(QUEUE,[]); q.push(e); put(QUEUE,q);
+    var r=get(RECENT,[]); r.unshift(e); put(RECENT,r.slice(0,30));
+    // Same browser as the tracker? Put it straight into its local list too.
+    var ck="rk_cache_v2_"+USER, c=get(ck,null);
+    if(Array.isArray(c)){c.unshift(e);put(ck,c);}
+    $("txt").value=""; $("txt").focus(); status("📱 Saved · syncing…"); render(); flush();
+  }
+
+  $("save").onclick=function(){save($("txt").value);};
+  $("txt").addEventListener("keydown",function(ev){if(ev.key==="Enter"&&(ev.metaKey||ev.ctrlKey)){ev.preventDefault();save($("txt").value);}});
+  window.addEventListener("online",flush);
+  document.addEventListener("visibilitychange",function(){if(!document.hidden){flush();$("txt").focus();}});
+
+  function start(){
+    $("pinBox").style.display="none"; $("main").style.display="block";
+    render(); flush();
+    var t=Q.get("t");
+    if(t){ history.replaceState({},"",location.pathname+(USER!=="main"?"?user="+encodeURIComponent(USER):""));
+      if(Q.has("auto")) save(t); else $("txt").value=t; }
+    $("txt").focus();
+  }
+
+  // Same PIN as the tracker, asked once per device.
+  function hash(pin){
+    try{return crypto.subtle.digest("SHA-256",new TextEncoder().encode("rkpin:"+pin)).then(function(b){
+      return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0");}).join("");});}
+    catch(e){return Promise.resolve("plain:"+pin);}
+  }
+  if(localStorage.getItem(PINOK)==="1"){ start(); }
+  else{
+    $("main").style.display="none";
+    api("getPortfolio",{key:"user_pins",user:"main"}).then(function(r){
+      var map=(r&&r.data)||{};
+      if(!map[USER]){ start(); return; }
+      $("pinBox").style.display="flex"; $("pin").focus();
+      var go=function(){ hash($("pin").value.trim()).then(function(h){
+        if(h===map[USER]){localStorage.setItem(PINOK,"1");start();} else $("pinErr").textContent="Wrong PIN";});};
+      $("pinGo").onclick=go;
+      $("pin").addEventListener("keydown",function(e){if(e.key==="Enter")go();});
+    }).catch(function(){ start(); });
+  }
+})();
+</script>
+</body>
+</html>
