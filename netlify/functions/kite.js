@@ -10,8 +10,10 @@ exports.handler = async (event) => {
   };
   if (event.httpMethod === "OPTIONS") return {statusCode:200, headers:h, body:""};
 
-  const API_KEY    = process.env.KITE_API_KEY;
-  const API_SECRET = process.env.KITE_API_SECRET;
+  // Trim: a stray space/newline pasted into Netlify env silently breaks the
+  // checksum and Kite replies "Invalid `checksum`".
+  const API_KEY    = String(process.env.KITE_API_KEY || "").trim();
+  const API_SECRET = String(process.env.KITE_API_SECRET || "").trim();
 
   function kiteGet(path, token) {
     return new Promise(function(resolve, reject) {
@@ -60,7 +62,8 @@ exports.handler = async (event) => {
 
   try {
     var body = JSON.parse(event.body || "{}");
-    var action = body.action || "";
+    var qsp = event.queryStringParameters || {};
+    var action = body.action || (qsp.action === "check" ? "check" : "");
 
     // Generate login URL for user to authenticate
     if (action === "loginUrl") {
@@ -70,7 +73,11 @@ exports.handler = async (event) => {
 
     // Exchange request_token for access_token
     if (action === "getToken") {
-      var reqToken = body.request_token;
+      if (!API_KEY || !API_SECRET) {
+        return {statusCode:200, headers:h, body:JSON.stringify({status:"error",
+          message:"KITE_API_KEY or KITE_API_SECRET is missing in Netlify (check it is available to Functions)."})};
+      }
+      var reqToken = String(body.request_token || "").trim();
       var checksum = crypto.createHash("sha256")
         .update(API_KEY + reqToken + API_SECRET)
         .digest("hex");
@@ -80,7 +87,21 @@ exports.handler = async (event) => {
         checksum: checksum
       });
       var d = JSON.parse(raw);
+      if (d && d.status === "error" && /checksum/i.test(d.message || "")) {
+        d.message = "Invalid checksum — the KITE_API_SECRET in Netlify does not match the API key's app. " +
+          "Copy the API secret again from developers.kite.trade (same app as key ending ..." + API_KEY.slice(-4) + ") into Netlify, then redeploy.";
+      }
       return {statusCode:200, headers:h, body:JSON.stringify(d)};
+    }
+
+    // Safe self-check: never returns the secret, only shape info.
+    if (action === "check") {
+      var rawK = process.env.KITE_API_KEY || "", rawS = process.env.KITE_API_SECRET || "";
+      return {statusCode:200, headers:h, body:JSON.stringify({
+        key_set: !!rawK, key_len: API_KEY.length, key_tail: API_KEY.slice(-4), key_had_spaces: rawK !== API_KEY,
+        secret_set: !!rawS, secret_len: API_SECRET.length, secret_had_spaces: rawS !== API_SECRET,
+        expected: "key 16 chars, secret 32 chars"
+      })};
     }
 
     // Get holdings
