@@ -54,6 +54,7 @@ input,select,textarea,button{font-family:inherit;}
   .rk-navbar button{ font-size:11px !important; padding:6px 9px !important; }
   /* Remove the 6 filter dropdowns on phone (AI search covers them); keep the search box */
   .rk-filterbar select{ display:none !important; }
+  .rk-filterbar select.rk-sort{ display:inline-block !important; }
   .rk-filterbar input{ width:100% !important; }
 }
 </style>
@@ -181,6 +182,10 @@ function parseDate(d){
   d=String(d).trim();
   // Already YYYY-MM-DD
   if(/^\d{4}-\d{2}-\d{2}$/.test(d))return d;
+  // ISO with time, or YYYY-M-D without zero padding (sorted wrongly as text)
+  if(/^\d{4}-\d{2}-\d{2}T/.test(d))return d.slice(0,10);
+  const m0=d.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+  if(m0)return m0[1]+"-"+m0[2].padStart(2,"0")+"-"+m0[3].padStart(2,"0");
   // DD-MM-YYYY or DD/MM/YYYY
   const m=d.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
   if(m)return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
@@ -17764,11 +17769,17 @@ function App(){
     // number throws, which unmounted the entire app the moment anyone searched.
     if(search){const q=search.toLowerCase();return["title","notes","person","vendor","amount","taskType","chemical","account","financialType","property"].some(k=>String(e[k]==null?"":e[k]).toLowerCase().includes(q));}
     return true;
-  }).sort((a,b)=>{
-    if(sort==="date_desc")return(b.date||"").localeCompare(a.date||"");
-    if(sort==="date_asc") return(a.date||"").localeCompare(b.date||"");
-    return(a.title||"").localeCompare(b.title||"");
-  }),[entries,hideDone,filterCat,filterTag,filterPerson,filterAccount,filterVendor,filterStatus,search,sort]);
+  }).map(e=>{
+    // Dates arrive in several formats (2026-07-06, 6-7-2026, 06 Jul 2026…).
+    // Comparing them as raw text put July above August. Normalise first, and
+    // break ties within a day by when the entry was created.
+    const d=parseDate(e.date)||String(e.createdAt||"").slice(0,10);
+    return {e,k:d+"|"+String(e.createdAt||"")};
+  }).sort((x,y)=>{
+    if(sort==="date_desc")return y.k.localeCompare(x.k);
+    if(sort==="date_asc") return x.k.localeCompare(y.k);
+    return(x.e.title||"").localeCompare(y.e.title||"");
+  }).map(x=>x.e),[entries,hideDone,filterCat,filterTag,filterPerson,filterAccount,filterVendor,filterStatus,search,sort]);
 
   const overdueN=entries.filter(e=>reminderActive(e)&&!e.tags?.includes("Done")).length;
   const superN=entries.filter(e=>e.tags?.includes("Super Pending")).length;
@@ -17993,7 +18004,7 @@ function App(){
         <select value={filterVendor} onChange={e=>setFilterVendor(e.target.value)} style={fSel}><option value="" style={{background:"#3a2000"}}>All Vendors</option>{allVendors.map(v=><option key={v} value={v} style={{background:"#3a2000"}}>{v}</option>)}</select>
         <select value={filterAccount} onChange={e=>setFilterAccount(e.target.value)} style={fSel}><option value="" style={{background:"#3a2000"}}>All Accounts</option>{allAccounts.map(a=><option key={a} value={a} style={{background:"#3a2000"}}>{a}</option>)}</select>
         <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={fSel}><option value="" style={{background:"#3a2000"}}>All Status</option>{dropdowns.paymentStatuses.map(s=><option key={s} value={s} style={{background:"#3a2000"}}>{s}</option>)}</select>
-        <select value={sort} onChange={e=>setSort(e.target.value)} style={fSel}><option value="date_desc" style={{background:"#3a2000"}}>Newest</option><option value="date_asc" style={{background:"#3a2000"}}>Oldest</option><option value="title" style={{background:"#3a2000"}}>A–Z</option></select>
+        <select className="rk-sort" value={sort} onChange={e=>setSort(e.target.value)} style={fSel}><option value="date_desc" style={{background:"#3a2000"}}>Newest</option><option value="date_asc" style={{background:"#3a2000"}}>Oldest</option><option value="title" style={{background:"#3a2000"}}>A–Z</option></select>
         {(filterCat!=="All"||filterTag||filterPerson||filterAccount||filterVendor||filterStatus||search)&&<button onClick={()=>{setFilterCat("All");setFilterTag("");setFilterPerson("");setFilterAccount("");setFilterVendor("");setFilterStatus("");setSearch("");}} style={{...fSel,background:"rgba(255,100,100,.2)",color:"#ffb0b0",border:"1px solid #ff8888",fontSize:11}}>✕ Clear</button>}
       </div>
     </div>
