@@ -98,7 +98,7 @@ button{font-family:inherit;border:none;border-radius:12px;font-weight:700;cursor
   function save(text){
     text=String(text||"").trim(); if(!text) return;
     var first=text.split("\n")[0];
-    var e={id:genId(),title:first.length>60?first.slice(0,57)+"…":first,date:localDate(),category:"",
+    var e={id:genId(),title:first.length>60?first.slice(0,57)+"…":first,date:localDate(),category:"Quick Notes",
       tags:["Quick Note"],notes:text,createdAt:new Date().toISOString()};
     var q=get(QUEUE,[]); q.push(e); put(QUEUE,q);
     var r=get(RECENT,[]); r.unshift(e); put(RECENT,r.slice(0,30));

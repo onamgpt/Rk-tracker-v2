@@ -152,7 +152,7 @@ const DEFAULT_DD={
   properties:["Greenbay","846","846 1st Floor","N104","Bommasandra","BDA","Coonoor trip"],
   paymentStatuses:["Payment Pending","Asked Payment","Partial Payment","Paid","Overdue"],
   chemicals:["Sandal","Rose","Jasmine","Mogra","Vetiver / Khus","Lavender","Patchouli","Cedarwood","Frankincense","Myrrh","Camphor","Benzyl Benzoate","DOP","DEP","Galaxolide","Iso E Super","Hedione","Coumarin","Musk Ketone","Eugenol","Linalool","Geraniol","Vanillin","Jigat / Binder","Charcoal Powder","Wood Powder","Bamboo Sticks","Masala Mix","Jasmine ASP"],
-  categories:["Business - Purchase","Sales - Order","Sales - Payment","Sales - Visit","Sales - Expense","Sales - Complaint","Finance","Health","Family","Personal","Compliance","Property","Digital","Reminders","Intelligence","Problem"]
+  categories:["Business - Purchase","Sales - Order","Sales - Payment","Sales - Visit","Sales - Expense","Sales - Complaint","Finance","Health","Family","Personal","Compliance","Property","Digital","Reminders","Intelligence","Problem","Quick Notes"]
 };
 
 const STATUS_TAGS=["Pending","In Progress","Done","Urgent","Super Pending","Waiting","Follow-up","Payment Due","Paid","Overdue","Review","GOVT","Recurring","AI Flagged"];
@@ -339,6 +339,9 @@ function loadDD(){
       localStorage.setItem(LS_DD,JSON.stringify(saved));
       localStorage.setItem(MIGRATION_KEY,"1");
     }
+    // Quick Notes (from /note and the Siri shortcut) get their own category,
+    // kept apart from sales, purchase and every business view.
+    if(Array.isArray(saved.categories)&&saved.categories.indexOf("Quick Notes")===-1) saved.categories=saved.categories.concat(["Quick Notes"]);
     return Object.assign({},DEFAULT_DD,saved);
   }catch(e){return DEFAULT_DD;}
 }
