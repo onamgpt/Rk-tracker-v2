@@ -17367,6 +17367,30 @@ function AIMTrading({ onClose }) {
   </div>;
 }
 
+// ── LIST ARRANGEMENT HELPERS ─────────────────────────────────────────────────
+const VIEW_CHIPS=[{k:"all",l:"All"},{k:"business",l:"🏢 Business"},{k:"notes",l:"✍️ Quick Notes"},{k:"reminders",l:"⏰ Reminders"},{k:"personal",l:"🏡 Personal"},{k:"money",l:"₹ Money"}];
+function inView(e,v){
+  const c=String(e.category||"");
+  if(v==="notes") return c==="Quick Notes";
+  if(v==="reminders") return c==="Reminders"||!!e.reminder;
+  if(v==="personal") return /^(Personal|Family|Health)/.test(c);
+  if(v==="money") return /^(Finance|Sales - Payment)/.test(c)||!!e.amount||!!e.paymentStatus;
+  if(v==="business") return !!c&&!/^(Personal|Family|Health|Quick Notes|Reminders)/.test(c);
+  return true;
+}
+function dayLabel(iso){
+  if(!iso) return "No date";
+  const pad=n=>String(n).padStart(2,"0"), d0=new Date();
+  const today=d0.getFullYear()+"-"+pad(d0.getMonth()+1)+"-"+pad(d0.getDate());
+  const diff=Math.round((new Date(today+"T00:00:00")-new Date(iso+"T00:00:00"))/864e5);
+  if(isNaN(diff)) return "No date";
+  if(diff<0) return "📅 Upcoming";
+  if(diff===0) return "Today";
+  if(diff===1) return "Yesterday";
+  if(diff<7) return "Last 7 days";
+  return new Date(iso+"T00:00:00").toLocaleDateString("en-IN",{month:"long",year:"numeric"});
+}
+
 function App(){
   if(IS_VIEW_MODE) return<ShareableView/>;
 
@@ -17465,7 +17489,14 @@ function App(){
   const [filterStatus,setFilterStatus]=useState("");
   const [hideDone,setHideDone]=useState(false);
   const [showHidden,setShowHidden]=useState(false);
-  const [sort,setSort]=useState("date_desc");
+  const [sort,setSortRaw]=useState(()=>{try{return localStorage.getItem("rk_sort")||"date_desc";}catch(e){return "date_desc";}});
+  const setSort=v=>{setSortRaw(v);try{localStorage.setItem("rk_sort",v);}catch(e){}};
+  // Quick view chips — remembered on this device
+  const [view,setViewRaw]=useState(()=>{try{return localStorage.getItem("rk_view")||"all";}catch(e){return "all";}});
+  const setView=v=>{setViewRaw(v);setRowLimit(150);try{localStorage.setItem("rk_view",v);}catch(e){}};
+  const [attnOpen,setAttnOpen]=useState(false);
+  const [doneOpen,setDoneOpen]=useState(false);
+  const [rowLimit,setRowLimit]=useState(150);
   const [selIds,setSelIds]=useState([]);
 
   useEffect(()=>{saveDD(dropdowns);},[dropdowns]);
@@ -17765,6 +17796,7 @@ function App(){
     if(filterAccount&&e.account!==filterAccount)return false;
     if(filterVendor&&e.vendor!==filterVendor)return false;
     if(filterStatus&&e.paymentStatus!==filterStatus)return false;
+    if(view!=="all"&&!inView(e,view))return false;
     // Coerce to string first. "amount" is numeric, and calling toLowerCase on a
     // number throws, which unmounted the entire app the moment anyone searched.
     if(search){const q=search.toLowerCase();return["title","notes","person","vendor","amount","taskType","chemical","account","financialType","property"].some(k=>String(e[k]==null?"":e[k]).toLowerCase().includes(q));}
@@ -17773,13 +17805,49 @@ function App(){
     // Dates arrive in several formats (2026-07-06, 6-7-2026, 06 Jul 2026…).
     // Comparing them as raw text put July above August. Normalise first, and
     // break ties within a day by when the entry was created.
+    if(sort==="recent"){const t=String(e.updatedAt||"")>String(e.createdAt||"")?String(e.updatedAt):String(e.createdAt||"");return {e,k:t};}
     const d=parseDate(e.date)||String(e.createdAt||"").slice(0,10);
     return {e,k:d+"|"+String(e.createdAt||"")};
   }).sort((x,y)=>{
-    if(sort==="date_desc")return y.k.localeCompare(x.k);
+    if(sort==="date_desc"||sort==="recent")return y.k.localeCompare(x.k);
     if(sort==="date_asc") return x.k.localeCompare(y.k);
     return(x.e.title||"").localeCompare(y.e.title||"");
-  }).map(x=>x.e),[entries,hideDone,filterCat,filterTag,filterPerson,filterAccount,filterVendor,filterStatus,search,sort]);
+  }).map(x=>x.e),[entries,hideDone,filterCat,filterTag,filterPerson,filterAccount,filterVendor,filterStatus,search,sort,view]);
+
+  // Arrange the list: Needs-attention pinned on top, date headings in the
+  // middle (Today / Yesterday / Last 7 days / Upcoming / month), Done folded
+  // away at the bottom. Rows are rendered in pages so the phone stays fast.
+  const listItems=useMemo(()=>{
+    const attn=[],main=[],done=[];
+    filtered.forEach(e=>{
+      const t=e.tags||[];
+      if(t.includes("Done")) done.push(e);
+      else if(t.includes("Super Pending")||t.includes("Urgent")||t.includes("Overdue")||reminderActive(e)) attn.push(e);
+      else main.push(e);
+    });
+    attn.sort((a,b)=>{const r=x=>(x.tags||[]).includes("Super Pending")?0:(x.tags||[]).includes("Urgent")?1:2;return r(a)-r(b);});
+    const out=[]; let n=0;
+    const push=e=>out.push({e,n:++n});
+    if(attn.length){
+      out.push({hdr:"attn",label:"⚠️ Needs attention",count:attn.length,open:attnOpen,toggle:attn.length>5?()=>setAttnOpen(o=>!o):null});
+      (attnOpen?attn:attn.slice(0,5)).forEach(push);
+      if(!attnOpen&&attn.length>5) out.push({more:"attn",label:"Show all "+attn.length+" ▾",act:()=>setAttnOpen(true)});
+    }
+    const grouped=sort!=="title";
+    const counts={}; const lab=e=>dayLabel(sort==="recent"?String(e.updatedAt||e.createdAt||"").slice(0,10):(parseDate(e.date)||String(e.createdAt||"").slice(0,10)));
+    if(grouped) main.forEach(e=>{const l=lab(e);counts[l]=(counts[l]||0)+1;});
+    let last=null;
+    main.slice(0,rowLimit).forEach(e=>{
+      if(grouped){const l=lab(e); if(l!==last){out.push({hdr:"d_"+l,label:l,count:counts[l]});last=l;}}
+      push(e);
+    });
+    if(main.length>rowLimit) out.push({more:"main",label:"Show more ("+(main.length-rowLimit)+" left) ▾",act:()=>setRowLimit(x=>x+150)});
+    if(done.length){
+      out.push({hdr:"done",label:"✅ Done",count:done.length,open:doneOpen,toggle:()=>setDoneOpen(o=>!o)});
+      if(doneOpen) done.slice(0,300).forEach(push);
+    }
+    return out;
+  },[filtered,sort,attnOpen,doneOpen,rowLimit]);
 
   const overdueN=entries.filter(e=>reminderActive(e)&&!e.tags?.includes("Done")).length;
   const superN=entries.filter(e=>e.tags?.includes("Super Pending")).length;
@@ -17996,6 +18064,9 @@ function App(){
         </div>}
         {quickParsed&&quickParsed.error&&<div style={{marginTop:10,color:"#a33",fontSize:12}}>{quickParsed.error}</div>}
       </div>}
+      <div style={{display:"flex",gap:6,overflowX:"auto",padding:"2px 0 8px",WebkitOverflowScrolling:"touch"}}>
+        {VIEW_CHIPS.map(c=><button key={c.k} onClick={()=>setView(c.k)} style={{flex:"0 0 auto",padding:"6px 13px",borderRadius:20,border:view===c.k?"1.5px solid #f5d890":"1px solid rgba(245,216,144,.35)",background:view===c.k?"#f5d890":"rgba(255,255,255,.08)",color:view===c.k?"#2a1800":"#f5e8c0",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{c.l}</button>)}
+      </div>
       <div className="rk-filterbar" style={{display:"flex",flexWrap:"wrap",gap:5}}>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search all fields…" style={{...fSel,background:"rgba(255,255,255,.1)",width:150}}/>
         <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={fSel}>{ALL_CATS.map(c=><option key={c} value={c} style={{background:"#3a2000"}}>{c}</option>)}</select>
@@ -18004,7 +18075,7 @@ function App(){
         <select value={filterVendor} onChange={e=>setFilterVendor(e.target.value)} style={fSel}><option value="" style={{background:"#3a2000"}}>All Vendors</option>{allVendors.map(v=><option key={v} value={v} style={{background:"#3a2000"}}>{v}</option>)}</select>
         <select value={filterAccount} onChange={e=>setFilterAccount(e.target.value)} style={fSel}><option value="" style={{background:"#3a2000"}}>All Accounts</option>{allAccounts.map(a=><option key={a} value={a} style={{background:"#3a2000"}}>{a}</option>)}</select>
         <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={fSel}><option value="" style={{background:"#3a2000"}}>All Status</option>{dropdowns.paymentStatuses.map(s=><option key={s} value={s} style={{background:"#3a2000"}}>{s}</option>)}</select>
-        <select className="rk-sort" value={sort} onChange={e=>setSort(e.target.value)} style={fSel}><option value="date_desc" style={{background:"#3a2000"}}>Newest</option><option value="date_asc" style={{background:"#3a2000"}}>Oldest</option><option value="title" style={{background:"#3a2000"}}>A–Z</option></select>
+        <select className="rk-sort" value={sort} onChange={e=>setSort(e.target.value)} style={fSel}><option value="date_desc" style={{background:"#3a2000"}}>Newest</option><option value="date_asc" style={{background:"#3a2000"}}>Oldest</option><option value="recent" style={{background:"#3a2000"}}>Recently added</option><option value="title" style={{background:"#3a2000"}}>A–Z</option></select>
         {(filterCat!=="All"||filterTag||filterPerson||filterAccount||filterVendor||filterStatus||search)&&<button onClick={()=>{setFilterCat("All");setFilterTag("");setFilterPerson("");setFilterAccount("");setFilterVendor("");setFilterStatus("");setSearch("");}} style={{...fSel,background:"rgba(255,100,100,.2)",color:"#ffb0b0",border:"1px solid #ff8888",fontSize:11}}>✕ Clear</button>}
       </div>
     </div>
@@ -18024,7 +18095,10 @@ function App(){
             </tr>
           </thead>
           <tbody>
-            {filtered.map((e,idx)=>{
+            {listItems.map((it)=>{
+              if(it.hdr) return <tr key={"h_"+it.hdr}><td colSpan={9} onClick={it.toggle} style={{padding:"10px 10px 6px",background:it.hdr==="attn"?"#fff1e6":it.hdr==="done"?"#eef7ee":"#f6eedc",color:it.hdr==="attn"?"#9a3a00":it.hdr==="done"?"#2a6a2a":"#6a4a10",fontSize:12,fontWeight:800,letterSpacing:.4,cursor:it.toggle?"pointer":"default",position:"sticky",left:0}}>{it.label} <span style={{fontWeight:600,opacity:.7}}>· {it.count}</span>{it.toggle&&<span style={{float:"right",fontWeight:600}}>{it.open?"Hide ▴":"Show ▾"}</span>}</td></tr>;
+              if(it.more) return <tr key={"m_"+it.more}><td colSpan={9} style={{padding:"8px 10px"}}><button onClick={it.act} style={{padding:"7px 14px",borderRadius:8,border:"1px solid #c8a060",background:"#fffaf0",color:"#8a5800",fontSize:12,fontWeight:700,cursor:"pointer"}}>{it.label}</button></td></tr>;
+              const e=it.e, idx=it.n-1;
               const ov=isOverdue(e.reminder)&&!e.tags?.includes("Done");
               const isDone=e.tags?.includes("Done");
               const isSP=e.tags?.includes("Super Pending");
