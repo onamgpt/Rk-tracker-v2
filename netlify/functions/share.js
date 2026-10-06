@@ -5,6 +5,13 @@
 // so the tracker never caches a version with missing attachments.
 // Everything lands in category "Quick Notes", away from sales/purchase views.
 const db = require("./db.js");
+const smart = require("./smartnote.js");
+function describe(r) {
+  if (r.mode === "append") return "✅ Added to: " + r.title;
+  if (r.reminder) return "⏰ Reminder set " + r.reminder.slice(0, 16).replace("T", " ") + ": " + r.title;
+  return "✅ Saved to " + r.category + ": " + r.title;
+}
+exports.describe = describe;
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
@@ -79,8 +86,13 @@ exports.handler = async (event) => {
   };
 
   if (!files.length) {
+    // Smart filing (section / reminder / add-to-entry); plain Quick Note if that fails.
+    try {
+      const r = await smart.route({ user, text });
+      if (r && r.ok) return reply(200, describe(r));
+    } catch (e) {}
     const r = JSON.parse((await db.handler({ httpMethod: "POST", body: JSON.stringify({ action: "save", user, entry }) })).body);
-    return r && r.ok ? reply(200, "✅ Saved to tracker") : reply(500, "❌ Could not save: " + JSON.stringify(r).slice(0, 200));
+    return r && r.ok ? reply(200, "✅ Saved to Quick Notes") : reply(500, "❌ Could not save: " + JSON.stringify(r).slice(0, 200));
   }
 
   // Park files, then hand off. The entry itself is saved by the background job.

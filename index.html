@@ -280,6 +280,9 @@ function sanitizeEntry(e){
   out.remindDays=(e.remindDays===null||e.remindDays===undefined)?"":String(e.remindDays);
   out.remindDone=!!e.remindDone;
   if(e._shared)out._shared=true;
+  if(e.serverEdit)out.serverEdit=String(e.serverEdit);
+  if(e.linkLabel)out.linkLabel=String(e.linkLabel);
+  if(e.updatedAt)out.updatedAt=String(e.updatedAt);
   if(!out.title){
     // Never discard a real entry just because Title cell is empty/shifted — synthesize a label.
     var noteFirst = out.notes ? String(out.notes).split(/[\n|]/)[0].trim().slice(0,60) : "";
@@ -17546,6 +17549,15 @@ function App(){
         const _tombs=_recovery?[]:loadTombstones();
         const toAdd=r.entries.filter(e=>e&&e.id&&!localIds.has(e.id)&&_tombs.indexOf(e.id)===-1).map(sanitizeEntry).filter(Boolean);
         let base = toAdd.length>0 ? cached.concat(toAdd) : cached.slice();
+        // c) Entries changed from Quick Note / Siri / Share (a note appended,
+        //    category moved, undo) carry serverEdit. Take that newer version,
+        //    keeping any photos that only exist on this phone.
+        const _srv={};r.entries.forEach(e=>{if(e&&e.id&&e.serverEdit)_srv[e.id]=e;});
+        base=base.map(l=>{const s=_srv[l.id]; if(!s||String(s.serverEdit)<=String(l.serverEdit||""))return l;
+          const se=sanitizeEntry(s); if(!se)return l;
+          const httpSet=new Set((se.attachments||[]).map(a=>a&&a.data));
+          const localOnly=(l.attachments||[]).filter(a=>a&&a.data&&String(a.data).indexOf("http")!==0&&!httpSet.has(a.data));
+          return Object.assign({},se,{attachments:(se.attachments||[]).concat(localOnly)});});
         base = await _mergeShared(base);
         base.sort((a,b)=>String(b.createdAt||b.date||"").localeCompare(String(a.createdAt||a.date||"")));
         setEntries(base);saveCache(base);

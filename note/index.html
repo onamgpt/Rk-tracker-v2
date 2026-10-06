@@ -30,6 +30,16 @@ button{font-family:inherit;border:none;border-radius:12px;font-weight:700;cursor
 .list h2{color:#c8a060;font-size:12px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
 .item{background:rgba(253,248,239,.08);color:#f0e4c8;border-radius:10px;padding:9px 11px;margin-bottom:6px;font-size:14px;line-height:1.35}
 .item small{display:block;color:#a08860;font-size:11px;margin-top:3px}
+.tools{display:flex;gap:8px;margin-top:10px}
+.tools label{flex:1;text-align:center;padding:12px 6px;border-radius:12px;background:rgba(253,248,239,.1);color:#f5d890;font-size:14px;font-weight:700;cursor:pointer;border:1px solid rgba(245,216,144,.25)}
+.tools input{display:none}
+#files{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.f{position:relative;width:64px;height:64px;border-radius:10px;overflow:hidden;background:#fdf8ef;display:flex;align-items:center;justify-content:center;font-size:11px;color:#6a4a10;text-align:center;padding:3px}
+.f img{width:100%;height:100%;object-fit:cover}
+.f b{position:absolute;top:2px;right:2px;background:#000a;color:#fff;border-radius:50%;width:20px;height:20px;line-height:20px;font-size:12px;text-align:center;cursor:pointer}
+#result{display:none;margin-top:10px;background:#1a3a1a;color:#d8f5d8;border-radius:12px;padding:11px 12px;font-size:14px}
+#result .acts{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+#result button,#result select{padding:8px 12px;border-radius:9px;font-size:13px;border:1px solid #6a9a6a;background:#244a24;color:#e8ffe8;font-weight:600}
 .pin{display:none;flex-direction:column;align-items:center;gap:12px;margin-top:18vh;color:#f5d890}
 .pin input{width:200px;padding:14px;font-size:24px;text-align:center;letter-spacing:8px;border-radius:12px;border:none}
 .pin button{width:200px;padding:13px;font-size:16px;background:#1a7a4a;color:#fff}
@@ -48,9 +58,16 @@ button{font-family:inherit;border:none;border-radius:12px;font-weight:700;cursor
 
   <div id="main">
     <textarea id="txt" placeholder="Jot it down… (tap 🎤 on the keyboard to speak)" autofocus></textarea>
+    <div class="tools">
+      <label>📷 Photo<input id="inCam" type="file" accept="image/*" capture="environment"></label>
+      <label>📄 Scan<input id="inScan" type="file" accept="image/*" capture="environment"></label>
+      <label>📎 Files<input id="inFile" type="file" multiple accept="image/*,application/pdf,*/*"></label>
+    </div>
+    <div id="files"></div>
     <div class="row"><button id="save">Save to tracker</button></div>
+    <div id="result"></div>
     <div id="status"></div>
-    <div class="hint">Saves instantly on this phone, then syncs. Works offline.</div>
+    <div class="hint">Say where it goes: "health note…", "remind me Friday 11am…", "note for the Avadi order…". Anything else goes to Quick Notes. 📄 Scan reads the text from a bill or page.</div>
     <div class="list"><h2>Recent notes</h2><div id="recent"></div></div>
   </div>
 </div>
@@ -73,39 +90,135 @@ button{font-family:inherit;border:none;border-radius:12px;font-weight:700;cursor
   }
   function status(t){$("status").textContent=t;}
 
-  function render(){
-    var r=get(RECENT,[]), q=get(QUEUE,[]), pend={};
-    q.forEach(function(e){pend[e.id]=1;});
-    $("recent").innerHTML=r.slice(0,10).map(function(e){
-      var t=new Date(e.createdAt).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
-      return '<div class="item">'+esc(e.notes).slice(0,240)+'<small>'+t+' · '+(pend[e.id]?'⏳ waiting to sync':'✅ in tracker')+'</small></div>';
-    }).join("")||'<div class="hint">Nothing yet.</div>';
-  }
   function esc(s){return String(s||"").replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
 
+  var CATS=["Quick Notes","Health","Personal","Family","Reminders","Finance","Property","Compliance","Intelligence","Problem","Digital","Business - Purchase","Sales - Order","Sales - Payment","Sales - Visit","Sales - Expense","Sales - Complaint"];
+  var pending=[];   // {name,type,data(dataURL),thumb,ocr}
+  function smart(b){
+    return fetch("/.netlify/functions/smartnote",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(Object.assign({user:USER},b))}).then(function(r){return r.json();});
+  }
+  // Same photo handling as the tracker: shrink to 1200px JPEG, upload to Drive.
+  function readFile(f,max){
+    return new Promise(function(res,rej){
+      var r=new FileReader();
+      r.onload=function(e){
+        if(!/^image\//.test(f.type)||/heic|heif/i.test(f.type)&&!window.createImageBitmap){res({name:f.name,type:f.type||"application/octet-stream",data:e.target.result});return;}
+        var img=new Image();
+        img.onload=function(){
+          var M=max||1200,w=img.width,h=img.height;
+          if(w>M||h>M){if(w>h){h=Math.round(h*M/w);w=M;}else{w=Math.round(w*M/h);h=M;}}
+          var c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(img,0,0,w,h);
+          var name=(f.name||"photo").replace(/\.(heic|heif|png|webp)$/i,".jpg");
+          res({name:/\.jpe?g$/i.test(name)?name:name+".jpg",type:"image/jpeg",data:c.toDataURL("image/jpeg",.85),img:true});
+        };
+        img.onerror=function(){res({name:f.name,type:f.type,data:e.target.result});};
+        img.src=e.target.result;
+      };
+      r.onerror=rej; r.readAsDataURL(f);
+    });
+  }
+  function drawFiles(){
+    $("files").innerHTML=pending.map(function(p,i){
+      return '<div class="f">'+(p.img?'<img src="'+p.data+'">':esc(p.name).slice(0,28))+'<b data-i="'+i+'">✕</b></div>';
+    }).join("");
+    Array.prototype.forEach.call($("files").querySelectorAll("b"),function(x){x.onclick=function(){pending.splice(+x.dataset.i,1);drawFiles();};});
+  }
+  function addFiles(list,scan){
+    Array.prototype.forEach.call(list||[],function(f){
+      readFile(f,scan?1600:1200).then(function(p){
+        pending.push(p); drawFiles();
+        if(scan&&p.img){
+          status("🔍 Reading the text…");
+          smart({action:"ocr",imageBase64:p.data.split(",")[1],imageType:"image/jpeg"}).then(function(r){
+            var t=(r&&r.text)||"";
+            if(t){var v=$("txt").value.trim();$("txt").value=(v?v+"\n\n":"")+t;status("🔍 Text added — check it, then Save");}
+            else status("Couldn't read text from that photo — it's still attached.");
+          }).catch(function(){status("Couldn't read text right now — photo is still attached.");});
+        }
+      });
+    });
+  }
+  $("inCam").onchange=function(e){addFiles(e.target.files,false);e.target.value="";};
+  $("inScan").onchange=function(e){addFiles(e.target.files,true);e.target.value="";};
+  $("inFile").onchange=function(e){addFiles(e.target.files,false);e.target.value="";};
+
+  function upload(p){
+    return api("uploadFile",{file:{name:p.name,type:p.type,data:p.data}}).then(function(r){
+      var u=r&&(r.url||r.link||(r.data&&String(r.data).indexOf("http")===0?r.data:null));
+      if(!u) throw new Error("upload failed");
+      return {name:p.name,type:"drive",data:u,driveId:(r.id||r.driveId||"")};
+    });
+  }
+  function label(r){
+    if(r.mode==="append") return "✅ Added to: <b>"+esc(r.title)+"</b>";
+    if(r.reminder) return "⏰ Reminder "+esc(r.reminder.slice(0,16).replace("T"," "))+" — <b>"+esc(r.title)+"</b>";
+    return "✅ Saved to <b>"+esc(r.category)+"</b>: "+esc(r.title);
+  }
+  function showResult(r){
+    var box=$("result"); box.style.display="block";
+    box.innerHTML=label(r)+'<div class="acts"><button id="undo">↩︎ Undo</button>'+
+      (r.mode==="new"?'<select id="mv"><option value="">Move to…</option>'+CATS.filter(function(c){return c!==r.category;}).map(function(c){return '<option>'+c+'</option>';}).join("")+'</select>':'')+'</div>';
+    $("undo").onclick=function(){
+      $("undo").disabled=true;
+      smart({action:"undo",undo:r.undo}).then(function(x){box.innerHTML=x&&x.ok?"↩︎ Undone":"Couldn't undo — fix it in the tracker";markRecent(r.id,"↩︎ undone");});
+    };
+    if($("mv")) $("mv").onchange=function(){
+      var c=this.value; if(!c) return;
+      smart({action:"move",id:r.id,category:c}).then(function(x){
+        if(x&&x.ok){r.category=c;showResult(r);markRecent(r.id,"→ "+c);} else box.innerHTML+="<div>Couldn't move</div>";
+      });
+    };
+  }
+  function markRecent(id,txt){var rc=get(RECENT,[]);rc.forEach(function(e){if(e.id===id)e.where=txt;});put(RECENT,rc);render();}
+
+  function render(){
+    var r=get(RECENT,[]), q=get(QUEUE,[]);
+    $("recent").innerHTML=q.map(function(e){return '<div class="item">'+esc(e.text||e.notes||"").slice(0,200)+'<small>⏳ waiting for internet</small></div>';}).join("")+
+      r.slice(0,10).map(function(e){
+        var t=new Date(e.at||e.createdAt).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
+        return '<div class="item">'+esc(e.text||e.notes||"").slice(0,200)+(e.files?" · 📎"+e.files:"")+'<small>'+t+' · '+esc(e.where||"Quick Notes")+'</small></div>';
+      }).join("")||'<div class="hint">Nothing yet.</div>';
+  }
+
+  // Text-only notes wait offline; anything with photos needs a connection.
   var flushing=false;
   function flush(){
     if(flushing) return; var q=get(QUEUE,[]); if(!q.length){render();return;}
-    flushing=true;
-    var e=q[0];
-    api("save",{entry:e}).then(function(r){
-      if(r&&r.error) throw new Error(r.error);
-      var q2=get(QUEUE,[]).filter(function(x){return x.id!==e.id;}); put(QUEUE,q2);
-      flushing=false; status("✅ Saved to tracker"); render(); flush();
-    }).catch(function(){ flushing=false; status("📱 Saved on phone · will sync when online"); render(); });
+    flushing=true; var item=q[0];
+    var key=item.qid||item.id;
+    send(item.text||item.notes||"",[]).then(function(){
+      put(QUEUE,get(QUEUE,[]).filter(function(x){return (x.qid||x.id)!==key;})); flushing=false; render(); flush();
+    }).catch(function(){flushing=false;render();});
   }
-
+  function send(text,files){
+    return Promise.all(files.map(upload)).then(function(atts){
+      return smart({action:"route",text:text,attachments:atts}).then(function(r){
+        if(r&&r.ok) return r;
+        // AI unavailable → plain Quick Note, as before
+        var first=(text||(atts[0]&&atts[0].name)||"Quick note").split("\n")[0];
+        var e={id:genId(),title:first.slice(0,60),date:localDate(),category:"Quick Notes",tags:["Quick Note"],notes:text,attachments:atts,createdAt:new Date().toISOString()};
+        if(atts[0]){e.link=atts[0].data;e.linkLabel="📎 Attachment";}
+        return api("save",{entry:e}).then(function(s){if(s&&s.error)throw new Error(s.error);return {ok:true,mode:"new",id:e.id,title:e.title,category:"Quick Notes",undo:{type:"delete",id:e.id}};});
+      }).then(function(r){
+        var rc=get(RECENT,[]); rc.unshift({id:r.id,text:text,files:atts.length,at:new Date().toISOString(),where:r.mode==="append"?"added to "+r.title:(r.reminder?"⏰ "+r.reminder.slice(0,16).replace("T"," "):r.category)});
+        put(RECENT,rc.slice(0,30)); render(); return r;
+      });
+    });
+  }
   function save(text){
-    text=String(text||"").trim(); if(!text) return;
-    var first=text.split("\n")[0];
-    var e={id:genId(),title:first.length>60?first.slice(0,57)+"…":first,date:localDate(),category:"Quick Notes",
-      tags:["Quick Note"],notes:text,createdAt:new Date().toISOString()};
-    var q=get(QUEUE,[]); q.push(e); put(QUEUE,q);
-    var r=get(RECENT,[]); r.unshift(e); put(RECENT,r.slice(0,30));
-    // Same browser as the tracker? Put it straight into its local list too.
-    var ck="rk_cache_v2_"+USER, c=get(ck,null);
-    if(Array.isArray(c)){c.unshift(e);put(ck,c);}
-    $("txt").value=""; $("txt").focus(); status("📱 Saved · syncing…"); render(); flush();
+    text=String(text||"").trim(); if(!text&&!pending.length) return;
+    var files=pending.slice();
+    $("save").disabled=true; $("result").style.display="none";
+    status(files.length?"⬆️ Uploading "+files.length+" file"+(files.length>1?"s":"")+"…":"💭 Filing it…");
+    send(text,files).then(function(r){
+      pending=[]; drawFiles(); $("txt").value=""; status(""); showResult(r); $("save").disabled=false; $("txt").focus();
+    }).catch(function(){
+      $("save").disabled=false;
+      if(files.length){ status("📶 No connection — photos are kept here. Tap Save again when online."); return; }
+      var q=get(QUEUE,[]); q.push({qid:genId(),text:text}); put(QUEUE,q);
+      $("txt").value=""; status("📱 Saved on phone · will file it when online"); render();
+    });
   }
 
   $("save").onclick=function(){save($("txt").value);};
