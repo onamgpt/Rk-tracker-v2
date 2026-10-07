@@ -6,19 +6,36 @@ const travel = require("./travel.js");
 const call = async (b) => JSON.parse((await db.handler({ httpMethod: "POST", body: JSON.stringify(b) })).body || "{}");
 const kvSet = (key, data) => call({ action: "savePortfolio", user: "main", key, data });
 
+// The plan is returned through a forced tool call, so the API hands back an
+// already-parsed object — free text JSON broke on a stray quote or comma.
+const PLAN_TOOL = { name: "save_plan", description: "Save the finished trip plan.",
+  input_schema: { type: "object", properties: {
+    name: { type: "string" }, start: { type: "string" }, pax: { type: "number" }, homeCity: { type: "string" }, homeAirport: { type: "string" },
+    summary: { type: "string" }, sectors: { type: "array", items: { type: "object" } }, flights: { type: "array", items: { type: "object" } },
+    flightAdvice: { type: "string" }, hotels: { type: "array", items: { type: "object" } }, days: { type: "array", items: { type: "object" } },
+    budget: { type: "array", items: { type: "object" } }, docs: { type: "array", items: { type: "object" } }, fx: { type: "object" } },
+    required: ["name", "start", "pax", "sectors", "flights", "hotels", "days", "budget"] } };
+
 function ask(model, system, prompt, maxTokens) {
-  const body = JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: prompt }] });
+  const body = JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: prompt }],
+    tools: [PLAN_TOOL], tool_choice: { type: "tool", name: "save_plan" } });
   return new Promise((resolve, reject) => {
     const req = https.request({ hostname: "api.anthropic.com", path: "/v1/messages", method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY || "", "anthropic-version": "2023-06-01", "Content-Length": Buffer.byteLength(body) } },
-      res => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { const j = JSON.parse(d); if (j.error) return reject(new Error(j.error.message)); resolve((j.content || []).map(x => x.text || "").join("")); } catch (e) { reject(e); } }); });
+      res => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { const j = JSON.parse(d); if (j.error) return reject(new Error(j.error.message)); const tu = (j.content || []).find(x => x.type === "tool_use");
+          if (tu && tu.input && typeof tu.input === "object") return resolve(tu.input);
+          resolve((j.content || []).map(x => x.text || "").join("")); } catch (e) { reject(e); } }); });
     req.on("error", reject); req.setTimeout(240000, () => { req.destroy(); reject(new Error("timeout")); });
     req.write(body); req.end();
   });
 }
-function parse(t) { const s = String(t || "").replace(/```json|```/g, ""); return JSON.parse(s.slice(s.indexOf("{"), s.lastIndexOf("}") + 1)); }
+function parse(t) {
+  if (t && typeof t === "object") return t;
+  const s = String(t || "").replace(/```json|```/g, "");
+  return JSON.parse(s.slice(s.indexOf("{"), s.lastIndexOf("}") + 1));
+}
 
-const SYSTEM = "You are an expert family travel planner for an Indian family based in Bangalore. You know real hotels, real airports (IATA codes), real attractions, visa rules for Indian passport holders, and realistic 2026-27 prices. Reply with ONLY one JSON object.";
+const SYSTEM = "You are an expert family travel planner for an Indian family based in Bangalore. You know real hotels, real airports (IATA codes), real attractions, visa rules for Indian passport holders, and realistic 2026-27 prices. Save the plan with the save_plan tool.";
 
 function prompt(brief, profile) {
   const today = new Date().toISOString().slice(0, 10);
@@ -28,7 +45,7 @@ Travellers and rules (follow strictly): ${JSON.stringify(profile || {})}
 
 Plan the trip. Rules of thumb: gentle pace, one main thing per day; hotels 4-star, central, on flat ground, walkable to sights; compare hotels on TOTAL cost including taxis; avoid routings that need extra transit visas for Indian passports; keep flights short; vegetarian food notes. Give 3 real hotel options per stay (mark one "pick": true), and flag any option that breaks a rule. Prices are estimates.
 
-Return JSON exactly in this shape:
+Call save_plan with exactly this shape:
 {"name":"trip name","start":"YYYY-MM-DD (departure day from home)","pax":number,"homeCity":"Bengaluru","homeAirport":"BLR",
 "summary":"2 sentences",
 "sectors":[{"city":"","nights":n,"mode":"flight|train|car|bus|ferry","airport":"IATA or empty"}],
@@ -47,10 +64,12 @@ exports.handler = async (event) => {
   if (!b.job) return;
   const key = "travel_job_" + b.job;
   try {
-    let text;
-    try { text = await ask("claude-sonnet-5-5", SYSTEM, prompt(b.brief, b.profile), 8000); }
-    catch (e) { text = await ask("claude-haiku-4-5-20251001", SYSTEM, prompt(b.brief, b.profile), 8000); }
-    const plan = parse(text);
+    let plan = null, lastErr = null;
+    for (const model of ["claude-sonnet-5-5", "claude-sonnet-5-5", "claude-haiku-4-5-20251001"]) {
+      try { plan = parse(await ask(model, SYSTEM, prompt(b.brief, b.profile), 12000)); if (plan && plan.sectors) break; }
+      catch (e) { lastErr = e; plan = null; }
+    }
+    if (!plan) throw lastErr || new Error("planner returned nothing");
 
     // Live prices where possible (a handful of SerpApi searches per plan).
     plan.live = { checked: new Date().toISOString() };
