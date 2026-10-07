@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cash Book">
+<title>Cash Book · Onam Agarbathi</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f6f7f2;color:#1f2a1f;font:15px/1.45 -apple-system,system-ui,"Segoe UI",sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+.wrap{max-width:860px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:0 0 2px}
+.sub{color:#6a7a6a;font-size:13px;margin-bottom:14px}
+.cards{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.c1{flex:1 1 200px;background:linear-gradient(135deg,#1a5a3a,#0d3a24);color:#fff;border-radius:10px;padding:12px 14px}
+.c2{flex:1 1 200px;background:#eef2fa;border:1px solid #c9d4ea;color:#1a2a5a;border-radius:10px;padding:12px 14px}
+.c1 b,.c2 b{display:block;font-size:22px}
+.lab{font-size:11px;font-weight:700;letter-spacing:.3px;opacity:.85}
+input,select{font:inherit;font-size:14px;padding:8px;border:1px solid #d3d8d0;border-radius:6px;width:100%;background:#fff}
+.row2{display:flex;gap:8px;flex-wrap:wrap}
+.row2>div{flex:1 1 160px}
+.btns{display:flex;gap:8px;margin:10px 0}
+.btns button{flex:1;padding:11px;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer}
+.in{background:#eaf6ee;border:1px solid #9ccfab;color:#1a5a3a}
+.out{background:#fbecee;border:1px solid #e3a8b0;color:#8a2434}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:640px}
+th{font-size:11px;color:#6a7a6a;text-align:left;padding:4px;font-weight:700}
+td{padding:3px 4px;vertical-align:middle}
+td.n{text-align:right;white-space:nowrap;font-size:13px;color:#4a5a4a}
+.amt.inx{color:#1a6a3a;font-weight:700}.amt.outx{color:#8a2434;font-weight:700}
+.x{border:none;background:none;color:#b33;font-size:18px;cursor:pointer}
+.save{width:100%;padding:14px;border:none;border-radius:10px;background:#1f4a32;color:#fff;font-size:16px;font-weight:700;margin-top:12px;cursor:pointer}
+#msg{margin:8px 0;font-size:13px;min-height:18px}
+.pin{max-width:320px;margin:18vh auto;text-align:center}
+.pin input{font-size:24px;text-align:center;letter-spacing:8px;margin:12px 0}
+.pin button{width:100%;padding:12px;border:none;border-radius:8px;background:#1f4a32;color:#fff;font-weight:700;font-size:15px}
+.who{font-size:11px;color:#8a9a8a}
+</style>
+</head>
+<body>
+<div id="pinBox" class="pin" style="display:none">
+  <div style="font-size:34px">🔒</div>
+  <div style="font-weight:700;font-size:18px">Cash Book</div>
+  <div class="sub">Enter your PIN</div>
+  <input id="pin" type="password" inputmode="numeric" placeholder="••••">
+  <button id="go">Unlock</button>
+  <div id="pinErr" style="color:#b33;font-size:13px;margin-top:8px"></div>
+</div>
+
+<div id="app" class="wrap" style="display:none">
+  <h1>📗 Cash Book</h1>
+  <div class="sub">Type each cheque, payment and deposit as it happens. Tick <b>Done</b> when it shows in the bank statement.</div>
+  <div class="row2">
+    <div><div class="lab" style="color:#6a7a6a">OPENING BALANCE</div><input id="opening" inputmode="decimal" placeholder="from the statement"></div>
+    <div><div class="lab" style="color:#6a7a6a">AS ON</div><input id="openingDate" type="date"></div>
+  </div>
+  <div class="cards">
+    <div class="c1"><div class="lab">IN THE BANK NOW</div><b id="now">₹0</b><div style="font-size:11px;opacity:.8">opening plus everything ticked</div></div>
+    <div class="c2"><div class="lab">ONCE EVERYTHING SETTLES</div><b id="later">₹0</b><div id="pend" style="font-size:11px;opacity:.8"></div></div>
+  </div>
+  <div class="btns"><button class="in" id="addIn">+ Money in</button><button class="out" id="addOut">+ Money out</button></div>
+  <div class="tw"><table>
+    <thead><tr><th style="width:140px">Date</th><th>What it is</th><th style="width:110px">Cheque no</th><th style="width:120px;text-align:right">Amount</th><th style="width:50px">Done</th><th style="width:110px;text-align:right">Balance</th><th style="width:30px"></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+  <label style="display:block;margin-top:8px;font-size:13px"><input type="checkbox" id="showDone" style="width:auto"> Show settled entries too</label>
+  <button class="save" id="save">💾 Save</button>
+  <div id="msg"></div>
+  <div class="who" id="who"></div>
+</div>
+
+<script>
+(function(){
+  var USER=(new URLSearchParams(location.search).get("user")||"maadhu").toLowerCase();
+  var PK="cb_pin_"+USER, pin=localStorage.getItem(PK)||"";
+  var book={opening:"",openingDate:"",rows:[]}, deleted=[], dirty=false;
+  var $=function(i){return document.getElementById(i);};
+  function api(action,extra){
+    return fetch("/.netlify/functions/cashbook",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(Object.assign({action:action,user:USER,pin:pin},extra||{}))}).then(function(r){return r.json();});
+  }
+  function num(v){var n=parseFloat(String(v==null?"":v).replace(/[^0-9.-]/g,""));return isNaN(n)?0:n;}
+  function money(n){return "₹"+Math.round(n).toLocaleString("en-IN");}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function today(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+
+  function render(){
+    var ord=book.rows.map(function(r,i){return Object.assign({_i:i},r);}).sort(function(a,b){return String(a.date).localeCompare(String(b.date));});
+    var run=num(book.opening), pin_=0, pout=0;
+    ord.forEach(function(r){ var a=num(r.amount); if(r.done) run+= r.kind==="in"?a:-a; else if(r.kind==="in") pin_+=a; else pout+=a; r._bal=run; });
+    $("now").textContent=money(run); $("later").textContent=money(run+pin_-pout);
+    $("pend").textContent=(pin_?"+"+money(pin_)+" coming · ":"")+(pout?"−"+money(pout)+" going":"");
+    var show=$("showDone").checked;
+    $("rows").innerHTML=ord.filter(function(r){return show||!r.done;}).map(function(r){
+      return '<tr data-i="'+r._i+'">'+
+        '<td><input type="date" data-f="date" value="'+esc(r.date)+'"></td>'+
+        '<td><input data-f="what" value="'+esc(r.what)+'" placeholder="who / what"></td>'+
+        '<td><input data-f="ref" value="'+esc(r.ref)+'" placeholder="—"></td>'+
+        '<td><input data-f="amount" inputmode="decimal" class="amt '+(r.kind==="in"?"inx":"outx")+'" style="text-align:right" value="'+esc(r.amount)+'"></td>'+
+        '<td style="text-align:center"><input type="checkbox" data-f="done" style="width:20px;height:20px"'+(r.done?" checked":"")+'></td>'+
+        '<td class="n">'+(r.done?money(r._bal):"—")+'</td>'+
+        '<td><button class="x" title="Delete">×</button></td></tr>';
+    }).join("");
+    Array.prototype.forEach.call(document.querySelectorAll("#rows tr"),function(tr){
+      var i=+tr.dataset.i;
+      Array.prototype.forEach.call(tr.querySelectorAll("input"),function(inp){
+        inp.addEventListener(inp.type==="checkbox"?"change":"input",function(){
+          book.rows[i][inp.dataset.f]= inp.type==="checkbox"?inp.checked:inp.value; dirty=true;
+          if(inp.type==="checkbox"||inp.dataset.f==="date") render(); else recalc();
+        });
+      });
+      tr.querySelector(".x").onclick=function(){ if(!confirm("Delete this entry?")) return; deleted.push(book.rows[i].id); book.rows.splice(i,1); dirty=true; render(); };
+    });
+  }
+  function recalc(){ // totals only, keep focus in the field being typed
+    var run=num(book.opening), a=0, b=0;
+    book.rows.forEach(function(r){ var x=num(r.amount); if(r.done) run+= r.kind==="in"?x:-x; else if(r.kind==="in") a+=x; else b+=x; });
+    $("now").textContent=money(run); $("later").textContent=money(run+a-b);
+  }
+  function add(kind){ book.rows.push({id:"cb_"+Date.now(),date:today(),what:"",who:"",ref:"",amount:"",kind:kind,done:false}); dirty=true; $("showDone").checked=false; render();
+    var trs=document.querySelectorAll("#rows tr"); var last=trs[trs.length-1]; if(last){ last.querySelector('[data-f="what"]').focus(); } }
+  $("addIn").onclick=function(){add("in");}; $("addOut").onclick=function(){add("out");};
+  $("showDone").onchange=render;
+  $("opening").oninput=function(){ book.opening=this.value; dirty=true; recalc(); render(); };
+  $("openingDate").onchange=function(){ book.openingDate=this.value; dirty=true; };
+  $("save").onclick=function(){
+    var btn=this; btn.disabled=true; $("msg").textContent="Saving…";
+    api("save",{rows:book.rows,deleted:deleted,opening:book.opening,openingDate:book.openingDate}).then(function(r){
+      btn.disabled=false;
+      if(r.error==="pin"){ lock("PIN changed — enter it again."); return; }
+      if(!r.ok){ $("msg").textContent="✗ Could not save — try again"; return; }
+      book=r.book; deleted=[]; dirty=false; fill(); $("msg").textContent="✓ Saved";
+      setTimeout(function(){ if(!dirty) $("msg").textContent=""; },2500);
+    }).catch(function(){ btn.disabled=false; $("msg").textContent="✗ No connection — not saved yet"; });
+  };
+  window.addEventListener("beforeunload",function(e){ if(dirty){ e.preventDefault(); e.returnValue=""; } });
+  function fill(){ $("opening").value=book.opening||""; $("openingDate").value=book.openingDate||"";
+    $("who").textContent=book.updated?"Last saved "+new Date(book.updated).toLocaleString("en-IN")+(book.updatedBy?" by "+book.updatedBy:""):""; render(); }
+
+  function lock(err){ $("app").style.display="none"; $("pinBox").style.display=""; $("pinErr").textContent=err||""; $("pin").value=""; $("pin").focus(); }
+  function open(){
+    api("get").then(function(r){
+      if(r.error==="pin"){ localStorage.removeItem(PK); lock(pin?"Wrong PIN":""); return; }
+      if(!r.ok){ lock("Could not load — check the connection."); return; }
+      localStorage.setItem(PK,pin); book=r.book; book.rows=book.rows||[];
+      $("pinBox").style.display="none"; $("app").style.display=""; fill();
+    }).catch(function(){ lock("No connection."); });
+  }
+  $("go").onclick=function(){ pin=$("pin").value.trim(); if(pin) open(); };
+  $("pin").addEventListener("keydown",function(e){ if(e.key==="Enter") $("go").click(); });
+  if(pin) open(); else lock("");
+})();
+</script>
+</body>
+</html>

@@ -11781,10 +11781,11 @@ function CashBook() {
   const [busy,setBusy]=useState(false);
   const [msg,setMsg]=useState("");
   const [showCleared,setShowCleared]=useState(false);
+  const [deletedIds,setDeletedIds]=useState([]);
 
   useEffect(()=>{ (async()=>{
     try{
-      const r=await sheetsAPI("getPortfolio",{key:"cash_book"});
+      const r=await sheetsAPI("getPortfolio",{key:"cash_book",user:"main"});
       if(r&&r.data){
         setRows(r.data.rows||[]);
         setOpening(r.data.opening||"");
@@ -11800,8 +11801,15 @@ function CashBook() {
   const save=async()=>{
     setBusy(true);
     try{
-      await sheetsAPI("savePortfolio",{key:"cash_book",
-        data:{opening,openingDate,rows}});
+      // Maadhu fills the same book from /cashbook — merge row by row with
+      // what is saved now, so neither of you overwrites the other's entries.
+      const cur=await sheetsAPI("getPortfolio",{key:"cash_book",user:"main"});
+      const del=new Set(deletedIds), mine=new Map(rows.map(r=>[r.id,r])), merged=[];
+      ((cur&&cur.data&&cur.data.rows)||[]).forEach(r=>{ if(del.has(r.id))return; merged.push(mine.has(r.id)?mine.get(r.id):r); mine.delete(r.id); });
+      mine.forEach(r=>{ if(!del.has(r.id)) merged.push(r); });
+      await sheetsAPI("savePortfolio",{key:"cash_book",user:"main",
+        data:{opening,openingDate,rows:merged,updated:new Date().toISOString(),updatedBy:"main"}});
+      setRows(merged); setDeletedIds([]);
       setMsg("✓ Saved"); setTimeout(()=>setMsg(""),2500);
     }catch(e){ setMsg("✗ Could not save"); }
     setBusy(false);
@@ -11810,7 +11818,7 @@ function CashBook() {
   const add=(kind)=>setRows(r=>[...r,{id:"cb_"+Date.now(),date:today(),
     what:"",who:"",ref:"",amount:"",kind:kind,done:false}]);
   const upd=(i,f,v)=>setRows(r=>r.map((x,j)=>j===i?{...x,[f]:v}:x));
-  const del=(i)=>setRows(r=>r.filter((_,j)=>j!==i));
+  const del=(i)=>{ setDeletedIds(d=>rows[i]&&rows[i].id?[...d,rows[i].id]:d); setRows(r=>r.filter((_,j)=>j!==i)); };
 
   // Sort by date so the running balance reads like a passbook.
   const ordered=rows.map((r,i)=>({...r,_i:i}))
