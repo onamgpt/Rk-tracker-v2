@@ -1497,6 +1497,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     'Vegetarian, no alcohol, no coffee',
     '4-star hotels, central, safe area, on FLAT ground — no climbing',
     'Compare hotels on total cost including taxis/transport',
+    'Stays: Airbnb entire homes (guest favourites) first, hotels second',
     'Cabin bag only, one bag each',
     'Flights as short as possible; avoid routes needing extra transit visas (Indian passports)',
     'Gentle pace — one main thing a day; no theme parks'
@@ -1642,29 +1643,55 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     h += bookRow('fl', 'Flights', B.flights);
     h += '</div>';
 
-    // hotels
-    (P.hotels||[]).forEach(function(hs){
-      var ps = (P.sectors||[])[hs.sector]; if(!ps) return;
+    // stays: Airbnb first, hotels second
+    (P.sectors||[]).forEach(function(ps, si){
+      var hs = (P.hotels||[]).find(function(x){return x.sector===si;}) || {sector:si, options:[]};
       var c = sd[ps._id] || {}; var nights = Number(ps.nights)||1;
-      var bh = B.hotels[hs.sector] = B.hotels[hs.sector] || {};
+      var bh = B.hotels[si] = B.hotels[si] || {};
+      var abnb = bh.airbnb || (P.live && P.live.airbnb && P.live.airbnb[si]) || null;
+      if(!bh.userChose){ if(abnb && abnb.length){ if(bh.kind!=='airbnb'){ bh.kind='airbnb'; bh.apick=0; } } else bh.kind='hotel'; }
       if(bh.pick==null){ var pi=(hs.options||[]).findIndex(function(o){return o.pick;}); bh.pick = pi<0?0:pi; }
-      var liveH = bh.live || (P.live && P.live.hotels && P.live.hotels[hs.sector] && bh.pick===(hs.options||[]).findIndex(function(o){return o.pick;}) ? P.live.hotels[hs.sector] : null);
-      h += '<div class="card"><label class="f">'+esc(ps.city).toUpperCase()+' · '+nights+' NIGHT'+(nights>1?'S':'')+(c.arrive?' · '+fmt(c.arrive)+' → '+fmt(c.depart):'')+'</label>';
+      if(!(hs.options||[]).length && !abnb) { /* nothing planned for this stop */ }
+      var liveH = bh.live || (P.live && P.live.hotels && P.live.hotels[si] && bh.pick===(hs.options||[]).findIndex(function(o){return o.pick;}) ? P.live.hotels[si] : null);
+      h += '<div class="card"><label class="f">'+esc(ps.city).toUpperCase()+' · '+nights+' NIGHT'+(nights>1?'S':'')+(c.arrive?' · '+fmt(c.arrive)+' → '+fmt(c.depart):'')+(ps.area?' · '+esc(ps.area).toUpperCase():'')+'</label>';
+      // Airbnb
+      h += '<div class="emeta" style="margin:6px 0 4px;font-weight:700">🏠 Airbnb — entire homes, guest favourites'+(ps.area?' in '+esc(ps.area):'')+'</div>';
+      if(abnb && abnb.length){
+        abnb.forEach(function(a, i){
+          var on = bh.kind==='airbnb' && bh.apick===i;
+          h += '<label class="entry" style="cursor:pointer;'+(on?'outline:2px solid var(--go);':'')+'">'+
+            '<input type="radio" name="hp'+si+'" class="bkPickA" data-s="'+si+'" data-i="'+i+'"'+(on?' checked':'')+' style="margin-top:4px">'+
+            (a.thumb?'<img src="'+esc(a.thumb)+'" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:4px;flex:0 0 auto">':'')+
+            '<div class="ebody"><div class="etitle">'+esc(a.name)+'</div>'+
+            '<div class="emeta">'+esc(a.kind)+(a.rating?' · ★ '+a.rating+' ('+a.reviews+')':'')+(a.badges&&a.badges.length?' · '+esc(a.badges[0]):'')+'</div>'+
+            '<div class="emeta">'+[a.bedrooms?a.bedrooms+' bedroom'+(a.bedrooms>1?'s':''):'',a.beds?a.beds+' bed'+(a.beds>1?'s':''):'',a.baths?a.baths+' bath':''].filter(Boolean).join(' · ')+(a.freeCancel?' · free cancellation':'')+'</div>'+
+            '<div class="enote" style="color:var(--go)">'+inr(a.perNight)+'/night · '+inr(a.total)+' total · <a href="'+esc(a.link)+'" target="_blank" rel="noopener">Open on Airbnb</a></div>'+
+            '</div></label>';
+        });
+      } else {
+        h += '<div class="empty">'+(P.live && P.live.airbnbError ? 'Airbnb search failed when planning — tap Find Airbnbs.' : 'No Airbnb results yet.')+'</div>';
+      }
+      h += '<div class="row" style="margin:6px 0 10px"><button class="mini bkAbnb" data-s="'+si+'">'+(abnb&&abnb.length?'Refresh Airbnbs':'Find Airbnbs')+'</button></div>';
+      h += '<div class="f bkAMsg" data-s="'+si+'"></div>';
+      // Hotels
+      if((hs.options||[]).length) h += '<div class="emeta" style="margin:6px 0 4px;font-weight:700">🏨 Hotels</div>';
       (hs.options||[]).forEach(function(o, i){
-        var on = bh.pick===i;
+        var on = bh.kind==='hotel' && bh.pick===i;
         h += '<label class="entry" style="cursor:pointer;'+(on?'outline:2px solid var(--go);':'')+(o.flag?'opacity:.7;':'')+'">'+
-          '<input type="radio" name="hp'+hs.sector+'" class="bkPick" data-s="'+hs.sector+'" data-i="'+i+'"'+(on?' checked':'')+' style="margin-top:4px">'+
+          '<input type="radio" name="hp'+si+'" class="bkPick" data-s="'+si+'" data-i="'+i+'"'+(on?' checked':'')+' style="margin-top:4px">'+
           '<div class="ebody"><div class="etitle">'+esc(o.name)+' · '+(o.stars||'')+'★</div>'+
           '<div class="emeta">'+esc(o.area||'')+' · est. '+(String(o.currency||'INR').toUpperCase()==='INR' ? inr(o.perNight)+'/night' : esc(o.currency)+' '+(o.perNight||'')+'/night'+(toINR(P,o.perNight,o.currency)!=null?' ≈ '+inr(toINR(P,o.perNight,o.currency)):''))+' · '+nights+' night'+(nights>1?'s':'')+' ≈ '+inr((toINR(P,o.perNight,o.currency)||0)*nights)+'</div>'+
           (o.flag?'<div class="enote" style="color:var(--stamp)">⚠ '+esc(o.flag)+'</div>':'<div class="enote">'+esc(o.why||'')+'</div>')+
           (on && liveH && liveH.perNight ? '<div class="enote" style="color:var(--go)">Live: '+inr(liveH.perNight)+'/night · '+inr(liveH.total||liveH.perNight*nights)+' total'+(liveH.rating?' · rated '+liveH.rating:'')+(liveH.deals&&liveH.deals.length?' · cheapest on '+esc(liveH.deals[0].source):'')+'</div>':'')+
           '</div></label>';
       });
-      var pick = (hs.options||[])[bh.pick] || {};
-      h += '<div class="row" style="margin-top:8px"><button class="mini bkLiveH" data-s="'+hs.sector+'">Live price</button>'+
-        '<a class="iconbtn" target="_blank" rel="noopener" href="'+esc(hotelLink((pick.name||'')+' '+ps.city, c.arrive||'', c.depart||'', String(paxN(t))))+'">Booking.com</a></div>';
-      h += '<div class="f bkHMsg" data-s="'+hs.sector+'" style="margin-top:6px"></div>';
-      h += bookRow('h'+hs.sector, 'This hotel (total)', bh);
+      if((hs.options||[]).length){
+        var pick = (hs.options||[])[bh.pick] || {};
+        h += '<div class="row" style="margin-top:8px"><button class="mini bkLiveH" data-s="'+si+'">Live hotel price</button>'+
+          '<a class="iconbtn" target="_blank" rel="noopener" href="'+esc(hotelLink((pick.name||'')+' '+ps.city, c.arrive||'', c.depart||'', String(paxN(t))))+'">Booking.com</a></div>';
+        h += '<div class="f bkHMsg" data-s="'+si+'" style="margin-top:6px"></div>';
+      }
+      h += bookRow('h'+si, 'This stay (total)', bh);
       h += '</div>';
     });
 
@@ -1701,6 +1728,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     var P=t.plan, B=P.book, pax=paxN(t);
     if(key==='fl'){ var lv=B.flightsLive||(P.live&&P.live.flights); return lv&&lv.lowest ? lv.lowest*pax : null; }
     var s=+key.slice(1), hs=(P.hotels||[]).find(function(x){return x.sector===s;}), bh=B.hotels[s]||{}, ps=(P.sectors||[])[s]||{};
+    if(bh.kind==='airbnb'){ var al=bh.airbnb||(P.live&&P.live.airbnb&&P.live.airbnb[s])||[]; var a=al[bh.apick||0]; if(a) return a.total; }
     var lv=bh.live; if(lv&&(lv.total||lv.perNight)) return lv.total||lv.perNight*(Number(ps.nights)||1);
     var o=hs&&hs.options&&hs.options[bh.pick||0]; var v=o?toINR(P,o.perNight,o.currency):null; return v!=null ? v*(Number(ps.nights)||1) : null;
   }
@@ -1724,11 +1752,11 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     var fnow = f.paid ? +f.paid : f.agent ? f.agent*pax : fl&&fl.lowest ? fl.lowest*pax : fp;
     rows.unshift({item:'Flights', plan:fp, now:fnow, src:f.paid?'paid':f.agent?'agent':fl&&fl.lowest?'live':'estimate'});
     var hnow=0, src='estimate';
-    (P.hotels||[]).forEach(function(hs){
-      var bh=B.hotels[hs.sector]||{}; var key='h'+hs.sector;
+    (P.sectors||[]).forEach(function(ps, si){
+      var bh=B.hotels[si]||{}; var key='h'+si;
       if(bh.paid){ hnow+=+bh.paid; src='paid/agent'; } else if(bh.agent){ hnow+=+bh.agent; src='paid/agent'; } else { if(bh.live && src==='estimate') src='live + estimate'; hnow+=onlineTotal(t,key)||0; }
     });
-    rows.splice(1,0,{item:'Hotels', plan:hp, now:hnow||hp, src:src});
+    rows.splice(1,0,{item:'Stays (Airbnb / hotels)', plan:hp, now:hnow||hp, src:src});
     return rows;
   }
 
@@ -1757,12 +1785,26 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       var w=(watchesCache||[]).find(function(x){return x.tripId===t.id;}); if(!w) return;
       await travelAPI('watchDelete',{id:w.id}); watchesCache=watchesCache.filter(function(x){return x.id!==w.id;}); renderBook();
     };
+    Array.prototype.forEach.call(document.querySelectorAll('.bkPickA'),function(r){ r.onchange=function(){
+      var s=+r.dataset.s; B.hotels[s]=B.hotels[s]||{}; B.hotels[s].kind='airbnb'; B.hotels[s].userChose=true; B.hotels[s].apick=+r.dataset.i;
+      syncHotelEntry(t, s); save(); renderBook(); }; });
+    Array.prototype.forEach.call(document.querySelectorAll('.bkAbnb'),function(b){ b.onclick=async function(){
+      var s=+b.dataset.s, ps=P.sectors[s], c=sectorDates(t)[ps._id]||{};
+      var msg=document.querySelector('.bkAMsg[data-s="'+s+'"]'); msg.textContent='Searching Airbnb…';
+      var r=await travelAPI('airbnb',{city:ps.city,checkin:c.arrive,checkout:c.depart,adults:paxN(t),lat:Number(ps.lat)||null,lng:Number(ps.lng)||null});
+      if(r.error){ msg.textContent=r.error==='nokey'?NOKEY:'Could not fetch: '+r.error; return; }
+      var bh=B.hotels[s]=B.hotels[s]||{}; bh.airbnb=r.list||[];
+      if(!bh.airbnb.length){ msg.textContent='No guest-favourite entire homes free in that area for these dates.'; save(); return; }
+      if(!bh.userChose){ bh.kind='airbnb'; bh.apick=0; } syncHotelEntry(t,s);
+      save(); renderBook();
+    }; });
     Array.prototype.forEach.call(document.querySelectorAll('.bkPick'),function(r){ r.onchange=function(){
-      var s=+r.dataset.s, i=+r.dataset.i; B.hotels[s]=B.hotels[s]||{}; B.hotels[s].pick=i; B.hotels[s].live=null;
+      var s=+r.dataset.s, i=+r.dataset.i; B.hotels[s]=B.hotels[s]||{}; B.hotels[s].kind='hotel'; B.hotels[s].userChose=true; B.hotels[s].pick=i; B.hotels[s].live=null;
       syncHotelEntry(t, s); save(); renderBook(); }; });
     Array.prototype.forEach.call(document.querySelectorAll('.bkLiveH'),function(b){ b.onclick=async function(){
       var s=+b.dataset.s, hs=(P.hotels||[]).find(function(x){return x.sector===s;}), ps=P.sectors[s], c=sectorDates(t)[ps._id]||{};
       var bh=B.hotels[s]=B.hotels[s]||{}, o=hs.options[bh.pick||0];
+      if(bh.kind!=='hotel'){ bh.kind='hotel'; }
       var msg=document.querySelector('.bkHMsg[data-s="'+s+'"]'); msg.textContent='Checking Google Hotels…';
       var r=await travelAPI('hotel',{name:o.name,city:ps.city,checkin:c.arrive,checkout:c.depart,adults:paxN(t)});
       if(r.error){ msg.textContent=r.error==='nokey'?NOKEY:'Could not fetch: '+r.error; return; }
@@ -1786,7 +1828,9 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   }
   function syncHotelEntry(t, s){
     var P=t.plan, ps=P.sectors[s], c=sectorDates(t)[ps._id]; if(!c) return;
-    var hs=(P.hotels||[]).find(function(x){return x.sector===s;}), bh=P.book.hotels[s]||{}, o=hs.options[bh.pick||0]||{};
+    var hs=(P.hotels||[]).find(function(x){return x.sector===s;})||{options:[]}, bh=P.book.hotels[s]||{}, o=hs.options[bh.pick||0]||{};
+    if(bh.kind==='airbnb'){ var al=bh.airbnb||(P.live&&P.live.airbnb&&P.live.airbnb[s])||[]; var a=al[bh.apick||0];
+      if(a) o={name:'Airbnb: '+a.name, area:(ps.area||'')+(a.link?' · '+a.link:'')}; }
     var id='hotel_'+s;
     Object.keys(t.binder).forEach(function(d){ t.binder[d]=(t.binder[d]||[]).filter(function(e){return e.id!==id;}); });
     // drop the planner's own hotel line for that arrival day, then add the chosen one

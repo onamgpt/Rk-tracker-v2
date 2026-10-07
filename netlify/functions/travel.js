@@ -67,6 +67,25 @@ async function hotelPrice(name, city, checkin, checkout, adults) {
     stars: p.extracted_hotel_class || null, link: p.link || "", deals: (p.prices || []).slice(0, 3).map(x => ({ source: x.source, perNight: x.rate_per_night && x.rate_per_night.extracted_lowest })) };
 }
 
+// Airbnb first: entire homes, guest favourites, inside a tight box around
+// the neighbourhood the planner chose — so "central and walkable" holds.
+async function airbnb(o) {
+  const p = { engine: "airbnb", airbnb_domain: "airbnb.co.in", currency: "INR", q: o.city || "",
+    check_in_date: o.checkin, check_out_date: o.checkout, adults: String(o.adults || 2), room_type: "entire_home", guest_favorite: "true" };
+  if (o.lat && o.lng) { const d = 0.012, e = 0.016; p.map_bounds = [o.lat + d, o.lng + e, o.lat - d, o.lng - e].map(x => x.toFixed(5)).join(","); }
+  let j = await serp(p);
+  let list = j.organic_results || [];
+  if (list.length < 3 && p.guest_favorite) { delete p.guest_favorite; j = await serp(p); list = j.organic_results || []; }
+  const nights = Math.max(1, Math.round((new Date(o.checkout) - new Date(o.checkin)) / 864e5));
+  return list.filter(r => r.extracted_price && (r.rating || 0) >= 4.6).slice(0, 5).map(r => ({
+    id: r.listing_id, name: r.name || r.title, kind: r.title || "", link: r.link, rating: r.rating || null, reviews: r.reviews || 0,
+    badges: r.badges || [], total: r.extracted_price, perNight: Math.round(r.extracted_price / nights),
+    bedrooms: r.bedrooms || null, beds: r.beds || null, baths: r.bathrooms || null,
+    freeCancel: !!r.free_cancellation, thumb: r.thumbnail || "", lat: r.gps_coordinates && r.gps_coordinates.latitude, lng: r.gps_coordinates && r.gps_coordinates.longitude
+  }));
+}
+exports.airbnb = airbnb;
+
 // ── fare watches ────────────────────────────────────────────────────────────
 async function sendTelegram(text) {
   const base = process.env.URL || "https://rk-tracker-v2.netlify.app";
@@ -127,6 +146,7 @@ exports.handler = async (event) => {
 
       case "flights": return OK(Object.assign({ ok: true }, await flights(b.legs || [])));
       case "hotel": return OK(Object.assign({ ok: true }, await hotelPrice(b.name, b.city, b.checkin, b.checkout, b.adults)));
+      case "airbnb": return OK({ ok: true, list: await airbnb(b) });
 
       case "watchList": return OK({ ok: true, watches: (await kvGet("fare_watches")) || [] });
       case "watchSave": {

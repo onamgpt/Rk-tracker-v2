@@ -51,7 +51,7 @@ Use the real local currency of the destination in "fx" (e.g. CNY for China, EUR 
 Call save_plan with exactly this shape:
 {"name":"trip name","start":"YYYY-MM-DD (departure day from home)","pax":number,"homeCity":"Bengaluru","homeAirport":"BLR",
 "summary":"2 sentences",
-"sectors":[{"city":"","nights":n,"mode":"flight|train|car|bus|ferry","airport":"IATA or empty"}],
+"sectors":[{"city":"","nights":n,"mode":"flight|train|car|bus|ferry","airport":"IATA or empty","area":"best flat, central neighbourhood to stay in","lat":centre latitude of that neighbourhood,"lng":centre longitude}],
 "flights":[{"from":"IATA","to":"IATA","date":"YYYY-MM-DD","label":"City → City","international":true}],
 "flightAdvice":"which airline/route to prefer and why; routes to avoid",
 "hotels":[{"sector":0-based index into sectors,"options":[{"name":"","area":"","stars":number,"perNight":INR number,"currency":"INR","pick":true,"why":"","flag":""}]}],
@@ -90,6 +90,13 @@ exports.handler = async (event) => {
         if (!pick || !s) continue;
         const ci = hotelCheckin(plan, h.sector), co = addDays(ci, Number(s.nights) || 1);
         try { plan.live.hotels[h.sector] = await travel_hotel(pick.name, s.city, ci, co, plan.pax || 2); } catch (e) { plan.live.hotelsError = String(e.message || e); }
+      }
+      // Airbnb first — one search per stay, inside the chosen neighbourhood
+      plan.live.airbnb = {};
+      for (let i = 0; i < (plan.sectors || []).length; i++) {
+        const s = plan.sectors[i]; const ci = hotelCheckin(plan, i), co = addDays(ci, Number(s.nights) || 1);
+        try { plan.live.airbnb[i] = await travel.airbnb({ city: s.city, checkin: ci, checkout: co, adults: plan.pax || 2, lat: Number(s.lat) || null, lng: Number(s.lng) || null }); }
+        catch (e) { plan.live.airbnbError = String(e.message || e); }
       }
     }
     await kvSet(key, { status: "done", plan, brief: b.brief, at: new Date().toISOString() });
