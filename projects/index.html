@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Builds">
+<meta name="theme-color" content="#11161c">
+<title>Build Projects</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#11161c;color:#e6edf2;font:15px/1.45 -apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+.wrap{max-width:620px;margin:0 auto;padding:14px}
+h1{font-size:22px;margin:4px 0 4px;display:flex;align-items:center;gap:10px}
+h1 a{margin-left:auto;font-size:13px;font-weight:400;color:#8aa0b0;text-decoration:none;border:1px solid #26313a;border-radius:8px;padding:6px 10px}
+.sub{color:#8aa0b0;font-size:13px;margin-bottom:12px}
+.proj{background:#161d24;border:1px solid #232d36;border-radius:14px;margin-bottom:12px;overflow:hidden}
+.ph{padding:12px 14px;display:flex;gap:10px;align-items:center;cursor:pointer}
+.ph b{font-size:16px;flex:1}
+.ph .tot{font-size:12.5px;color:#9be36b;text-align:right}
+.pd{padding:0 14px 12px}
+.why{font-size:13px;color:#a9b8c4;margin-bottom:8px}
+.part{display:flex;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #1f2830}
+.part .n{flex:1;min-width:0}
+.part .n b{font-size:14.5px;display:block}
+.part .n span{font-size:12px;color:#8aa0b0}
+.buy{flex:0 0 auto;padding:9px 13px;border-radius:10px;background:#f2a33a;color:#1a1004;font-weight:800;font-size:13.5px;text-decoration:none}
+.alt{font-size:11.5px;color:#8aa0b0;text-decoration:underline;display:inline-block;margin-top:2px}
+.st{flex:0 0 auto;padding:8px 10px;border-radius:10px;border:1px solid #2a3540;background:#0d1115;color:#c8d4dc;font-size:12px;font-weight:700;min-width:84px;cursor:pointer}
+.st.ordered{background:#203247;color:#9cc8ff;border-color:#2f4f73}
+.st.received{background:#1b3a2a;color:#9be36b;border-color:#2c5a40}
+.done .buy{opacity:.35}
+.add{display:flex;gap:6px;margin-top:10px}
+.add input{flex:1;min-width:0;padding:8px;border-radius:9px;border:1px solid #2a3540;background:#0d1115;color:#e6edf2;font:inherit;font-size:13.5px}
+.add button{padding:8px 12px;border:none;border-radius:9px;background:#3fb37f;color:#08140e;font-weight:800}
+.note{font-size:12px;color:#7a8a96;margin-top:6px}
+#msg{text-align:center;color:#9be36b;font-size:13px;min-height:18px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛠 Build Projects <a href="/">Tracker</a></h1>
+  <div class="sub">Tap <b>Buy</b> to open the shop, then tap the status: To buy → Ordered → Received. Prices are approximate.</div>
+  <div id="list"></div>
+  <div id="msg"></div>
+</div>
+<script>
+(function(){
+  // New projects are added here by Claude; your statuses and own parts are kept in the tracker.
+  var R=function(q){return "https://robu.in/?s="+encodeURIComponent(q)+"&post_type=product";};
+  var A=function(q){return "https://www.amazon.in/s?k="+encodeURIComponent(q);};
+  var PROJECTS=[
+    {id:"pi-base",title:"Raspberry Pi 5 — base (24×7, long-term)",why:"The computer every project below runs on. Official parts only — they last for years running non-stop.",parts:[
+      {id:"pi5",name:"Raspberry Pi 5 — 4 GB",note:"The board itself",qty:1,price:12300,link:R("Raspberry Pi 5 Model 4GB"),alt:"https://kspelectronics.in/brand/raspberry-pi/"},
+      {id:"psu",name:"Official 27W USB-C power supply (Indian plug)",note:"Only the official one — cheap chargers cause most failures",qty:1,price:1100,link:R("Official 27W USB-C PD Power Supply Raspberry Pi 5"),alt:"https://kspelectronics.in/brand/raspberry-pi/"},
+      {id:"case",name:"Official Raspberry Pi 5 case (with built-in fan)",note:"Its own fan and heatsink keep the Pi cool 24×7 — no separate cooler needed",qty:1,price:900,link:R("Official Raspberry Pi 5 Case")},
+      {id:"sd",name:"SanDisk High Endurance 64 GB microSD",note:"Made for 24×7 recording — lasts far longer than normal cards",qty:1,price:900,link:A("SanDisk High Endurance 64GB microSD")},
+      {id:"reader",name:"USB microSD card reader",note:"Only if your computer has no card slot — used once",qty:1,price:300,link:A("USB microSD card reader")}
+    ]},
+    {id:"enose",title:"Electronic nose — fragrance QC (v1)",why:"Teach it a good batch, then it tells you if a new batch matches. Runs on the Pi above.",parts:[
+      {id:"bme",name:"BME688 gas sensor breakout (Pimoroni or Adafruit)",note:"Buy 2 — one in the jar, one spare",qty:2,price:2200,link:R("BME688"),alt:A("BME688 breakout")},
+      {id:"qwiic",name:"STEMMA QT / Qwiic to female jumper cable",note:"Plug-in, no soldering",qty:2,price:120,link:R("Qwiic female jumper cable"),alt:A("STEMMA QT female jumper cable")},
+      {id:"fan",name:"30 mm 5V mini fan",note:"Stirs the air in the jar so every sniff is the same",qty:1,price:150,link:R("30mm 5V fan")},
+      {id:"jar",name:"Glass jars with metal lids, ~500 ml",note:"Sniffing chambers — sensor and fan go through the lid",qty:3,price:150,link:A("glass jar 500ml metal lid")},
+      {id:"strips",name:"Smelling / blotter strips",note:"You probably have these already",qty:1,price:0,link:A("perfume smelling strips")}
+    ]},
+    {id:"enose-pro",title:"Electronic nose — upgrade (later, optional)",why:"Bosch's 8-sensor kit and free BME AI-Studio software for more accurate training. Buy after v1 works.",parts:[
+      {id:"bkit",name:"Bosch BME688 Development Kit",note:"8 sensors on one board",qty:1,price:9000,link:A("BME688 development kit"),alt:"https://www.bosch-sensortec.com/software-tools/tools/bme688-development-kit/"}
+    ]},
+    {id:"yt-tv",title:"YouTube tracker for the TV",why:"Uses the Pi base — nothing extra to buy. Set up after the Pi arrives.",parts:[]}
+  ];
+  var KEY="build_projects", S={status:{},custom:{},open:{}};
+  var $=function(i){return document.getElementById(i);};
+  function api(a,x){return fetch("/.netlify/functions/db",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action:a,user:"main",key:KEY},x||{}))}).then(function(r){return r.json();});}
+  var t=null; function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){} clearTimeout(t); t=setTimeout(function(){api("savePortfolio",{data:S}).catch(function(){});},500);}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  var NEXT={"":"ordered",ordered:"received",received:""}, LBL={"":"To buy",ordered:"Ordered",received:"Received ✓"};
+  function draw(){
+    $("list").innerHTML=PROJECTS.map(function(p,pi){
+      var parts=p.parts.concat(S.custom[p.id]||[]);
+      var left=parts.filter(function(x){return !S.status[p.id+":"+x.id];}).reduce(function(a,x){return a+(x.price||0)*(x.qty||1);},0);
+      var got=parts.filter(function(x){return S.status[p.id+":"+x.id]==="received";}).length;
+      var open=S.open[p.id]!==undefined?S.open[p.id]:pi<2;
+      return '<div class="proj"><div class="ph" data-p="'+p.id+'"><b>'+esc(p.title)+'</b><span class="tot">'+(parts.length?got+'/'+parts.length+' received<br>'+(left?'≈ ₹'+left.toLocaleString("en-IN")+' to buy':'all ordered'):'nothing to buy')+'</span></div>'+
+        (open?'<div class="pd"><div class="why">'+esc(p.why)+'</div>'+parts.map(function(x){
+          var st=S.status[p.id+":"+x.id]||"";
+          return '<div class="part'+(st?' done':'')+'"><div class="n"><b>'+esc(x.name)+(x.qty>1?' × '+x.qty:'')+'</b><span>'+esc(x.note||"")+(x.price?' · ≈ ₹'+(x.price*(x.qty||1)).toLocaleString("en-IN"):'')+'</span>'+(x.alt?'<br><a class="alt" href="'+esc(x.alt)+'" target="_blank" rel="noopener">other seller</a>':'')+'</div>'+
+            '<a class="buy" href="'+esc(x.link)+'" target="_blank" rel="noopener">Buy</a>'+
+            '<button class="st '+st+'" data-k="'+p.id+':'+x.id+'">'+LBL[st]+'</button></div>';
+        }).join("")+
+        '<div class="add"><input placeholder="Add a part (name)" data-add="'+p.id+'"><input placeholder="Link (optional)" data-addl="'+p.id+'"><button data-addb="'+p.id+'">+</button></div></div>':'')+'</div>';
+    }).join("");
+    document.querySelectorAll(".ph").forEach(function(h){h.onclick=function(){var id=h.dataset.p,pi=PROJECTS.findIndex(function(p){return p.id===id;});var cur=S.open[id]!==undefined?S.open[id]:pi<2;S.open[id]=!cur;save();draw();};});
+    document.querySelectorAll(".st").forEach(function(b){b.onclick=function(){var k=b.dataset.k,v=NEXT[S.status[k]||""];if(v)S.status[k]=v;else delete S.status[k];save();draw();};});
+    document.querySelectorAll("[data-addb]").forEach(function(b){b.onclick=function(){var id=b.dataset.addb,n=document.querySelector('[data-add="'+id+'"]').value.trim();if(!n)return;
+      var l=document.querySelector('[data-addl="'+id+'"]').value.trim()||A(n);(S.custom[id]=S.custom[id]||[]).push({id:"c"+Date.now().toString(36),name:n,note:"added by you",qty:1,price:0,link:l});save();draw();};});
+  }
+  try{var c=JSON.parse(localStorage.getItem(KEY));if(c)S=Object.assign(S,c);}catch(e){}
+  draw();
+  api("getPortfolio").then(function(r){if(r&&r.data&&typeof r.data==="object"){S=Object.assign({status:{},custom:{},open:{}},r.data);draw();}}).catch(function(){});
+})();
+</script>
+</body>
+</html>
