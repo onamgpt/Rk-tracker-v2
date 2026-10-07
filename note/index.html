@@ -94,9 +94,14 @@ button{font-family:inherit;border:none;border-radius:12px;font-weight:700;cursor
 
   var CATS=["Quick Notes","Health","Personal","Family","Reminders","Finance","Property","Compliance","Intelligence","Problem","Digital","Business - Purchase","Sales - Order","Sales - Payment","Sales - Visit","Sales - Expense","Sales - Complaint"];
   var pending=[];   // {name,type,data(dataURL),thumb,ocr}
-  function smart(b){
+  function smart(b,ms){
+    // Never let smart filing hold a note hostage: give up after a few seconds
+    // and the note is saved plainly to Quick Notes instead.
+    var ctl=window.AbortController?new AbortController():null;
+    var t=ctl?setTimeout(function(){ctl.abort();},ms||9000):null;
     return fetch("/.netlify/functions/smartnote",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify(Object.assign({user:USER},b))}).then(function(r){return r.json();});
+      body:JSON.stringify(Object.assign({user:USER},b)),signal:ctl?ctl.signal:undefined})
+      .then(function(r){if(t)clearTimeout(t);if(!r.ok)throw new Error("HTTP "+r.status);return r.json();});
   }
   // Same photo handling as the tracker: shrink to 1200px JPEG, upload to Drive.
   function readFile(f,max){
@@ -193,7 +198,7 @@ button{font-family:inherit;border:none;border-radius:12px;font-weight:700;cursor
   }
   function send(text,files){
     return Promise.all(files.map(upload)).then(function(atts){
-      return smart({action:"route",text:text,attachments:atts}).then(function(r){
+      return smart({action:"route",text:text,attachments:atts}).catch(function(){return null;}).then(function(r){
         if(r&&r.ok) return r;
         // AI unavailable → plain Quick Note, as before
         var first=(text||(atts[0]&&atts[0].name)||"Quick note").split("\n")[0];

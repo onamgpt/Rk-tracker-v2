@@ -16,6 +16,31 @@ const H = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/jso
 const OK = (o) => ({ statusCode: 200, headers: H, body: JSON.stringify(o) });
 
 const call = async (b) => JSON.parse((await db.handler({ httpMethod: "POST", body: JSON.stringify(b) })).body || "{}");
+// Light reads straight from Supabase — getAll pulls every full entry and was
+// too slow to finish inside Netlify's 10-second limit.
+const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+const SB_KEY = process.env.SUPABASE_SERVICE_KEY || "";
+async function sbGet(path) {
+  const r = await fetch(SB_URL + path, { headers: { apikey: SB_KEY, Authorization: "Bearer " + SB_KEY } });
+  if (r.status >= 400) throw new Error("supabase " + r.status);
+  return r.json();
+}
+async function listLight(user) {
+  try {
+    const rows = await sbGet("/rest/v1/entries?owner=eq." + encodeURIComponent(user) +
+      "&select=id,title,category,date,person,vendor,tags,created_at&order=created_at.desc&limit=400");
+    return rows.map(r => ({ id: r.id, title: r.title, category: r.category, date: r.date, person: r.person, vendor: r.vendor, tags: r.tags || [], createdAt: r.created_at }));
+  } catch (e) { return []; }
+}
+async function getFull(user, id) {
+  const rows = await sbGet("/rest/v1/entries?id=eq." + encodeURIComponent(id) + "&owner=eq." + encodeURIComponent(user) + "&select=*");
+  const r = rows && rows[0]; if (!r) return null;
+  const base = (r.data && typeof r.data === "object") ? r.data : {};
+  return Object.assign({ id: r.id, title: r.title, date: r.date, category: r.category, person: r.person, vendor: r.vendor,
+    amount: r.amount, notes: r.notes, link: r.link, linkLabel: r.link_label, tags: r.tags || [], attachments: r.attachments || [],
+    createdAt: r.created_at, reminder: r.reminder, reminderNote: r.reminder_note, paymentStatus: r.payment_status }, base);
+}
+
 const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const istNow = () => new Date(Date.now() + 5.5 * 3600e3);
 const istDate = () => istNow().toISOString().slice(0, 10);
@@ -37,12 +62,12 @@ function claude(content, system, maxTokens, timeoutMs) {
   });
 }
 
-async function ocrImage(b64, type) {
+async function ocrImage(b64, type, ms) {
   if (!/^image\/(jpeg|png|webp|gif)$/.test(type || "") || !b64 || b64.length > 4800000) return "";
   try {
     const t = await claude([{ type: "image", source: { type: "base64", media_type: type, data: b64 } },
       { type: "text", text: "Read every bit of text in this image exactly as written, line by line. Keep numbers, amounts, dates, names and invoice numbers exact. If there is no text, reply with nothing." }],
-      "You are an OCR engine. Output only the text found in the image, nothing else.", 2000, 20000);
+      "You are an OCR engine. Output only the text found in the image, nothing else.", 2000, ms || 20000);
     return String(t || "").trim();
   } catch (e) { return ""; }
 }
@@ -102,7 +127,7 @@ Existing entries (id | date | category | title | person | vendor):
 ${cands || "(none)"}
 
 Return JSON: {"mode":"new|append","targetId":"","category":"","title":"short title, max 60 chars","notes":"the note, cleaned of the routing words like 'make a quick note for my health', otherwise unchanged","date":"YYYY-MM-DD","reminder":"","person":"","vendor":"","amount":"","paymentStatus":""}`;
-  return parseJSON(await claude([{ type: "text", text: prompt }], system, 700, 8000));
+  return parseJSON(await claude([{ type: "text", text: prompt }], system, 500, 5500));
 }
 
 async function route(b) {
@@ -112,8 +137,7 @@ async function route(b) {
   const ocr = String(b.ocr || "").trim();
   if (!text && !atts.length && !ocr) return { error: "empty" };
 
-  const all = await call({ action: "getAll", user });
-  const entries = (all && all.entries) || [];
+  const entries = await listLight(user);
   let d = null;
   const basis = text || (ocr ? "Scanned document:\n" + ocr.slice(0, 1500) : "");
   if (basis) { try { d = await decide(basis, entries); } catch (e) { d = null; } }
@@ -124,7 +148,8 @@ async function route(b) {
   const ocrBlock = ocr ? "\n\n🔍 Text from photo:\n" + ocr : "";
 
   // ── append to an existing entry ──
-  const target = d.mode === "append" && d.targetId ? entries.find(e => e.id === d.targetId) : null;
+  let target = null;
+  if (d.mode === "append" && d.targetId && entries.find(e => e.id === d.targetId)) { try { target = await getFull(user, d.targetId); } catch (e) { target = null; } }
   if (target) {
     const prev = JSON.parse(JSON.stringify(target));
     const upd = Object.assign({}, target);
@@ -169,7 +194,7 @@ exports.handler = async (event) => {
   let b = {}; try { b = JSON.parse(event.body || "{}"); } catch (e) { return OK({ error: "bad json" }); }
   const user = String(b.user || "main").toLowerCase();
   try {
-    if (b.action === "ocr") return OK({ ok: true, text: await ocrImage(String(b.imageBase64 || ""), b.imageType || "image/jpeg") });
+    if (b.action === "ocr") return OK({ ok: true, text: await ocrImage(String(b.imageBase64 || ""), b.imageType || "image/jpeg", 8500) });
     if (b.action === "route") return OK(await route(b));
     if (b.action === "undo" && b.undo) {
       if (b.undo.type === "delete" && b.undo.id) {
@@ -183,8 +208,7 @@ exports.handler = async (event) => {
       if (b.undo.type === "restore" && b.undo.entry && b.undo.entry.id) return OK(await call({ action: "save", user, entry: b.undo.entry }));
     }
     if (b.action === "move" && b.id && CATS.includes(b.category)) {
-      const all = await call({ action: "getAll", user });
-      const e = ((all && all.entries) || []).find(x => x.id === b.id);
+      const e = await getFull(user, b.id);
       if (!e) return OK({ error: "not found" });
       e.category = b.category; e.updatedAt = new Date().toISOString(); e.serverEdit = e.updatedAt;
       const s = await call({ action: "save", user, entry: e });
