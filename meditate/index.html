@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Meditate">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#14110c">
+<title>Meditate</title>
+<style>
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:#14110c;color:#e9dcc0;font:16px/1.5 -apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+.wrap{max-width:520px;margin:0 auto;padding:18px}
+h1{font-family:Palatino,"Book Antiqua",Georgia,serif;font-weight:400;font-size:24px;margin:4px 0 16px;color:#f2e3bf;display:flex;align-items:center;gap:10px}
+h1 a{margin-left:auto;font:13px -apple-system,sans-serif;color:#a8936a;text-decoration:none;border:1px solid #3a3020;border-radius:8px;padding:6px 10px}
+.lab{font-size:12px;color:#a8936a;letter-spacing:.4px;margin:14px 0 6px}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{padding:10px 14px;border-radius:22px;border:1px solid #3a3020;background:transparent;color:#e9dcc0;font-size:15px;cursor:pointer}
+.chip.on{background:#c9a24a;color:#1a1408;border-color:#c9a24a;font-weight:700}
+input,select{font:inherit;background:#1f1a12;color:#e9dcc0;border:1px solid #3a3020;border-radius:10px;padding:10px;width:100%}
+.row{display:flex;gap:10px}
+.row>*{flex:1}
+.ring{position:relative;width:min(78vw,300px);height:min(78vw,300px);margin:26px auto 10px}
+.ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ring .t{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring .t b{font:300 54px/1 -apple-system,sans-serif;letter-spacing:1px;color:#f2e3bf}
+.ring .t span{font-size:13px;color:#a8936a;margin-top:8px}
+.go{width:100%;padding:17px;border:none;border-radius:14px;background:#c9a24a;color:#1a1408;font-size:18px;font-weight:800;margin-top:18px;cursor:pointer}
+.sub{display:flex;gap:10px;margin-top:10px}
+.sub button{flex:1;padding:13px;border-radius:12px;border:1px solid #3a3020;background:transparent;color:#e9dcc0;font-size:15px;cursor:pointer}
+.stats{display:flex;gap:10px;margin-top:22px}
+.stat{flex:1;background:#1c1710;border:1px solid #2c2416;border-radius:12px;padding:10px;text-align:center}
+.stat b{display:block;font-size:22px;color:#f2e3bf;font-weight:600}
+.stat span{font-size:11px;color:#a8936a}
+.hist{margin-top:14px}
+.h{display:flex;gap:8px;padding:9px 2px;border-bottom:1px solid #241e14;font-size:14px}
+.h span:first-child{flex:1}
+.h button{background:none;border:none;color:#7a6a4a;cursor:pointer}
+.note{font-size:12.5px;color:#8a7a5a;margin-top:10px}
+#msg{text-align:center;color:#c9a24a;min-height:20px;margin-top:8px;font-size:14px}
+.running .setup{display:none}
+body.running{background:#0b0906}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🪷 Meditate <a href="/">Tracker</a></h1>
+
+  <div class="setup">
+    <div class="lab">PRACTICE</div>
+    <select id="kind"><option>Vipassana</option><option>Anapana</option><option>Metta</option><option>Other</option></select>
+    <div class="lab">MINUTES</div>
+    <div class="chips" id="mins"></div>
+    <div class="lab">SMALL BELLS — WHEN THIS MUCH TIME IS LEFT</div>
+    <div class="row">
+      <select id="b1"></select>
+      <select id="b2"></select>
+    </div>
+  </div>
+
+  <div class="ring">
+    <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="54" fill="none" stroke="#2a2216" stroke-width="5"/>
+      <circle id="arc" cx="60" cy="60" r="54" fill="none" stroke="#c9a24a" stroke-width="5" stroke-linecap="round" stroke-dasharray="339.3" stroke-dashoffset="0"/>
+      <g id="ticks"></g></svg>
+    <div class="t"><b id="clock">60:00</b><span id="phase">tap Begin</span></div>
+  </div>
+
+  <button class="go" id="go">Begin</button>
+  <div class="sub" id="sub" style="display:none"><button id="pause">Pause</button><button id="stop">End early</button></div>
+  <div id="msg"></div>
+
+  <div class="setup">
+    <div class="stats">
+      <div class="stat"><b id="sToday">0</b><span>min today</span></div>
+      <div class="stat"><b id="sWeek">0</b><span>min this week</span></div>
+      <div class="stat"><b id="sStreak">0</b><span>day streak</span></div>
+    </div>
+    <div class="sub"><button id="addPast">+ Log a session I already did</button></div>
+    <div class="hist" id="hist"></div>
+    <div class="note">Keep this screen open (it stays awake on its own). Place the phone face down — bells play even with the screen dimmed, but not if you switch apps or lock the phone.</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var $=function(i){return document.getElementById(i);};
+  var PREF="med_pref", KEY="meditation_log";
+  var pref; try{ pref=JSON.parse(localStorage.getItem(PREF))||{}; }catch(e){ pref={}; }
+  pref=Object.assign({mins:60,b1:20,b2:10,kind:"Vipassana"},pref);
+  var log=[];
+
+  // ── bells: struck-bowl tone made in the browser (no files to load) ──
+  var ctx=null;
+  function audio(){ if(!ctx){ var A=window.AudioContext||window.webkitAudioContext; ctx=new A(); } if(ctx.state==="suspended") ctx.resume(); return ctx; }
+  function bell(big, at){
+    var c=audio(), t=(at||c.currentTime)+0.02, base=big?196:392, dur=big?9:5, vol=big?0.5:0.22;
+    [[1,1],[2.76,0.45],[5.4,0.22],[8.93,0.1]].forEach(function(p){
+      var o=c.createOscillator(), g=c.createGain();
+      o.type="sine"; o.frequency.value=base*p[0];
+      g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vol*p[1],t+0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+dur/(p[0]>2?1.8:1));
+      o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+dur);
+    });
+  }
+  function bells(n,big){ var c=audio(); for(var i=0;i<n;i++) bell(big,c.currentTime+i*(big?4:2.5)); }
+
+  // ── setup ──
+  [10,20,30,45,60,90].forEach(function(m){
+    var b=document.createElement("button"); b.className="chip"+(pref.mins===m?" on":""); b.textContent=m; b.onclick=function(){ pref.mins=m; savePref(); drawChips(); idle(); }; $("mins").appendChild(b);
+  });
+  var cust=document.createElement("button"); cust.className="chip"; cust.textContent="Other"; cust.onclick=function(){ var v=parseInt(prompt("Minutes",pref.mins),10); if(v>0&&v<600){ pref.mins=v; savePref(); drawChips(); idle(); } }; $("mins").appendChild(cust);
+  function drawChips(){ Array.prototype.forEach.call($("mins").children,function(b){ b.classList.toggle("on", String(pref.mins)===b.textContent || (b.textContent==="Other" && [10,20,30,45,60,90].indexOf(pref.mins)<0)); }); }
+  [["b1",[0,5,10,15,20,25,30,50]],["b2",[0,5,10,15,20]]].forEach(function(x){
+    $(x[0]).innerHTML=x[1].map(function(p){return '<option value="'+p+'">'+(p? p+'% left':'off')+'</option>';}).join("");
+    $(x[0]).value=pref[x[0]]; $(x[0]).onchange=function(){ pref[x[0]]=+this.value; savePref(); idle(); };
+  });
+  $("kind").value=pref.kind; $("kind").onchange=function(){ pref.kind=this.value; savePref(); };
+  function savePref(){ try{ localStorage.setItem(PREF,JSON.stringify(pref)); }catch(e){} }
+  function fmt(s){ s=Math.max(0,Math.round(s)); var h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(x).padStart(2,"0"); }
+  function marks(){ // tick marks where the small bells fall
+    var total=pref.mins*60, g=$("ticks"); g.innerHTML="";
+    [pref.b1,pref.b2].filter(Boolean).forEach(function(p){
+      var a=(1-p/100)*2*Math.PI, x=60+54*Math.cos(a), y=60+54*Math.sin(a);
+      g.innerHTML+='<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="2.6" fill="#e9dcc0"/>';
+    });
+  }
+  function idle(){ $("clock").textContent=fmt(pref.mins*60); $("arc").style.strokeDashoffset=0;
+    var parts=[pref.b1,pref.b2].filter(Boolean).map(function(p){return fmt(pref.mins*60*p/100)+" left";});
+    $("phase").textContent= parts.length? "small bells at "+parts.join(" & ") : "no small bells"; marks(); }
+
+  // ── session ──
+  var run=null, wake=null;
+  async function keepAwake(){ try{ if("wakeLock" in navigator){ wake=await navigator.wakeLock.request("screen"); } }catch(e){} }
+  document.addEventListener("visibilitychange",function(){ if(!document.hidden && run && !run.paused) keepAwake(); });
+  $("go").onclick=function(){
+    audio(); bells(3,true);
+    var total=pref.mins*60;
+    run={start:Date.now()+12000, total:total, paused:false, pausedAt:0, rung:{}, kind:pref.kind};  // 12 s for the opening bells to fade
+    document.body.classList.add("running"); $("go").style.display="none"; $("sub").style.display="flex"; $("msg").textContent="";
+    keepAwake(); tick();
+  };
+  $("pause").onclick=function(){
+    if(!run) return;
+    if(run.paused){ run.start+=Date.now()-run.pausedAt; run.paused=false; this.textContent="Pause"; keepAwake(); tick(); }
+    else { run.paused=true; run.pausedAt=Date.now(); this.textContent="Resume"; }
+  };
+  $("stop").onclick=function(){ if(!run) return; var done=Math.max(0,(Date.now()-run.start)/1000); finish(done, false); };
+  function tick(){
+    if(!run || run.paused) return;
+    var el=(Date.now()-run.start)/1000, left=run.total-el;
+    if(el<0){ $("clock").textContent=fmt(run.total); $("phase").textContent="settle in…"; return setTimeout(tick,250); }
+    $("clock").textContent=fmt(left); $("phase").textContent=run.kind;
+    $("arc").style.strokeDashoffset=(339.3*Math.min(1,el/run.total)).toFixed(1);
+    [pref.b1,pref.b2].forEach(function(p){ if(p && !run.rung[p] && left<=run.total*p/100){ run.rung[p]=1; bell(false); } });
+    if(left<=0){ bells(3,true); return finish(run.total,true); }
+    setTimeout(tick,250);
+  }
+  function finish(secs, full){
+    var mins=Math.round(secs/60), kind=run.kind; run=null;
+    try{ wake&&wake.release(); }catch(e){} wake=null;
+    document.body.classList.remove("running"); $("go").style.display=""; $("sub").style.display="none"; $("pause").textContent="Pause";
+    idle();
+    if(mins>=1){ addSession({date:today(), mins:mins, kind:kind, full:full, at:new Date().toISOString()}); $("msg").textContent=(full?"🙏 ":"")+mins+" minutes of "+kind+" logged"; }
+    else $("msg").textContent="Session ended";
+  }
+
+  // ── log (saved to the tracker) ──
+  function today(){ var d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+  function api(action,extra){ return fetch("/.netlify/functions/db",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action:action,user:"main",key:KEY},extra||{}))}).then(function(r){return r.json();}); }
+  function addSession(s){
+    s.id="m"+Date.now().toString(36); log.unshift(s); draw();
+    try{ localStorage.setItem(KEY,JSON.stringify(log)); }catch(e){}
+    api("getPortfolio").then(function(r){ var cur=(r&&r.data&&r.data.sessions)||[]; if(!cur.some(function(x){return x.id===s.id;})) cur.unshift(s);
+      return api("savePortfolio",{data:{sessions:cur.slice(0,2000)}}).then(function(){ log=cur; draw(); }); }).catch(function(){});
+  }
+  function removeSession(id){
+    log=log.filter(function(x){return x.id!==id;}); draw();
+    try{ localStorage.setItem(KEY,JSON.stringify(log)); }catch(e){}
+    api("getPortfolio").then(function(r){ var cur=((r&&r.data&&r.data.sessions)||[]).filter(function(x){return x.id!==id;}); return api("savePortfolio",{data:{sessions:cur}}); }).catch(function(){});
+  }
+  $("addPast").onclick=function(){
+    var m=parseInt(prompt("How many minutes?", "60"),10); if(!(m>0)) return;
+    var d=prompt("Date (YYYY-MM-DD)", today()); if(!/^\d{4}-\d{2}-\d{2}$/.test(d||"")) return;
+    addSession({date:d, mins:m, kind:pref.kind, full:true, at:new Date().toISOString()}); $("msg").textContent=m+" minutes logged";
+  };
+  function draw(){
+    var t=today(), now=new Date(), wk=new Date(now); wk.setDate(now.getDate()-((now.getDay()+6)%7)); var wkIso=wk.toISOString().slice(0,10);
+    var tMin=0,wMin=0, days={};
+    log.forEach(function(s){ if(s.date===t) tMin+=s.mins; if(s.date>=wkIso) wMin+=s.mins; days[s.date]=1; });
+    var streak=0, d=new Date(); if(!days[t]) d.setDate(d.getDate()-1);
+    while(days[d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")]){ streak++; d.setDate(d.getDate()-1); }
+    $("sToday").textContent=tMin; $("sWeek").textContent=wMin; $("sStreak").textContent=streak;
+    $("hist").innerHTML=log.slice(0,30).map(function(s){
+      var dd=new Date(s.date+"T00:00:00").toLocaleDateString("en-IN",{weekday:"short",day:"2-digit",month:"short"});
+      return '<div class="h"><span>'+dd+' · '+s.kind+'</span><span>'+s.mins+' min'+(s.full?'':' (ended early)')+'</span><button data-id="'+s.id+'" title="Delete">×</button></div>';
+    }).join("");
+    Array.prototype.forEach.call($("hist").querySelectorAll("button"),function(b){ b.onclick=function(){ if(confirm("Delete this session?")) removeSession(b.dataset.id); }; });
+  }
+  try{ log=JSON.parse(localStorage.getItem(KEY))||[]; }catch(e){ log=[]; }
+  draw(); idle();
+  api("getPortfolio").then(function(r){ if(r&&r.data&&Array.isArray(r.data.sessions)){ log=r.data.sessions; try{localStorage.setItem(KEY,JSON.stringify(log));}catch(e){} draw(); } }).catch(function(){});
+})();
+</script>
+</body>
+</html>
