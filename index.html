@@ -12186,6 +12186,275 @@ function AvailableFunds() {
   );
 }
 
+// ── DEBT RECOVERY ────────────────────────────────────────────────────────────
+// One case per debtor: invoices, payments, MSME interest (3× RBI bank rate,
+// compounded monthly), the 45-day MSME and 180-day GST-credit dates, an
+// escalation ladder that writes the letters, evidence, call/promise log with
+// Telegram reminders, and agency fees (e.g. 5% upfront + 20% of recoveries).
+const RC_STAGES=["New","Reminder sent","Demand sent","Legal notice","With agency","Samadhaan filed","MSEFC hearing","Award / court","Settled","Written off"];
+const rcId=()=>"rc"+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+const rcToday=()=>{const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");};
+const rcAdd=(iso,n)=>{const d=new Date(iso+"T00:00:00");d.setDate(d.getDate()+n);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");};
+const rcDays=(a,b)=>Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/864e5);
+const rcInr=n=>"₹"+Math.round(Number(n)||0).toLocaleString("en-IN");
+const rcFmt=iso=>{if(!iso)return"—";const d=new Date(iso+"T00:00:00");return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});};
+
+function rcCalc(c,settings,asOf){
+  asOf=asOf||rcToday();
+  const r=3*(Number(settings.bankRate)||0)/100, m=r/12;
+  const credit=Math.min(Number(c.creditDays)||45,45);
+  const inv=(c.invoices||[]).filter(i=>Number(i.amount)>0&&i.date).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const pays=(c.payments||[]).filter(p=>Number(p.amount)>0&&p.date).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const st=inv.map(i=>({i,due:rcAdd(i.delivered||i.date,credit),P:Number(i.amount),T:Number(i.amount),last:null}));
+  st.forEach(s=>s.last=s.due);
+  const grow=(s,to)=>{ if(to>s.last){ if(m>0) s.T*=Math.pow(1+m,rcDays(s.last,to)/30.4375); s.last=to; } };
+  pays.forEach(p=>{ let x=Number(p.amount);
+    for(const s of st){ if(x<=0)break; if(s.P<=0.5)continue; grow(s,p.date); const a=Math.min(x,s.P); s.P-=a; s.T-=a; x-=a; } });
+  let principal=0,interest=0; const rows=st.map(s=>{ grow(s,asOf);
+    const intr=Math.max(0,s.T-s.P), over=Math.max(0,rcDays(s.due,asOf)), itc=rcAdd(s.i.date,180);
+    principal+=s.P; interest+= s.P>0.5?intr:0;
+    return {inv:s.i,due:s.due,left:s.P,interest:s.P>0.5?intr:0,over,itc,itcDaysLeft:rcDays(asOf,itc)}; });
+  const billed=inv.reduce((a,i)=>a+Number(i.amount),0), paid=pays.reduce((a,p)=>a+Number(p.amount),0);
+  const viaAgency=pays.filter(p=>p.via==="agency").reduce((a,p)=>a+Number(p.amount),0);
+  const ag=c.agency||{}; const fee=ag.name?viaAgency*(Number(ag.feePct)||0)/100:0; const up=ag.name?Number(ag.upfrontAmount)||0:0;
+  return {rows,billed,paid,principal,interest,claim:principal+interest,viaAgency,fee,up,net:paid-fee-up,rate:r*100};
+}
+
+function rcLetter(kind,c,S,k){
+  const co=S.company||"Onam Agarbathi Pvt. Ltd.", today=rcFmt(rcToday());
+  const lines=k.rows.filter(x=>x.left>0.5).map(x=>`  • Invoice ${x.inv.no||"—"} dated ${rcFmt(x.inv.date)} — ${rcInr(x.inv.amount)} (balance ${rcInr(x.left)}, due since ${rcFmt(x.due)})`).join("\n");
+  const sign=`\n\nFor ${co}\n${S.signatory||"Ravikiran Karapakala, Director"}\n${S.phone||""}${S.email?"  ·  "+S.email:""}`;
+  const head=`${co}\n${S.address||""}\nGSTIN: ${S.gstin||"—"}   ·   Udyam: ${S.udyam||"—"} (${S.udyamType||"Micro"} Enterprise)\n\nDate: ${today}\n\nTo,\n${c.debtor}${c.address?"\n"+c.address:""}${c.gstin?"\nGSTIN: "+c.gstin:""}\n\n`;
+  if(kind==="reminder") return `Dear ${c.contact||c.debtor},\n\nA friendly reminder from ${co}: the following invoice(s) are now overdue —\n${lines}\n\nTotal outstanding: ${rcInr(k.principal)}.\n\nKindly arrange the payment at the earliest and share the UTR / cheque details. If it is already paid, please ignore this message and send us the details so we can update our books.\n\nThank you,\n${co}`;
+  if(kind==="demand") return head+`Subject: Demand for payment of outstanding dues — ${rcInr(k.principal)}\n\nDear Sir/Madam,\n\nDespite our reminders, the following invoices for goods supplied and received by you remain unpaid:\n${lines}\n\nPrincipal outstanding: ${rcInr(k.principal)}\n\nWe are a ${S.udyamType||"Micro"} Enterprise registered under the MSMED Act, 2006 (Udyam ${S.udyam||"—"}). Under Sections 15 and 16 of that Act, payment was due within 45 days of acceptance, and compound interest with monthly rests at three times the RBI bank rate now applies. Interest accrued so far is approximately ${rcInr(k.interest)}.\n\nWe request you to clear the principal of ${rcInr(k.principal)} within 7 days of this letter, failing which we shall be constrained to initiate proceedings, including before the Micro and Small Enterprises Facilitation Council, without further notice.`+sign;
+  if(kind==="legal") return head+`DRAFT — to be reviewed and issued by our advocate\n\nSubject: Legal notice for recovery of ${rcInr(k.claim)} under the MSMED Act, 2006\n\nSir/Madam,\n\n1. Our client ${co}, a ${S.udyamType||"Micro"} Enterprise registered under Udyam No. ${S.udyam||"—"}, supplied goods to you against the following invoices, which you accepted without any objection:\n${lines}\n\n2. Under Section 15 of the MSMED Act, 2006, you were bound to pay within 45 days of acceptance. Under Section 16, you are liable to pay compound interest with monthly rests at three times the bank rate notified by the RBI (${(k.rate).toFixed(2)}% p.a. used here). As on ${today}:\n   Principal: ${rcInr(k.principal)}\n   Interest (approx.): ${rcInr(k.interest)}\n   Total: ${rcInr(k.claim)}\n\n3. Under the second proviso to Section 16(2) of the CGST Act, 2017, input tax credit taken on these invoices must be reversed with interest where the supplier is not paid within 180 days of the invoice date. Under Section 43B(h) of the Income-tax Act, 1961, sums due to a micro or small enterprise and not paid within the time allowed by Section 15 of the MSMED Act are not deductible.\n\n4. You are hereby called upon to pay ${rcInr(k.claim)} within 15 days of receipt of this notice, failing which our client will refer the matter to the Micro and Small Enterprises Facilitation Council under Section 18 of the MSMED Act and/or initiate such other proceedings as advised, entirely at your risk as to costs and consequences.\n\nThis notice is issued without prejudice to all other rights and remedies of our client.`+sign;
+  if(kind==="samadhaan") return `MSME SAMADHAAN — FILING PACK\nPortal: https://samadhaan.msme.gov.in  (Application Entry → login with Udyam number + mobile OTP)\n\nPETITIONER\n${co}\nUdyam: ${S.udyam||"—"} (${S.udyamType||"Micro"})   ·   GSTIN: ${S.gstin||"—"}\n${S.address||""}\n\nRESPONDENT (BUYER)\n${c.debtor}\n${c.address||""}\nGSTIN: ${c.gstin||"—"}   ·   Phone: ${c.phone||"—"}   ·   Email: ${c.email||"—"}\n\nINVOICES\n${lines}\n\nPrincipal: ${rcInr(k.principal)}   ·   Interest (approx.): ${rcInr(k.interest)}   ·   Total claim: ${rcInr(k.claim)}\n\nUPLOAD CHECKLIST\n  [ ] Udyam certificate (registered before the invoice dates)\n  [ ] Each invoice\n  [ ] Purchase order / agreement — or the affidavit below if there is none\n  [ ] Delivery proof: LR / e-way bill / signed delivery challan\n  [ ] Reminders, demand letter, legal notice (with postal / email proof)\n  [ ] Ledger / statement of account\n\nAFFIDAVIT FORMAT (when there is no purchase order)\nI, ${S.signatory||"Ravikiran Karapakala"}, Director of ${co}, do hereby solemnly affirm that goods were supplied to ${c.debtor} against the invoices listed above on the buyer's oral order, that the goods were accepted without objection, and that the amounts stated remain unpaid as on ${today}.\n\nWHAT HAPPENS NEXT\n  • The council sends the buyer a notice; conciliation follows.\n  • If unresolved, arbitration under Section 18; the award is enforceable like a court decree.\n  • To challenge the award, the buyer must first deposit 75% of the amount (Section 19).`;
+  return "";
+}
+
+function DebtRecovery({ onClose }){
+  const [data,setData]=useState(null), [sel,setSel]=useState(null), [tab,setTab]=useState("money");
+  const [msg,setMsg]=useState(""), [letter,setLetter]=useState(null), [busy,setBusy]=useState(false), [showSet,setShowSet]=useState(false);
+  useEffect(()=>{ (async()=>{
+    const r=await sheetsAPI("getPortfolio",{key:"recovery_cases",user:"main"});
+    const d=(r&&r.data)||{};
+    setData({settings:Object.assign({company:"Onam Agarbathi Pvt. Ltd.",udyamType:"Micro",bankRate:5.75,signatory:"Ravikiran Karapakala, Director"},d.settings||{}),cases:d.cases||[]});
+  })(); },[]);
+  const persist=async(next)=>{ setData(next); setBusy(true);
+    try{ await sheetsAPI("savePortfolio",{key:"recovery_cases",user:"main",data:next}); setMsg("✓ Saved"); }catch(e){ setMsg("✗ Not saved — check connection"); }
+    setBusy(false); setTimeout(()=>setMsg(""),2000); };
+  if(!data) return <div style={{padding:30,textAlign:"center",color:"#8a6a3a"}}>⏳ Loading…</div>;
+  const S=data.settings;
+  const upd=(id,fn)=>persist({...data,cases:data.cases.map(c=>c.id===id?fn(JSON.parse(JSON.stringify(c))):c)});
+  const inp={padding:"8px 9px",border:"1px solid #d8cdb0",borderRadius:7,fontSize:13,width:"100%",boxSizing:"border-box",background:"#fff"};
+  const btn=(bg,fg)=>({padding:"8px 12px",borderRadius:8,border:"none",background:bg,color:fg||"#fff",fontWeight:700,fontSize:12.5,cursor:"pointer"});
+  const card={background:"#fff",border:"1px solid #eadfc4",borderRadius:12,padding:12,marginBottom:10};
+  const all=data.cases.map(c=>({c,k:rcCalc(c,S)}));
+  const today=rcToday();
+
+  // ── settings ──
+  const SettingsBox=()=>{ const [f,setF]=useState(S);
+    return <div style={card}>
+      <b style={{fontSize:13}}>Your details for letters</b>
+      {[["company","Company"],["address","Address"],["gstin","GSTIN"],["udyam","Udyam number"],["signatory","Signed by"],["phone","Phone"],["email","Email"]].map(([k,l])=>
+        <div key={k} style={{marginTop:6}}><div style={{fontSize:11,color:"#8a7a5a"}}>{l}</div><input style={inp} value={f[k]||""} onChange={e=>setF({...f,[k]:e.target.value})}/></div>)}
+      <div style={{display:"flex",gap:8,marginTop:6}}>
+        <div style={{flex:1}}><div style={{fontSize:11,color:"#8a7a5a"}}>Udyam type</div><select style={inp} value={f.udyamType} onChange={e=>setF({...f,udyamType:e.target.value})}><option>Micro</option><option>Small</option><option>Medium</option></select></div>
+        <div style={{flex:1}}><div style={{fontSize:11,color:"#8a7a5a"}}>RBI bank rate % (check rbi.org.in)</div><input style={inp} type="number" step="0.05" value={f.bankRate} onChange={e=>setF({...f,bankRate:e.target.value})}/></div>
+      </div>
+      {f.udyamType==="Medium"&&<div style={{color:"#a33",fontSize:12,marginTop:6}}>MSME interest and Samadhaan apply only to Micro and Small enterprises.</div>}
+      <button style={{...btn("#1f4a32"),marginTop:10}} onClick={()=>{persist({...data,settings:f});setShowSet(false);}}>Save details</button>
+    </div>; };
+
+  // ── case list ──
+  if(!sel){
+    const tot=all.reduce((a,x)=>({p:a.p+x.k.principal,i:a.i+x.k.interest}),{p:0,i:0});
+    const open=all.filter(x=>!["Settled","Written off"].includes(x.c.stage));
+    const todo=[];
+    open.forEach(({c,k})=>{
+      (c.log||[]).filter(l=>l.type==="ptp"&&l.ptpDate&&!l.done&&l.ptpDate<=today).forEach(l=>todo.push({c,t:"📞 Promise due "+rcFmt(l.ptpDate)+(l.amount?" · "+rcInr(l.amount):"")}));
+      k.rows.filter(r=>r.left>0.5&&r.itcDaysLeft>=0&&r.itcDaysLeft<=20).forEach(r=>todo.push({c,t:"⏳ GST 180-day mark in "+r.itcDaysLeft+" days (inv "+(r.inv.no||"—")+") — good time for the legal notice"}));
+      const last=(c.log||[]).reduce((m,l)=>l.date>m?l.date:m,c.created||"");
+      if(k.principal>0.5&&last&&rcDays(last,today)>=7) todo.push({c,t:"🕑 No action for "+rcDays(last,today)+" days"});
+    });
+    return <div>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+        <h2 style={{margin:0,fontSize:18,color:"#1a3a2a",flex:1}}>⚖️ Debt Recovery</h2>
+        <button style={btn("#f3ead2","#5a4a20")} onClick={()=>setShowSet(s=>!s)}>⚙️ Details</button>
+      </div>
+      {showSet&&<SettingsBox/>}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+        <div style={{flex:"1 1 140px",background:"linear-gradient(135deg,#7a2a1a,#4a1a10)",color:"#fff",borderRadius:12,padding:"10px 12px"}}><div style={{fontSize:10.5,opacity:.8,fontWeight:700}}>STUCK (PRINCIPAL)</div><div style={{fontSize:20,fontWeight:800}}>{rcInr(tot.p)}</div></div>
+        <div style={{flex:"1 1 140px",background:"#fff4e6",border:"1px solid #f0c890",color:"#7a4a10",borderRadius:12,padding:"10px 12px"}}><div style={{fontSize:10.5,fontWeight:700}}>MSME INTEREST DUE</div><div style={{fontSize:20,fontWeight:800}}>{rcInr(tot.i)}</div></div>
+        <div style={{flex:"1 1 140px",background:"#eef6ee",border:"1px solid #b8dcb8",color:"#2a5a2a",borderRadius:12,padding:"10px 12px"}}><div style={{fontSize:10.5,fontWeight:700}}>OPEN CASES</div><div style={{fontSize:20,fontWeight:800}}>{open.length}</div></div>
+      </div>
+      {todo.length>0&&<div style={{...card,background:"#fffaf0"}}><b style={{fontSize:13}}>Today</b>{todo.slice(0,8).map((x,i)=><div key={i} onClick={()=>{setSel(x.c.id);setTab("log");}} style={{fontSize:12.5,padding:"5px 0",borderBottom:"1px dashed #eadfc4",cursor:"pointer"}}><b>{x.c.debtor}</b> — {x.t}</div>)}</div>}
+      <button style={{...btn("#1f4a32"),width:"100%",padding:12,marginBottom:10}} onClick={()=>{
+        const name=prompt("Debtor name (firm)"); if(!name) return;
+        const c={id:rcId(),debtor:name.trim(),stage:"New",creditDays:45,invoices:[],payments:[],log:[],files:[],agency:{},created:today};
+        persist({...data,cases:[c,...data.cases]}); setSel(c.id); setTab("money"); }}>+ New case</button>
+      {all.length===0&&<div style={{textAlign:"center",color:"#9a8a6a",padding:20,fontSize:13}}>No cases yet. Add the first debtor above.</div>}
+      {all.map(({c,k})=><div key={c.id} style={{...card,cursor:"pointer"}} onClick={()=>{setSel(c.id);setTab("money");}}>
+        <div style={{display:"flex",gap:8,alignItems:"baseline"}}><b style={{flex:1,fontSize:14}}>{c.debtor}</b><span style={{fontSize:11,background:"#f3ead2",borderRadius:10,padding:"2px 8px",color:"#6a5020"}}>{c.stage}</span></div>
+        <div style={{fontSize:12.5,color:"#5a4a30",marginTop:3}}>Due {rcInr(k.principal)} · interest {rcInr(k.interest)}{c.agency&&c.agency.name?" · 🤝 "+c.agency.name:""}</div>
+      </div>)}
+      <div style={{fontSize:11,color:"#9a8a6a",marginTop:6}}>{msg||"Interest is an estimate at 3× the RBI bank rate you set ("+S.bankRate+"%). Letters are drafts — have your advocate review the legal notice."}</div>
+    </div>;
+  }
+
+  const c=data.cases.find(x=>x.id===sel); if(!c){setSel(null);return null;}
+  const k=rcCalc(c,S);
+  const tabs=[["money","💰 Invoices"],["letters","✉️ Letters"],["log","📞 Log"],["files","📎 Evidence"],["agency","🤝 Agency"]];
+  const field=(label,key,type)=><div style={{flex:"1 1 160px"}}><div style={{fontSize:11,color:"#8a7a5a"}}>{label}</div>
+    <input style={inp} type={type||"text"} defaultValue={c[key]||""} onBlur={e=>{if(e.target.value!==(c[key]||""))upd(c.id,x=>{x[key]=e.target.value;return x;});}}/></div>;
+
+  return <div>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+      <button style={btn("#f3ead2","#5a4a20")} onClick={()=>{setSel(null);setLetter(null);}}>‹ All</button>
+      <h2 style={{margin:0,fontSize:17,color:"#1a3a2a",flex:1}}>{c.debtor}</h2>
+      <select style={{...inp,width:"auto"}} value={c.stage} onChange={e=>upd(c.id,x=>{x.stage=e.target.value;x.log=(x.log||[]).concat([{id:rcId(),date:today,type:"note",text:"Stage → "+e.target.value}]);return x;})}>{RC_STAGES.map(s=><option key={s}>{s}</option>)}</select>
+    </div>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8,fontSize:12.5}}>
+      <span>Billed <b>{rcInr(k.billed)}</b></span><span>Paid <b>{rcInr(k.paid)}</b></span><span style={{color:"#8a2a1a"}}>Due <b>{rcInr(k.principal)}</b></span><span style={{color:"#8a5a10"}}>+ interest <b>{rcInr(k.interest)}</b></span><span>Claim <b>{rcInr(k.claim)}</b></span>
+    </div>
+    <div style={{display:"flex",gap:4,overflowX:"auto",marginBottom:10}}>{tabs.map(([t,l])=><button key={t} onClick={()=>{setTab(t);setLetter(null);}} style={{...btn(tab===t?"#1f4a32":"#f3ead2",tab===t?"#fff":"#5a4a20"),flex:"0 0 auto"}}>{l}</button>)}</div>
+
+    {tab==="money"&&<div>
+      <div style={{...card,display:"flex",flexWrap:"wrap",gap:8}}>
+        {field("Contact person","contact")}{field("Phone (WhatsApp)","phone","tel")}{field("Email","email","email")}{field("GSTIN","gstin")}
+        <div style={{flex:"1 1 100%"}}><div style={{fontSize:11,color:"#8a7a5a"}}>Address</div><input style={inp} defaultValue={c.address||""} onBlur={e=>upd(c.id,x=>{x.address=e.target.value;return x;})}/></div>
+        {field("Agreed credit days (max 45 counts)","creditDays","number")}
+        {c.gstin&&<a href="https://services.gst.gov.in/services/searchtp" target="_blank" rel="noopener" style={{fontSize:12,alignSelf:"flex-end"}}>Check GSTIN status ↗</a>}
+      </div>
+      <div style={card}>
+        <b style={{fontSize:13}}>Invoices</b>
+        {k.rows.map(r=><div key={r.inv.id} style={{fontSize:12.5,padding:"6px 0",borderBottom:"1px dashed #eadfc4"}}>
+          <div style={{display:"flex",gap:6}}><b style={{flex:1}}>#{r.inv.no||"—"} · {rcFmt(r.inv.date)} · {rcInr(r.inv.amount)}</b>
+            <button style={{border:"none",background:"none",color:"#b33",cursor:"pointer"}} onClick={()=>{if(confirm("Remove invoice?"))upd(c.id,x=>{x.invoices=x.invoices.filter(i=>i.id!==r.inv.id);return x;});}}>×</button></div>
+          <div style={{color:r.left>0.5?"#7a3a10":"#2a6a2a"}}>{r.left>0.5?`Balance ${rcInr(r.left)} · ${r.over} days past due (${rcFmt(r.due)}) · interest ${rcInr(r.interest)}`:"✓ Paid"}</div>
+          {r.left>0.5&&<div style={{color:r.itcDaysLeft<0?"#8a2a1a":"#5a6a7a"}}>GST 180-day mark: {rcFmt(r.itc)} {r.itcDaysLeft<0?"— passed: buyer must reverse credit":"("+r.itcDaysLeft+" days)"}</div>}
+        </div>)}
+        <InvoiceAdd onAdd={i=>upd(c.id,x=>{x.invoices=(x.invoices||[]).concat([i]);return x;})} inp={inp} btn={btn}/>
+      </div>
+      <div style={card}>
+        <b style={{fontSize:13}}>Payments received</b>
+        {(c.payments||[]).slice().sort((a,b)=>b.date.localeCompare(a.date)).map(p=><div key={p.id} style={{fontSize:12.5,padding:"5px 0",borderBottom:"1px dashed #eadfc4",display:"flex",gap:6}}>
+          <span style={{flex:1}}>{rcFmt(p.date)} · <b>{rcInr(p.amount)}</b>{p.via==="agency"?" · via agency":""}{p.note?" · "+p.note:""}</span>
+          <button style={{border:"none",background:"none",color:"#b33",cursor:"pointer"}} onClick={()=>{if(confirm("Remove payment?"))upd(c.id,x=>{x.payments=x.payments.filter(y=>y.id!==p.id);return x;});}}>×</button></div>)}
+        <PaymentAdd hasAgency={!!(c.agency&&c.agency.name)} onAdd={p=>upd(c.id,x=>{x.payments=(x.payments||[]).concat([p]);x.log=(x.log||[]).concat([{id:rcId(),date:p.date,type:"note",text:"Payment received "+rcInr(p.amount)+(p.via==="agency"?" (via agency)":"")}]);return x;})} inp={inp} btn={btn}/>
+      </div>
+    </div>}
+
+    {tab==="letters"&&<div>
+      {!letter&&[["reminder","1 · Friendly reminder","WhatsApp / email","Reminder sent"],["demand","2 · Formal demand letter","7 days to pay","Demand sent"],["legal","3 · Legal notice (draft for advocate)","MSME + GST 180-day + 43B(h), 15 days","Legal notice"],["samadhaan","4 · MSME Samadhaan filing pack","Checklist, claim, affidavit format","Samadhaan filed"]].map(([kd,t,s,stage])=>
+        <div key={kd} style={{...card,cursor:"pointer"}} onClick={()=>setLetter({kind:kd,stage,text:rcLetter(kd,c,S,k)})}><b style={{fontSize:13.5}}>{t}</b><div style={{fontSize:12,color:"#7a6a4a"}}>{s}</div></div>)}
+      {letter&&<div>
+        <textarea style={{...inp,minHeight:320,fontFamily:"inherit",lineHeight:1.45}} value={letter.text} onChange={e=>setLetter({...letter,text:e.target.value})}/>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+          <button style={btn("#25a35a")} onClick={()=>window.open("https://wa.me/"+String(c.phone||"").replace(/\D/g,"").replace(/^(\d{10})$/,"91$1")+"?text="+encodeURIComponent(letter.text),"_blank")}>WhatsApp</button>
+          <button style={btn("#2a5a8a")} onClick={()=>window.open("mailto:"+(c.email||"")+"?subject="+encodeURIComponent((letter.kind==="legal"?"Legal notice":letter.kind==="demand"?"Demand for payment":"Payment reminder")+" — "+(S.company||""))+"&body="+encodeURIComponent(letter.text))}>Email</button>
+          <button style={btn("#6a4a20")} onClick={()=>{const w=window.open("","_blank");if(!w)return;w.document.write("<pre style='font:14px/1.55 Georgia,serif;white-space:pre-wrap;max-width:720px;margin:40px auto'>"+letter.text.replace(/[&<]/g,s=>s==="&"?"&amp;":"&lt;")+"</pre>");w.document.close();w.focus();w.print();}}>Print / PDF</button>
+          <button style={btn("#f3ead2","#5a4a20")} onClick={()=>{try{navigator.clipboard.writeText(letter.text);setMsg("Copied");setTimeout(()=>setMsg(""),1500);}catch(e){}}}>Copy</button>
+          <button style={btn("#1f4a32")} onClick={()=>{upd(c.id,x=>{x.stage=RC_STAGES.indexOf(letter.stage)>RC_STAGES.indexOf(x.stage)?letter.stage:x.stage;x.log=(x.log||[]).concat([{id:rcId(),date:today,type:"letter",text:letter.stage+" — "+letter.text.slice(0,80)+"…"}]);return x;});setLetter(null);}}>✓ Mark as sent</button>
+          <button style={btn("#eee","#555")} onClick={()=>setLetter(null)}>Back</button>
+        </div>
+        {letter.kind==="samadhaan"&&<a href="https://samadhaan.msme.gov.in" target="_blank" rel="noopener" style={{display:"inline-block",marginTop:8,fontSize:13}}>Open MSME Samadhaan portal ↗</a>}
+      </div>}
+    </div>}
+
+    {tab==="log"&&<div>
+      <LogAdd onAdd={async l=>{ upd(c.id,x=>{x.log=(x.log||[]).concat([l]);return x;});
+        if(l.type==="ptp"&&l.ptpDate){ try{ await fetch("/.netlify/functions/travel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"reminder",title:"Payment promise: "+c.debtor+(l.amount?" "+rcInr(l.amount):""),when:l.ptpDate+"T10:00:00+05:30",note:l.text||""})}); setMsg("🔔 Telegram reminder set for "+rcFmt(l.ptpDate)); }catch(e){} } }} inp={inp} btn={btn}/>
+      {(c.log||[]).slice().reverse().map(l=><div key={l.id} style={{...card,padding:"8px 10px",fontSize:12.5}}>
+        <div style={{display:"flex",gap:6}}><b style={{flex:1}}>{rcFmt(l.date)} · {l.type==="ptp"?"🤝 Promise to pay":l.type==="call"?"📞 Call":l.type==="letter"?"✉️ Letter":"📝 Note"}</b>
+          {l.type==="ptp"&&!l.done&&<button style={btn("#eef6ee","#2a5a2a")} onClick={()=>upd(c.id,x=>{x.log=x.log.map(y=>y.id===l.id?{...y,done:true}:y);return x;})}>Kept ✓</button>}</div>
+        {l.type==="ptp"&&<div>Promised {l.amount?rcInr(l.amount)+" ":""}by {rcFmt(l.ptpDate)}{l.done?" — kept":l.ptpDate<today?" — ⚠️ broken":""}</div>}
+        {l.text&&<div style={{color:"#5a4a30",whiteSpace:"pre-wrap"}}>{l.text}</div>}
+      </div>)}
+    </div>}
+
+    {tab==="files"&&<div>
+      <div style={card}>
+        <div style={{fontSize:12,color:"#7a6a4a",marginBottom:6}}>Invoices, POs, LR / e-way bills, delivery proof, chat screenshots, ledger.</div>
+        <input type="file" multiple accept="image/*,application/pdf,*/*" onChange={async e=>{const fs=[...e.target.files];e.target.value="";if(!fs.length)return;setMsg("Uploading…");
+          const out=[];for(const f of fs){try{const a=await fileToB64(f);const d=await uploadToDrive(a);if(d&&d.type==="drive")out.push({id:rcId(),name:f.name,url:d.data,date:today});}catch(err){}}
+          upd(c.id,x=>{x.files=(x.files||[]).concat(out);return x;});setMsg(out.length+" file(s) saved to Drive");}}/>
+      </div>
+      {(c.files||[]).map(f=><div key={f.id} style={{...card,padding:"8px 10px",fontSize:12.5,display:"flex",gap:6}}>
+        <a href={f.url} target="_blank" rel="noopener" style={{flex:1}}>📎 {f.name}</a><span style={{color:"#9a8a6a"}}>{rcFmt(f.date)}</span>
+        <button style={{border:"none",background:"none",color:"#b33",cursor:"pointer"}} onClick={()=>{if(confirm("Remove from list? (file stays in Drive)"))upd(c.id,x=>{x.files=x.files.filter(y=>y.id!==f.id);return x;});}}>×</button></div>)}
+    </div>}
+
+    {tab==="agency"&&<AgencyBox c={c} k={k} inp={inp} btn={btn} card={card} onSave={ag=>upd(c.id,x=>{x.agency=ag;if(ag.name&&RC_STAGES.indexOf(x.stage)<RC_STAGES.indexOf("With agency"))x.stage="With agency";return x;})}/>}
+
+    <div style={{fontSize:11.5,color:"#7a6a4a",marginTop:8,minHeight:16}}>{busy?"Saving…":msg}</div>
+    <button style={{...btn("#fbecee","#8a2434"),marginTop:6}} onClick={()=>{if(confirm("Delete this whole case?")){persist({...data,cases:data.cases.filter(x=>x.id!==c.id)});setSel(null);}}}>Delete case</button>
+  </div>;
+}
+
+function InvoiceAdd({onAdd,inp,btn}){
+  const [f,setF]=useState({no:"",date:rcToday(),delivered:"",amount:""});
+  return <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+    <input style={{...inp,flex:"1 1 90px"}} placeholder="Invoice no" value={f.no} onChange={e=>setF({...f,no:e.target.value})}/>
+    <div style={{flex:"1 1 130px"}}><div style={{fontSize:10.5,color:"#8a7a5a"}}>Invoice date</div><input style={inp} type="date" value={f.date} onChange={e=>setF({...f,date:e.target.value})}/></div>
+    <div style={{flex:"1 1 130px"}}><div style={{fontSize:10.5,color:"#8a7a5a"}}>Delivered on (optional)</div><input style={inp} type="date" value={f.delivered} onChange={e=>setF({...f,delivered:e.target.value})}/></div>
+    <input style={{...inp,flex:"1 1 110px"}} placeholder="Amount ₹ (incl. GST)" inputMode="decimal" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})}/>
+    <button style={btn("#1f4a32")} onClick={()=>{if(!(Number(f.amount)>0)||!f.date)return;onAdd({id:rcId(),...f,amount:Number(f.amount)});setF({no:"",date:f.date,delivered:"",amount:""});}}>+ Add invoice</button>
+  </div>;
+}
+function PaymentAdd({onAdd,inp,btn,hasAgency}){
+  const [f,setF]=useState({date:rcToday(),amount:"",via:"direct",note:""});
+  return <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+    <input style={{...inp,flex:"1 1 130px"}} type="date" value={f.date} onChange={e=>setF({...f,date:e.target.value})}/>
+    <input style={{...inp,flex:"1 1 110px"}} placeholder="Amount ₹" inputMode="decimal" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})}/>
+    {hasAgency&&<select style={{...inp,flex:"1 1 120px"}} value={f.via} onChange={e=>setF({...f,via:e.target.value})}><option value="direct">Paid to us directly</option><option value="agency">Recovered by agency</option></select>}
+    <input style={{...inp,flex:"2 1 140px"}} placeholder="UTR / cheque / note" value={f.note} onChange={e=>setF({...f,note:e.target.value})}/>
+    <button style={btn("#2a6a2a")} onClick={()=>{if(!(Number(f.amount)>0))return;onAdd({id:rcId(),...f,amount:Number(f.amount)});setF({...f,amount:"",note:""});}}>+ Payment</button>
+  </div>;
+}
+function LogAdd({onAdd,inp,btn}){
+  const [f,setF]=useState({type:"call",text:"",ptpDate:"",amount:""});
+  return <div style={{background:"#fffaf0",border:"1px solid #eadfc4",borderRadius:12,padding:10,marginBottom:10}}>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+      <select style={{...inp,flex:"1 1 130px"}} value={f.type} onChange={e=>setF({...f,type:e.target.value})}><option value="call">📞 Call</option><option value="ptp">🤝 Promise to pay</option><option value="note">📝 Note</option></select>
+      {f.type==="ptp"&&<input style={{...inp,flex:"1 1 130px"}} type="date" value={f.ptpDate} onChange={e=>setF({...f,ptpDate:e.target.value})}/>}
+      {f.type==="ptp"&&<input style={{...inp,flex:"1 1 110px"}} placeholder="Amount ₹" inputMode="decimal" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})}/>}
+    </div>
+    <textarea style={{...inp,marginTop:6,minHeight:56}} placeholder="What was said" value={f.text} onChange={e=>setF({...f,text:e.target.value})}/>
+    <button style={{...btn("#1f4a32"),marginTop:6}} onClick={()=>{if(f.type==="ptp"&&!f.ptpDate)return;if(!f.text&&f.type!=="ptp")return;onAdd({id:rcId(),date:rcToday(),type:f.type,text:f.text,ptpDate:f.ptpDate,amount:Number(f.amount)||0});setF({type:"call",text:"",ptpDate:"",amount:""});}}>Add{f.type==="ptp"?" + Telegram reminder":""}</button>
+  </div>;
+}
+function AgencyBox({c,k,inp,btn,card,onSave}){
+  const a=c.agency||{};
+  const [f,setF]=useState({name:a.name||"",upfrontPct:a.upfrontPct!=null?a.upfrontPct:5,feePct:a.feePct!=null?a.feePct:20,upfrontAmount:a.upfrontAmount!=null?a.upfrontAmount:"",engaged:a.engaged||rcToday(),contact:a.contact||""});
+  const suggested=Math.round(k.principal*(Number(f.upfrontPct)||0)/100);
+  return <div>
+    <div style={card}>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        <div style={{flex:"2 1 160px"}}><div style={{fontSize:11,color:"#8a7a5a"}}>Agency</div><input style={inp} placeholder="e.g. PayAssured" value={f.name} onChange={e=>setF({...f,name:e.target.value})}/></div>
+        <div style={{flex:"2 1 160px"}}><div style={{fontSize:11,color:"#8a7a5a"}}>Their contact</div><input style={inp} value={f.contact} onChange={e=>setF({...f,contact:e.target.value})}/></div>
+        <div style={{flex:"1 1 110px"}}><div style={{fontSize:11,color:"#8a7a5a"}}>Engaged on</div><input style={inp} type="date" value={f.engaged} onChange={e=>setF({...f,engaged:e.target.value})}/></div>
+        <div style={{flex:"1 1 80px"}}><div style={{fontSize:11,color:"#8a7a5a"}}>Upfront %</div><input style={inp} type="number" value={f.upfrontPct} onChange={e=>setF({...f,upfrontPct:e.target.value})}/></div>
+        <div style={{flex:"1 1 110px"}}><div style={{fontSize:11,color:"#8a7a5a"}}>Upfront paid ₹</div><input style={inp} type="number" placeholder={String(suggested)} value={f.upfrontAmount} onChange={e=>setF({...f,upfrontAmount:e.target.value})}/></div>
+        <div style={{flex:"1 1 80px"}}><div style={{fontSize:11,color:"#8a7a5a"}}>Success fee %</div><input style={inp} type="number" value={f.feePct} onChange={e=>setF({...f,feePct:e.target.value})}/></div>
+      </div>
+      <button style={{...btn("#1f4a32"),marginTop:8}} onClick={()=>onSave({...f,upfrontAmount:f.upfrontAmount===""?suggested:Number(f.upfrontAmount)})}>Save agency</button>
+    </div>
+    {a.name&&<div style={card}>
+      <b style={{fontSize:13}}>Money so far</b>
+      <table style={{width:"100%",fontSize:13,marginTop:6,borderCollapse:"collapse"}}><tbody>
+        <tr><td>Recovered by {a.name}</td><td style={{textAlign:"right"}}>{rcInr(k.viaAgency)}</td></tr>
+        <tr><td>Recovered directly</td><td style={{textAlign:"right"}}>{rcInr(k.paid-k.viaAgency)}</td></tr>
+        <tr><td>Upfront paid ({a.upfrontPct}%)</td><td style={{textAlign:"right",color:"#8a2a1a"}}>− {rcInr(k.up)}</td></tr>
+        <tr><td>Success fee ({a.feePct}% of agency recoveries)</td><td style={{textAlign:"right",color:"#8a2a1a"}}>− {rcInr(k.fee)}</td></tr>
+        <tr style={{fontWeight:800,borderTop:"1px solid #d8cdb0"}}><td>Net in your hand</td><td style={{textAlign:"right"}}>{rcInr(k.net)}</td></tr>
+        <tr><td style={{color:"#7a6a4a"}}>Still to recover</td><td style={{textAlign:"right",color:"#7a6a4a"}}>{rcInr(k.principal)} + interest {rcInr(k.interest)}</td></tr>
+      </tbody></table>
+      <div style={{fontSize:11.5,color:"#7a6a4a",marginTop:6}}>Log each recovery under 💰 Invoices → Payments as "Recovered by agency" so the fee is worked out on it. Check the agreement on whether their fee also applies to money the buyer pays you directly.</div>
+    </div>}
+  </div>;
+}
+
 function CFOBrief({ entries, onClose }) {
   const [loading, setLoading] = useState(false);
   const [brief, setBrief] = useState(null);
@@ -17452,6 +17721,7 @@ function App(){
   const [teamMenuOpen,setTeamMenuOpen]=useState(false);
   const [navMenuOpen,setNavMenuOpen]=useState(false);
   const [showCFO,setShowCFO]=useState(false);
+  const [showRecovery,setShowRecovery]=useState(false);
   const [showSpectrum,setShowSpectrum]=useState(false);
   const [showCSD,setShowCSD]=useState(false);
   const [showKerala,setShowKerala]=useState(false);
@@ -17996,6 +18266,7 @@ function App(){
                 {l:"📈 CFO Brief",fn:()=>setShowCFO(true), ownerOnly:true},
                 {l:"🏦 Bank Archive",fn:()=>setShowBank(true), ownerOnly:true},
                 {l:"💰 Receivables",fn:()=>setShowRecv(true), ownerOnly:true},
+                {l:"⚖️ Debt Recovery",fn:()=>setShowRecovery(true), ownerOnly:true},
                 {l:"📦 Orders",fn:()=>setShowOrders(true), ordersOnly:true},
                 {l:"📈 RK Trading",fn:()=>setShowAIM(true), ownerOnly:true},
                 {l:"🌈 Spectrum",fn:()=>setShowSpectrum(true), ownerOnly:true},
@@ -18285,6 +18556,7 @@ function App(){
     <Modal open={showLocation && IS_OWNER} onClose={()=>setShowLocation(false)} wide><LocationTracker onClose={()=>setShowLocation(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showDayBook} onClose={()=>setShowDayBook(false)} wide><DayBook onClose={()=>setShowDayBook(false)} onSaveEntry={saveEntry} entries={entries}/></Modal>
     <Modal open={showHealth} onClose={()=>setShowHealth(false)}><HealthFamilyQuick onClose={()=>setShowHealth(false)} onSaveEntry={saveEntry} mode="health" entries={entries}/></Modal>
+    <Modal open={showRecovery && IS_OWNER} onClose={()=>setShowRecovery(false)} wide><DebtRecovery onClose={()=>setShowRecovery(false)}/></Modal>
     <Modal open={showCFO && IS_OWNER} onClose={()=>setShowCFO(false)}><CFOBrief entries={entries} onClose={()=>setShowCFO(false)}/></Modal>
     <Modal open={showSpectrum && IS_OWNER} onClose={()=>setShowSpectrum(false)}><Spectrum onClose={()=>setShowSpectrum(false)} onSaveEntry={saveEntry}/></Modal>
     <Modal open={showCSD && IS_CSD_USER} onClose={()=>setShowCSD(false)} wide><CSD onClose={()=>setShowCSD(false)} onSaveEntry={saveEntry}/></Modal>
