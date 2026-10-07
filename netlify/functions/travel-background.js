@@ -43,19 +43,22 @@ function prompt(brief, profile) {
 Brief: """${brief}"""
 Travellers and rules (follow strictly): ${JSON.stringify(profile || {})}
 
-Plan the trip. Rules of thumb: gentle pace, one main thing per day; hotels 4-star, central, on flat ground, walkable to sights; compare hotels on TOTAL cost including taxis; avoid routings that need extra transit visas for Indian passports; keep flights short; vegetarian food notes. Give 3 real hotel options per stay (mark one "pick": true), and flag any option that breaks a rule. Prices are estimates.
+Plan the trip. Rules of thumb: gentle pace, one main thing per day; hotels 4-star, central, on flat ground, walkable to sights; compare hotels on TOTAL cost including taxis; avoid routings that need extra transit visas for Indian passports; keep flights short; vegetarian food notes. Give 3 real hotel options per stay (mark one "pick": true), and flag any option that breaks a rule.
+Hotel "stars" must be the hotel's REAL official class (a 5-star luxury hotel is 5, never 4). Prefer genuine 4-star hotels; offer 5-star only if the brief asks or the price is close, and say so in "why".
+ALL prices ("perNight", budget) in INR, realistic for the travel dates — never placeholders. "currency" is always "INR".
+Use the real local currency of the destination in "fx" (e.g. CNY for China, EUR for Italy, NZD for New Zealand) with today's approximate INR rate.
 
 Call save_plan with exactly this shape:
 {"name":"trip name","start":"YYYY-MM-DD (departure day from home)","pax":number,"homeCity":"Bengaluru","homeAirport":"BLR",
 "summary":"2 sentences",
 "sectors":[{"city":"","nights":n,"mode":"flight|train|car|bus|ferry","airport":"IATA or empty"}],
-"flights":[{"from":"IATA","to":"IATA","date":"YYYY-MM-DD","label":"e.g. Bangalore → Auckland","international":true}],
+"flights":[{"from":"IATA","to":"IATA","date":"YYYY-MM-DD","label":"City → City","international":true}],
 "flightAdvice":"which airline/route to prefer and why; routes to avoid",
-"hotels":[{"sector":index,"options":[{"name":"","area":"","stars":4,"perNight":number,"currency":"NZD","pick":true,"why":"","flag":""}]}],
+"hotels":[{"sector":0-based index into sectors,"options":[{"name":"","area":"","stars":number,"perNight":INR number,"currency":"INR","pick":true,"why":"","flag":""}]}],
 "days":[{"date":"YYYY-MM-DD","items":[{"type":"flight|train|hotel|taxi|activity|other","time":"HH:MM or empty","title":"","note":""}]}],
 "budget":[{"item":"","inr":number}],
 "docs":[{"title":"","due":"YYYY-MM-DD","note":""}],
-"fx":{"currency":"NZD","inr":51}}
+"fx":{"currency":"local currency code","inr":rate}}
 The nights of all sectors must add up to the trip length; days must cover start date to the day you land home. Budget in INR for all travellers together.`;
 }
 
@@ -86,7 +89,7 @@ exports.handler = async (event) => {
         const s = (plan.sectors || [])[h.sector];
         if (!pick || !s) continue;
         const ci = hotelCheckin(plan, h.sector), co = addDays(ci, Number(s.nights) || 1);
-        try { plan.live.hotels[h.sector] = await travel_hotel(pick.name, s.city, ci, co, plan.pax || 2); } catch (e) {}
+        try { plan.live.hotels[h.sector] = await travel_hotel(pick.name, s.city, ci, co, plan.pax || 2); } catch (e) { plan.live.hotelsError = String(e.message || e); }
       }
     }
     await kvSet(key, { status: "done", plan, brief: b.brief, at: new Date().toISOString() });

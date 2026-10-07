@@ -1581,6 +1581,14 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     var map = {}; computeDates(t).forEach(function(c){ map[c.sector.id] = c; }); return map;
   }
   function fxRate(plan){ return (plan.fx && Number(plan.fx.inr)) || 1; }
+  function toINR(plan, amount, cur){
+    cur = String(cur||'INR').toUpperCase(); amount = Number(amount)||0;
+    if(cur==='INR' || cur==='RS' || cur==='₹') return amount;
+    var fx = plan.fx || {};
+    if(fx.rates && fx.rates[cur]) return amount*Number(fx.rates[cur]);
+    if(String(fx.currency||'').toUpperCase()===cur && Number(fx.inr)) return amount*Number(fx.inr);
+    return null;   // unknown currency: show as quoted, never guess
+  }
 
   function renderBook(){
     var t = active(), el = document.getElementById('bookBody');
@@ -1602,6 +1610,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     h += '<div class="card"><label class="f">FLIGHTS · PER PERSON · '+pax+' TRAVELLING</label>';
     h += legs.map(function(l){ return '<div class="emeta">✈️ '+esc(l.label||(l.from+' → '+l.to))+' · '+fmt(l.date)+'</div>'; }).join('');
     if(P.flightAdvice) h += '<div class="enote" style="margin-top:6px">'+esc(P.flightAdvice)+'</div>';
+    if(!live && P.live && P.live.flightsError) h += '<div class="enote" style="color:var(--stamp)">Live fares could not be fetched when planning ('+esc(P.live.flightsError)+'). Tap Check live fares.</div>';
     if(live && live.options && live.options.length){
       h += '<div style="margin-top:10px">' + live.options.slice(0,5).map(function(o){
         return '<div class="entry"><div class="ebody"><div class="etitle">'+esc(o.airlines)+' · '+inr(o.price)+'</div>'+
@@ -1646,7 +1655,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
         h += '<label class="entry" style="cursor:pointer;'+(on?'outline:2px solid var(--go);':'')+(o.flag?'opacity:.7;':'')+'">'+
           '<input type="radio" name="hp'+hs.sector+'" class="bkPick" data-s="'+hs.sector+'" data-i="'+i+'"'+(on?' checked':'')+' style="margin-top:4px">'+
           '<div class="ebody"><div class="etitle">'+esc(o.name)+' · '+(o.stars||'')+'★</div>'+
-          '<div class="emeta">'+esc(o.area||'')+' · est. '+esc(o.currency||'')+' '+(o.perNight||'')+'/night ≈ '+inr((o.perNight||0)*fx)+'</div>'+
+          '<div class="emeta">'+esc(o.area||'')+' · est. '+(String(o.currency||'INR').toUpperCase()==='INR' ? inr(o.perNight)+'/night' : esc(o.currency)+' '+(o.perNight||'')+'/night'+(toINR(P,o.perNight,o.currency)!=null?' ≈ '+inr(toINR(P,o.perNight,o.currency)):''))+' · '+nights+' night'+(nights>1?'s':'')+' ≈ '+inr((toINR(P,o.perNight,o.currency)||0)*nights)+'</div>'+
           (o.flag?'<div class="enote" style="color:var(--stamp)">⚠ '+esc(o.flag)+'</div>':'<div class="enote">'+esc(o.why||'')+'</div>')+
           (on && liveH && liveH.perNight ? '<div class="enote" style="color:var(--go)">Live: '+inr(liveH.perNight)+'/night · '+inr(liveH.total||liveH.perNight*nights)+' total'+(liveH.rating?' · rated '+liveH.rating:'')+(liveH.deals&&liveH.deals.length?' · cheapest on '+esc(liveH.deals[0].source):'')+'</div>':'')+
           '</div></label>';
@@ -1693,7 +1702,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     if(key==='fl'){ var lv=B.flightsLive||(P.live&&P.live.flights); return lv&&lv.lowest ? lv.lowest*pax : null; }
     var s=+key.slice(1), hs=(P.hotels||[]).find(function(x){return x.sector===s;}), bh=B.hotels[s]||{}, ps=(P.sectors||[])[s]||{};
     var lv=bh.live; if(lv&&(lv.total||lv.perNight)) return lv.total||lv.perNight*(Number(ps.nights)||1);
-    var o=hs&&hs.options&&hs.options[bh.pick||0]; return o ? (o.perNight||0)*fxRate(P)*(Number(ps.nights)||1) : null;
+    var o=hs&&hs.options&&hs.options[bh.pick||0]; var v=o?toINR(P,o.perNight,o.currency):null; return v!=null ? v*(Number(ps.nights)||1) : null;
   }
   function agentCompare(key, obj){
     var t=active(); if(!obj.agent) return '';
