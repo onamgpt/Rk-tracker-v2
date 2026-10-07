@@ -69,6 +69,19 @@ h1 a{margin-left:auto;font-size:13px;font-weight:400;color:#8aa0b0;text-decorati
       {id:"jar",name:"Glass jars with metal lids, ~500 ml",note:"Sniffing chambers",qty:3,price:150,link:A("glass jar 500ml metal lid")},
       {id:"strips",name:"Smelling / blotter strips",note:"You probably have these already",qty:1,price:0,link:A("perfume smelling strips")}
     ]},
+    {id:"throw",title:"Throw & longevity rig — intensity, spread, smoke",why:"Three gas sensors at different distances in a test tunnel, plus a smoke sensor, all on the Pi. For every batch it records peak strength, how fast the scent travels, how long it lasts, and smoke level. Build after the e-nose.",parts:[
+      {id:"bme3",name:"BME688 sensor breakout (one per distance)",note:"Reads scent strength at 0.25 m, 1 m and 2 m",qty:3,price:1100,link:R("BME688"),alt:A("BME688 breakout")},
+      {id:"mux",name:"Adafruit TCA9548A I2C multiplexer (STEMMA QT)",note:"Lets the Pi talk to three identical sensors at once",qty:1,price:700,link:R("TCA9548A multiplexer"),alt:A("Adafruit TCA9548A STEMMA QT")},
+      {id:"qw500",name:"Qwiic / STEMMA QT cable, 500 mm",note:"Plug-in leads from the multiplexer out to each sensor",qty:6,price:150,link:R("Qwiic cable 500mm"),alt:A("Qwiic cable 500mm")},
+      {id:"sps30",name:"Sensirion SPS30 particle sensor",note:"Measures incense smoke (PM2.5)",qty:1,price:4000,link:R("SPS30"),alt:A("Sensirion SPS30")},
+      {id:"spscab",name:"SPS30 connector cable (ZHR-5)",note:"Cable to connect the SPS30 to the Pi",qty:1,price:250,link:R("SPS30 cable"),alt:A("SPS30 cable ZHR-5")},
+      {id:"pipe",name:"4-inch PVC pipe, 2 m, with 2 end caps",note:"The test tunnel — local hardware shop. Drill small holes for each sensor",qty:1,price:600,link:A("4 inch PVC pipe end cap")},
+      {id:"fan2",name:"40 mm 5V fan",note:"Flushes the tunnel with fresh air between tests",qty:1,price:180,link:R("40mm 5V fan")}
+    ]},
+    {id:"throw-pid",title:"Throw rig — precision upgrade (optional, later)",why:"A PID sensor gives true concentration in ppb — lab-grade intensity numbers. Expensive; add only if the low-cost rig proves useful.",parts:[
+      {id:"pid",name:"ION Science MiniPID 2 (ppb) sensor",note:"Lab-grade fragrance intensity",qty:1,price:60000,link:A("MiniPID 2 ppb ION Science"),alt:"https://ionscience.com/en/products/minipid-2-ppb/"},
+      {id:"ads",name:"ADS1115 16-bit ADC (STEMMA QT)",note:"Reads the PID sensor's signal into the Pi",qty:1,price:450,link:R("ADS1115"),alt:A("Adafruit ADS1115 STEMMA QT")}
+    ]},
     {id:"yt-tv",title:"YouTube tracker for the TV",why:"Uses the Pi base — nothing extra to buy. Set up after the Pi arrives.",parts:[]}
   ];
   var KEY="build_projects", S={status:{},custom:{},open:{}};
