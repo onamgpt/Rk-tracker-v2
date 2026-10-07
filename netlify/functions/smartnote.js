@@ -188,6 +188,8 @@ async function route(b) {
 
 exports.route = route;
 exports.ocrImage = ocrImage;
+exports.queueReminder = queueReminder;
+exports.claude = claude;
 
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: H, body: "" };

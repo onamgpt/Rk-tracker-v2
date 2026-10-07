@@ -147,6 +147,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
 
   <div class="tripbar">
     <select id="tripSel"></select>
+    <button class="iconbtn" id="btnPlan" title="Plan a trip with AI" style="background:var(--go);color:#fff;border-color:var(--go)">✨ Plan trip</button>
     <button class="iconbtn" id="btnNew" title="New trip">+ New</button>
     <button class="iconbtn" id="btnDup" title="Duplicate trip">⧉</button>
     <button class="iconbtn" id="btnDel" title="Delete trip">🗑</button>
@@ -155,6 +156,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
 
   <div class="tabs">
     <button class="tab on" data-tab="board">Board</button>
+    <button class="tab" data-tab="book">🎟 Book</button>
     <button class="tab" data-tab="binder">Binder</button>
     <button class="tab" data-tab="vault">Vault</button>
     <button class="tab" data-tab="packing">Packing</button>
@@ -162,6 +164,21 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     <button class="tab" data-tab="nearby">📍 Nearby</button>
   </div>
   <div class="saved" id="saved"></div>
+
+  <div id="planner" style="display:none">
+    <div class="card">
+      <label class="f">WHERE, WHEN, WHO</label>
+      <textarea id="plBrief" rows="3" style="width:100%;padding:10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper)" placeholder="e.g. New Zealand, 6 nights, March 2027, from Bangalore — 3 of us, gentle pace"></textarea>
+      <label class="f" style="margin-top:12px">TRAVELLERS</label>
+      <input type="text" id="plWho" style="width:100%" placeholder="Ravi 56, Brunda 50, Tassmai 27">
+      <label class="f" style="margin-top:12px">YOUR RULES (saved for every trip)</label>
+      <textarea id="plRules" rows="5" style="width:100%;padding:10px;border:1px solid var(--rule);border-radius:3px;background:var(--paper)"></textarea>
+      <div class="row" style="margin-top:12px"><button class="mini" id="plGo">✨ Make my plan</button><button class="iconbtn" id="plClose">Close</button></div>
+      <div class="f" id="plStatus" style="margin-top:10px"></div>
+    </div>
+  </div>
+
+  <div id="book" style="display:none"><div id="bookBody"></div></div>
 
   <div id="board">
     <div class="card">
@@ -182,7 +199,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   </div>
 
   <div id="binder" style="display:none">
-    <div class="toolbar"><button class="iconbtn" id="btnPrint">🖨 Print binder</button></div>
+    <div class="toolbar"><button class="iconbtn" id="btnPrint">🖨 Print binder</button> <button class="iconbtn" id="btnPdf">📕 Trip PDF with vouchers</button> <span class="f" id="pdfStatus"></span></div>
     <div id="days"></div>
   </div>
 
@@ -546,13 +563,14 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   });
 
   /* ---------- tabs ---------- */
-  var PANES = ['board','binder','vault','packing','money','nearby'];
+  var PANES = ['board','book','binder','vault','packing','money','nearby'];
   Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(btn){
     btn.addEventListener('click', function(){
       tab = btn.getAttribute('data-tab');
       Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(b){ b.classList.toggle('on', b===btn); });
       PANES.forEach(function(p){ document.getElementById(p).style.display = tab===p ? '' : 'none'; });
       if(tab==='binder') renderBinder();
+      if(tab==='book') renderBook();
       if(tab==='vault') renderVault();
       if(tab==='packing') renderPacking();
       if(tab==='money') renderMoney();
@@ -1251,6 +1269,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     renderTripSel();
     renderBoard();
     if(tab==='binder') renderBinder();
+    if(tab==='book') renderBook();
     if(tab==='vault') renderVault();
     if(tab==='packing') renderPacking();
     if(tab==='money') renderMoney();
@@ -1468,6 +1487,371 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       else nbStatus('Email not sent: '+(d.reason||(d.result&&d.result.message)||'mail error'));
     }catch(e){ nbStatus('Email not sent: could not reach the server.'); }
     btn.disabled = false; nbSendBar();
+  });
+
+
+  /* =====================================================================
+     ✨ PLANNER · 🎟 BOOK · 📕 TRIP PDF
+     ===================================================================== */
+  var DEFAULT_RULES = [
+    'Vegetarian, no alcohol, no coffee',
+    '4-star hotels, central, safe area, on FLAT ground — no climbing',
+    'Compare hotels on total cost including taxis/transport',
+    'Cabin bag only, one bag each',
+    'Flights as short as possible; avoid routes needing extra transit visas (Indian passports)',
+    'Gentle pace — one main thing a day; no theme parks'
+  ].join('\n');
+
+  async function travelAPI(action, extra){
+    try{
+      var r = await fetch('/.netlify/functions/travel', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(Object.assign({action:action}, extra||{}))});
+      return await r.json();
+    }catch(e){ return {error:String(e)}; }
+  }
+  function inr(n){ return n==null||isNaN(n) ? '—' : '₹'+Math.round(n).toLocaleString('en-IN'); }
+  function paxN(t){ return Math.max(1, parseInt(t.pax,10)||1); }
+  var NOKEY = 'Live prices need the SerpApi key — add SERPAPI_KEY in Netlify (free plan, 250 searches a month).';
+
+  /* ---------- planner ---------- */
+  var profile = null;
+  document.getElementById('btnPlan').addEventListener('click', async function(){
+    var pane = document.getElementById('planner');
+    pane.style.display = pane.style.display==='none' ? '' : 'none';
+    if(pane.style.display==='') {
+      if(!profile){ var r = await travelAPI('profileGet'); profile = (r && r.profile) || {}; }
+      document.getElementById('plWho').value = profile.travellers || 'Ravi 56, Brunda 50, Tassmai 27';
+      document.getElementById('plRules').value = profile.rules || DEFAULT_RULES;
+      document.getElementById('plBrief').focus();
+    }
+  });
+  document.getElementById('plClose').addEventListener('click', function(){ document.getElementById('planner').style.display='none'; });
+
+  function plStatus(t){ document.getElementById('plStatus').textContent = t||''; }
+  document.getElementById('plGo').addEventListener('click', async function(){
+    var brief = document.getElementById('plBrief').value.trim();
+    if(!brief){ plStatus('Type where, when and who first.'); return; }
+    profile = {travellers: document.getElementById('plWho').value.trim(), rules: document.getElementById('plRules').value.trim()};
+    travelAPI('profileSave', {profile: profile});
+    var btn = this; btn.disabled = true;
+    plStatus('Planning… route, hotels, flights and prices. This takes 1–3 minutes.');
+    var st = await travelAPI('planStart', {brief: brief, profile: profile});
+    if(!st || !st.job){ btn.disabled=false; plStatus('Could not start: '+((st&&st.error)||'unknown')); return; }
+    var t0 = Date.now();
+    (async function poll(){
+      if(Date.now()-t0 > 6*60*1000){ btn.disabled=false; plStatus('Still working — tap Make my plan again in a minute to check.'); return; }
+      var r = await travelAPI('planStatus', {job: st.job});
+      var j = r && r.job;
+      if(j && j.status==='done'){ btn.disabled=false; plStatus('✓ Plan ready'); makeTripFromPlan(j.plan); return; }
+      if(j && j.status==='error'){ btn.disabled=false; plStatus('Planner error: '+j.error); return; }
+      var secs = Math.round((Date.now()-t0)/1000);
+      plStatus('Planning… '+secs+' s');
+      setTimeout(poll, 5000);
+    })();
+  });
+
+  function daysBetween(a, b){ return Math.round((fromISO(b)-fromISO(a))/864e5); }
+  function makeTripFromPlan(plan){
+    var t = {id:uid(), name: plan.name || 'New trip', start: plan.start, pax: String(plan.pax||3),
+      homeCity: plan.homeCity || 'Bengaluru', sectors: [], binder: {}, vault: [], packing: [], expenses: [], wallets: [],
+      plan: plan};
+    plan.book = plan.book || {flights:{}, hotels:{}};
+    // Long-haul: the first hotel night usually starts the day after departure.
+    var firstHotel = null;
+    (plan.days||[]).some(function(d){ if((d.items||[]).some(function(i){return i.type==='hotel';})){ firstHotel=d.date; return true; } return false; });
+    var gap = firstHotel ? daysBetween(plan.start, firstHotel) : 0;
+    if(gap>0) t.sectors.push({id:uid(), city:'✈ En route', nights:gap, mode:'flight'});
+    (plan.sectors||[]).forEach(function(s, i){ var id=uid(); s._id=id; t.sectors.push({id:id, city:s.city, nights:Number(s.nights)||1, mode:s.mode||'flight'}); });
+    var lastDay = (plan.days||[]).reduce(function(m,d){ return d.date>m?d.date:m; }, plan.start);
+    var end = tripEnd(t);
+    if(lastDay > end) t.sectors.push({id:uid(), city:'✈ Flying home', nights:daysBetween(end,lastDay), mode:'flight'});
+    (plan.days||[]).forEach(function(d){
+      t.binder[d.date] = (d.items||[]).map(function(i){ return {id:uid(), type:i.type||'other', time:i.time||'', title:i.title||'', ref:'', note:i.note||''}; });
+    });
+    trips[t.id] = t; activeId = t.id;
+    document.getElementById('planner').style.display='none';
+    renderAll(); save();
+    var bt = document.querySelector('.tab[data-tab="book"]'); if(bt) bt.click();
+    flash('Plan ready — check fares and hotels');
+  }
+
+  /* ---------- book tab ---------- */
+  var watchesCache = null;
+  function sectorDates(t){
+    var map = {}; computeDates(t).forEach(function(c){ map[c.sector.id] = c; }); return map;
+  }
+  function fxRate(plan){ return (plan.fx && Number(plan.fx.inr)) || 1; }
+
+  function renderBook(){
+    var t = active(), el = document.getElementById('bookBody');
+    if(!t.plan){
+      el.innerHTML = '<div class="card"><div class="empty">This trip was set up by hand. Use <b>✨ Plan trip</b> above to get live fares, hotel choices with prices, a budget and visa reminders.</div></div>';
+      return;
+    }
+    var P = t.plan; P.book = P.book || {flights:{}, hotels:{}}; var B = P.book, pax = paxN(t), fx = fxRate(P);
+    var sd = sectorDates(t);
+    var h = '';
+
+    // summary
+    h += '<div class="card"><div class="etitle" style="font-size:18px">'+esc(t.name)+'</div><div class="enote">'+esc(P.summary||'')+'</div></div>';
+
+    // flights
+    var legs = (P.flights||[]).filter(function(f){return f.international;});
+    if(!legs.length) legs = P.flights||[];
+    var live = B.flightsLive || P.live && P.live.flights;
+    h += '<div class="card"><label class="f">FLIGHTS · PER PERSON · '+pax+' TRAVELLING</label>';
+    h += legs.map(function(l){ return '<div class="emeta">✈️ '+esc(l.label||(l.from+' → '+l.to))+' · '+fmt(l.date)+'</div>'; }).join('');
+    if(P.flightAdvice) h += '<div class="enote" style="margin-top:6px">'+esc(P.flightAdvice)+'</div>';
+    if(live && live.options && live.options.length){
+      h += '<div style="margin-top:10px">' + live.options.slice(0,5).map(function(o){
+        return '<div class="entry"><div class="ebody"><div class="etitle">'+esc(o.airlines)+' · '+inr(o.price)+'</div>'+
+          '<div class="emeta">'+(o.hours?o.hours+' h · ':'')+o.stops+' stop'+(o.stops===1?'':'s')+(o.layovers?' ('+esc(o.layovers)+')':'')+' · total for '+pax+': '+inr(o.price*pax)+'</div></div></div>';
+      }).join('') + '</div>';
+      if(live.typical) h += '<div class="emeta">Typical price: '+inr(live.typical[0])+'–'+inr(live.typical[1])+(live.level?' · today is '+esc(live.level):'')+'</div>';
+    }
+    h += '<div class="row" style="margin-top:10px"><button class="mini" id="bkFares">Check live fares</button>'+
+      '<a class="iconbtn" target="_blank" rel="noopener" href="'+esc((live&&live.link)||flightLink(legs[0]?legs[0].from:'',legs[0]?legs[0].to:'',legs[0]?legs[0].date:''))+'">Open Google Flights</a></div>';
+    h += '<div class="f" id="bkFareMsg" style="margin-top:6px"></div>';
+    // watch
+    var w = (watchesCache||[]).find(function(x){return x.tripId===t.id;});
+    h += '<div class="card" style="margin:12px 0 0;background:var(--paper)"><label class="f">DAILY FARE WATCH (TELEGRAM ALERT)</label>';
+    if(w){
+      var hist = (w.history||[]).slice(-30);
+      h += '<div class="emeta">Watching'+(w.target?' · alert below '+inr(w.target):'')+(w.last?' · today '+inr(w.last.price)+' ('+esc(w.last.airline)+')':'')+(w.error?' · ⚠ '+esc(w.error):'')+'</div>';
+      if(hist.length>1){
+        var mx=Math.max.apply(null,hist.map(function(x){return x.price;})), mn=Math.min.apply(null,hist.map(function(x){return x.price;})), rg=(mx-mn)||1;
+        h += '<svg viewBox="0 0 300 50" style="width:100%;height:50px"><polyline fill="none" stroke="var(--go)" stroke-width="2" points="'+
+          hist.map(function(x,i){return Math.round(i*300/(hist.length-1))+','+Math.round(45-(x.price-mn)*40/rg);}).join(' ')+'"/></svg>'+
+          '<div class="emeta">Lowest seen '+inr(mn)+' · highest '+inr(mx)+'</div>';
+      }
+      h += '<div class="row" style="margin-top:8px"><input type="number" id="bkTarget" value="'+(w.target||'')+'" placeholder="Target ₹ per person" style="width:170px"><button class="mini" id="bkWatch">Update</button><button class="iconbtn" id="bkUnwatch">Stop watching</button></div>';
+    } else {
+      var guess = live && live.lowest ? Math.round(live.lowest*0.93/1000)*1000 : '';
+      h += '<div class="row"><input type="number" id="bkTarget" value="'+guess+'" placeholder="Target ₹ per person" style="width:170px"><button class="mini" id="bkWatch">Watch daily</button></div>';
+    }
+    h += '</div>';
+    h += bookRow('fl', 'Flights', B.flights);
+    h += '</div>';
+
+    // hotels
+    (P.hotels||[]).forEach(function(hs){
+      var ps = (P.sectors||[])[hs.sector]; if(!ps) return;
+      var c = sd[ps._id] || {}; var nights = Number(ps.nights)||1;
+      var bh = B.hotels[hs.sector] = B.hotels[hs.sector] || {};
+      if(bh.pick==null){ var pi=(hs.options||[]).findIndex(function(o){return o.pick;}); bh.pick = pi<0?0:pi; }
+      var liveH = bh.live || (P.live && P.live.hotels && P.live.hotels[hs.sector] && bh.pick===(hs.options||[]).findIndex(function(o){return o.pick;}) ? P.live.hotels[hs.sector] : null);
+      h += '<div class="card"><label class="f">'+esc(ps.city).toUpperCase()+' · '+nights+' NIGHT'+(nights>1?'S':'')+(c.arrive?' · '+fmt(c.arrive)+' → '+fmt(c.depart):'')+'</label>';
+      (hs.options||[]).forEach(function(o, i){
+        var on = bh.pick===i;
+        h += '<label class="entry" style="cursor:pointer;'+(on?'outline:2px solid var(--go);':'')+(o.flag?'opacity:.7;':'')+'">'+
+          '<input type="radio" name="hp'+hs.sector+'" class="bkPick" data-s="'+hs.sector+'" data-i="'+i+'"'+(on?' checked':'')+' style="margin-top:4px">'+
+          '<div class="ebody"><div class="etitle">'+esc(o.name)+' · '+(o.stars||'')+'★</div>'+
+          '<div class="emeta">'+esc(o.area||'')+' · est. '+esc(o.currency||'')+' '+(o.perNight||'')+'/night ≈ '+inr((o.perNight||0)*fx)+'</div>'+
+          (o.flag?'<div class="enote" style="color:var(--stamp)">⚠ '+esc(o.flag)+'</div>':'<div class="enote">'+esc(o.why||'')+'</div>')+
+          (on && liveH && liveH.perNight ? '<div class="enote" style="color:var(--go)">Live: '+inr(liveH.perNight)+'/night · '+inr(liveH.total||liveH.perNight*nights)+' total'+(liveH.rating?' · rated '+liveH.rating:'')+(liveH.deals&&liveH.deals.length?' · cheapest on '+esc(liveH.deals[0].source):'')+'</div>':'')+
+          '</div></label>';
+      });
+      var pick = (hs.options||[])[bh.pick] || {};
+      h += '<div class="row" style="margin-top:8px"><button class="mini bkLiveH" data-s="'+hs.sector+'">Live price</button>'+
+        '<a class="iconbtn" target="_blank" rel="noopener" href="'+esc(hotelLink((pick.name||'')+' '+ps.city, c.arrive||'', c.depart||'', String(paxN(t))))+'">Booking.com</a></div>';
+      h += '<div class="f bkHMsg" data-s="'+hs.sector+'" style="margin-top:6px"></div>';
+      h += bookRow('h'+hs.sector, 'This hotel (total)', bh);
+      h += '</div>';
+    });
+
+    // budget
+    h += '<div class="card"><label class="f">BUDGET FOR '+pax+' — PLAN vs NOW</label><table style="width:100%;border-collapse:collapse;font-size:14px">';
+    var rows = budgetRows(t), tp=0, tn=0;
+    rows.forEach(function(r){ tp+=r.plan||0; tn+=r.now||0;
+      h += '<tr><td style="padding:5px 0;border-bottom:1px solid var(--rule)">'+esc(r.item)+(r.src?' <span class="emeta">· '+esc(r.src)+'</span>':'')+'</td><td style="text-align:right;border-bottom:1px solid var(--rule);color:var(--ink-soft)">'+inr(r.plan)+'</td><td style="text-align:right;border-bottom:1px solid var(--rule);font-weight:700">'+inr(r.now)+'</td></tr>'; });
+    h += '<tr><td style="padding:8px 0;font-weight:700">Total</td><td style="text-align:right">'+inr(tp)+'</td><td style="text-align:right;font-weight:800">'+inr(tn)+'</td></tr></table></div>';
+
+    // papers
+    if((P.docs||[]).length){
+      h += '<div class="card"><label class="f">VISA &amp; PAPERS</label>' + P.docs.map(function(d, i){
+        return '<div class="entry"><div class="ebody"><div class="etitle">'+esc(d.title)+'</div><div class="emeta">'+(d.due?'By '+fmt(d.due):'')+'</div>'+(d.note?'<div class="enote">'+esc(d.note)+'</div>':'')+'</div>'+
+          (d.due ? '<button class="ebell bkRem" data-i="'+i+'" title="Telegram reminder 10:00 on the due date">'+(d.reminded?'🔔':'🔕')+'</button>' : '')+'</div>';
+      }).join('') + '</div>';
+    }
+    el.innerHTML = h;
+    wireBook(t);
+    if(watchesCache===null){ watchesCache=[]; travelAPI('watchList').then(function(r){ watchesCache=(r&&r.watches)||[]; if(tab==='book') renderBook(); }); }
+  }
+
+  function bookRow(key, label, obj){
+    obj = obj || {};
+    return '<div class="row bkRow" data-k="'+key+'" style="margin-top:10px;gap:6px">'+
+      '<select class="bkSt" style="padding:8px;border:1px solid var(--rule);border-radius:3px;background:var(--paper)">'+
+        ['To book','Approved','Booked'].map(function(s){return '<option'+(obj.status===s?' selected':'')+'>'+s+'</option>';}).join('')+'</select>'+
+      '<input type="number" class="bkAgent" placeholder="Agent quote ₹" value="'+(obj.agent||'')+'" style="width:130px">'+
+      '<input type="number" class="bkPaid" placeholder="Paid ₹" value="'+(obj.paid||'')+'" style="width:110px">'+
+      '<input type="text" class="bkRef" placeholder="Booking ref" value="'+esc(obj.ref||'')+'" style="width:120px">'+
+      '<div class="emeta bkCmp" style="width:100%">'+agentCompare(key, obj)+'</div></div>';
+  }
+  function onlineTotal(t, key){
+    var P=t.plan, B=P.book, pax=paxN(t);
+    if(key==='fl'){ var lv=B.flightsLive||(P.live&&P.live.flights); return lv&&lv.lowest ? lv.lowest*pax : null; }
+    var s=+key.slice(1), hs=(P.hotels||[]).find(function(x){return x.sector===s;}), bh=B.hotels[s]||{}, ps=(P.sectors||[])[s]||{};
+    var lv=bh.live; if(lv&&(lv.total||lv.perNight)) return lv.total||lv.perNight*(Number(ps.nights)||1);
+    var o=hs&&hs.options&&hs.options[bh.pick||0]; return o ? (o.perNight||0)*fxRate(P)*(Number(ps.nights)||1) : null;
+  }
+  function agentCompare(key, obj){
+    var t=active(); if(!obj.agent) return '';
+    var on = onlineTotal(t, key); if(!on) return 'Agent '+inr(obj.agent)+' — check live price to compare.';
+    var a = key==='fl' ? obj.agent*paxN(t) : +obj.agent;
+    var d = on - a;
+    return (key==='fl'?'Agent quote is per person. ':'')+(d>0 ? '✅ Agent is '+inr(d)+' cheaper than online' : '🌐 Online is '+inr(-d)+' cheaper than the agent')+' — compare refund rules and breakfast before booking.';
+  }
+  function budgetRows(t){
+    var P=t.plan, B=P.book, pax=paxN(t), fx=fxRate(P), rows=[];
+    var fp=0, hp=0;
+    (P.budget||[]).forEach(function(b){
+      var k=String(b.item||'').toLowerCase();
+      if(/international|flight|air/.test(k) && !/domestic|internal/.test(k) && !fp){ fp=b.inr; return; }
+      if(/hotel|stay|accommod/.test(k) && !hp){ hp=b.inr; return; }
+      rows.push({item:b.item, plan:b.inr, now:b.inr});
+    });
+    var f=B.flights||{}, fl=B.flightsLive||(P.live&&P.live.flights);
+    var fnow = f.paid ? +f.paid : f.agent ? f.agent*pax : fl&&fl.lowest ? fl.lowest*pax : fp;
+    rows.unshift({item:'Flights', plan:fp, now:fnow, src:f.paid?'paid':f.agent?'agent':fl&&fl.lowest?'live':'estimate'});
+    var hnow=0, src='estimate';
+    (P.hotels||[]).forEach(function(hs){
+      var bh=B.hotels[hs.sector]||{}; var key='h'+hs.sector;
+      if(bh.paid){ hnow+=+bh.paid; src='paid/agent'; } else if(bh.agent){ hnow+=+bh.agent; src='paid/agent'; } else { if(bh.live && src==='estimate') src='live + estimate'; hnow+=onlineTotal(t,key)||0; }
+    });
+    rows.splice(1,0,{item:'Hotels', plan:hp, now:hnow||hp, src:src});
+    return rows;
+  }
+
+  function wireBook(t){
+    var P=t.plan, B=P.book;
+    var q=function(sel){return document.querySelector(sel);};
+    var fb=q('#bkFares'); if(fb) fb.onclick=async function(){
+      var legs=(P.flights||[]).filter(function(f){return f.international;}); if(!legs.length) legs=P.flights||[];
+      q('#bkFareMsg').textContent='Checking Google Flights…';
+      var r=await travelAPI('flights',{legs:legs.map(function(l){return {from:l.from,to:l.to,date:l.date};})});
+      if(r.error){ q('#bkFareMsg').textContent = r.error==='nokey'?NOKEY:'Could not fetch: '+r.error; return; }
+      B.flightsLive={options:r.options,lowest:r.lowest,typical:r.typical,level:r.level,link:r.link,at:new Date().toISOString()};
+      save(); renderBook();
+    };
+    var wb=q('#bkWatch'); if(wb) wb.onclick=async function(){
+      var legs=(P.flights||[]).filter(function(f){return f.international;}); if(!legs.length) legs=P.flights||[];
+      var w=(watchesCache||[]).find(function(x){return x.tripId===t.id;})||{};
+      w=Object.assign(w,{tripId:t.id,label:t.name,legs:legs.map(function(l){return {from:l.from,to:l.to,date:l.date};}),target:+q('#bkTarget').value||null,until:t.start});
+      wb.disabled=true; wb.textContent='Checking…';
+      var r=await travelAPI('watchSave',{watch:w,runNow:true});
+      if(r.watch){ watchesCache=(watchesCache||[]).filter(function(x){return x.id!==r.watch.id;}).concat([r.watch]); }
+      if(r.watch&&r.watch.error==='SERPAPI_KEY missing') flash(NOKEY);
+      renderBook();
+    };
+    var uw=q('#bkUnwatch'); if(uw) uw.onclick=async function(){
+      var w=(watchesCache||[]).find(function(x){return x.tripId===t.id;}); if(!w) return;
+      await travelAPI('watchDelete',{id:w.id}); watchesCache=watchesCache.filter(function(x){return x.id!==w.id;}); renderBook();
+    };
+    Array.prototype.forEach.call(document.querySelectorAll('.bkPick'),function(r){ r.onchange=function(){
+      var s=+r.dataset.s, i=+r.dataset.i; B.hotels[s]=B.hotels[s]||{}; B.hotels[s].pick=i; B.hotels[s].live=null;
+      syncHotelEntry(t, s); save(); renderBook(); }; });
+    Array.prototype.forEach.call(document.querySelectorAll('.bkLiveH'),function(b){ b.onclick=async function(){
+      var s=+b.dataset.s, hs=(P.hotels||[]).find(function(x){return x.sector===s;}), ps=P.sectors[s], c=sectorDates(t)[ps._id]||{};
+      var bh=B.hotels[s]=B.hotels[s]||{}, o=hs.options[bh.pick||0];
+      var msg=document.querySelector('.bkHMsg[data-s="'+s+'"]'); msg.textContent='Checking Google Hotels…';
+      var r=await travelAPI('hotel',{name:o.name,city:ps.city,checkin:c.arrive,checkout:c.depart,adults:paxN(t)});
+      if(r.error){ msg.textContent=r.error==='nokey'?NOKEY:'Could not fetch: '+r.error; return; }
+      bh.live=r; save(); renderBook();
+    }; });
+    Array.prototype.forEach.call(document.querySelectorAll('.bkRow'),function(row){
+      var k=row.dataset.k, obj = k==='fl' ? (B.flights=B.flights||{}) : (B.hotels[+k.slice(1)]=B.hotels[+k.slice(1)]||{});
+      var upd=function(){ obj.status=row.querySelector('.bkSt').value; obj.agent=+row.querySelector('.bkAgent').value||null;
+        obj.paid=+row.querySelector('.bkPaid').value||null; obj.ref=row.querySelector('.bkRef').value.trim();
+        row.querySelector('.bkCmp').textContent=agentCompare(k,obj);
+        if(k!=='fl') syncHotelEntry(t, +k.slice(1)); else syncFlightRefs(t, obj.ref);
+        save(); };
+      row.querySelector('.bkSt').onchange=function(){ upd(); renderBook(); };
+      ['.bkAgent','.bkPaid','.bkRef'].forEach(function(c){ row.querySelector(c).onchange=function(){ upd(); renderBook(); }; });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.bkRem'),function(b){ b.onclick=async function(){
+      var d=P.docs[+b.dataset.i]; if(d.reminded) return;
+      b.disabled=true; var r=await travelAPI('reminder',{title:d.title,when:d.due+'T10:00:00+05:30',note:d.note||''});
+      if(r.ok){ d.reminded=true; save(); flash('Reminder set for '+fmt(d.due)); renderBook(); } else { b.disabled=false; flash('Could not set reminder'); }
+    }; });
+  }
+  function syncHotelEntry(t, s){
+    var P=t.plan, ps=P.sectors[s], c=sectorDates(t)[ps._id]; if(!c) return;
+    var hs=(P.hotels||[]).find(function(x){return x.sector===s;}), bh=P.book.hotels[s]||{}, o=hs.options[bh.pick||0]||{};
+    var id='hotel_'+s;
+    Object.keys(t.binder).forEach(function(d){ t.binder[d]=(t.binder[d]||[]).filter(function(e){return e.id!==id;}); });
+    // drop the planner's own hotel line for that arrival day, then add the chosen one
+    t.binder[c.arrive]=(t.binder[c.arrive]||[]).filter(function(e){return !(e.type==='hotel' && !e.ref && !e.doc && e.id.indexOf('hotel_')!==0);});
+    t.binder[c.arrive].push({id:id,type:'hotel',time:'15:00',title:(bh.status==='Booked'?'':'(not booked yet) ')+o.name+', '+ps.city,ref:bh.ref||'',note:(o.area||'')+(bh.paid?' · paid '+inr(bh.paid):'')});
+  }
+  function syncFlightRefs(t, ref){
+    if(!ref) return;
+    Object.keys(t.binder).forEach(function(d){ (t.binder[d]||[]).forEach(function(e){ if(e.type==='flight' && !e.ref) e.ref=ref; }); });
+  }
+
+  /* ---------- trip PDF: itinerary + every attached voucher, in date order ---------- */
+  function pdfText(s){
+    return String(s||'').replace(/→|➔|⇄/g,'->').replace(/₹/g,'Rs ').replace(/[–—]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"')
+      .replace(/·/g,'-').replace(/…/g,'...').replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g,'').trim();
+  }
+  function loadPdfLib(){
+    return window.PDFLib ? Promise.resolve() : new Promise(function(res,rej){
+      var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'; s.onload=res; s.onerror=rej; document.head.appendChild(s); });
+  }
+  function b64ToBytes(b64){ var bin=atob(b64), a=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i); return a; }
+  document.getElementById('btnPdf').addEventListener('click', async function(){
+    var st=document.getElementById('pdfStatus'), btn=this; btn.disabled=true;
+    try{
+      st.textContent='Preparing…'; await loadPdfLib();
+      var L=window.PDFLib, doc=await L.PDFDocument.create(), font=await doc.embedFont(L.StandardFonts.Helvetica), bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+      var t=active(), W=595, Hh=842, M=48, page, y;
+      function newPage(){ page=doc.addPage([W,Hh]); y=Hh-M; }
+      function line(txt, size, f, color){
+        txt=pdfText(txt); size=size||11; f=f||font;
+        var words=txt.split(/\s+/), cur='';
+        words.forEach(function(w){ var test=cur?cur+' '+w:w; if(f.widthOfTextAtSize(test,size)>W-2*M){ out(cur); cur=w; } else cur=test; });
+        if(cur) out(cur);
+        function out(s){ if(y<M+size){ newPage(); } page.drawText(s,{x:M,y:y-size,size:size,font:f,color:color||L.rgb(0.07,0.15,0.17)}); y-=size*1.4; }
+      }
+      newPage();
+      line(t.name, 24, bold); y-=6;
+      line(fmt(t.start)+' to '+fmt(tripEnd(t))+' - '+paxN(t)+' travelling', 12);
+      y-=8; computeDates(t).forEach(function(c){ line(c.sector.city+': '+fmt(c.arrive)+' - '+fmt(c.depart)+' ('+c.sector.nights+' night'+(c.sector.nights>1?'s':'')+')', 11); });
+      if(t.plan && t.plan.docs){ y-=10; line('Papers', 14, bold); t.plan.docs.forEach(function(d){ line('- '+d.title+(d.due?' (by '+fmt(d.due)+')':''), 10); }); }
+      var days=Object.keys(t.binder).filter(function(d){return (t.binder[d]||[]).length;}).sort();
+      var vouchers=[];
+      days.forEach(function(d){
+        y-=12; if(y<M+80) newPage();
+        line(fmt(d)+' - '+cityForDay(t,d), 14, bold);
+        (t.binder[d]||[]).slice().sort(function(a,b){return (a.time||'').localeCompare(b.time||'');}).forEach(function(e){
+          line((e.time?e.time+'  ':'')+e.title+(e.ref?'  [Ref '+e.ref+']':''), 11, bold);
+          if(e.note) line(e.note, 9.5);
+          if(e.doc && e.doc.url){ vouchers.push({day:d, e:e}); line('Voucher attached: '+e.doc.name, 9, font, L.rgb(0.12,0.42,0.36)); }
+        });
+      });
+      var missing=[];
+      for(var i=0;i<vouchers.length;i++){
+        var v=vouchers[i]; st.textContent='Binding voucher '+(i+1)+' of '+vouchers.length+'…';
+        var r=await travelAPI('fetchDoc',{url:v.e.doc.url});
+        if(!r.ok){ missing.push(v.e.doc.name+' ('+(r.error||'error')+')'); continue; }
+        var bytes=b64ToBytes(r.b64);
+        try{
+          if(/pdf/.test(r.type) || v.e.doc.name.toLowerCase().slice(-4)==='.pdf'){
+            var src=await L.PDFDocument.load(bytes,{ignoreEncryption:true});
+            var pages=await doc.copyPages(src, src.getPageIndices()); pages.forEach(function(p){ doc.addPage(p); });
+          } else {
+            var img = /png/.test(r.type) ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+            var p=doc.addPage([W,Hh]); var sc=Math.min((W-2*M)/img.width,(Hh-2*M)/img.height,1);
+            p.drawImage(img,{x:(W-img.width*sc)/2,y:(Hh-img.height*sc)/2,width:img.width*sc,height:img.height*sc});
+          }
+        }catch(err){ missing.push(v.e.doc.name+' (could not read)'); }
+      }
+      if(missing.length){ newPage(); line('Not bound in - open from the Travel Desk', 14, bold); missing.forEach(function(m){ line('- '+m, 10); }); }
+      var out=await doc.save(), blob=new Blob([out],{type:'application/pdf'}), a=document.createElement('a');
+      a.href=URL.createObjectURL(blob); a.download=(t.name||'trip').replace(/[^\w\- ]+/g,'')+'.pdf'; document.body.appendChild(a); a.click(); a.remove();
+      st.textContent='✓ PDF ready'+(vouchers.length?' · '+(vouchers.length-missing.length)+' voucher'+(vouchers.length-missing.length===1?'':'s')+' bound in':' · attach tickets with 📄 on each line to bind them in')+(missing.length?' · '+missing.length+' could not be read':'');
+    }catch(err){ st.textContent='Could not make the PDF: '+String(err.message||err); }
+    btn.disabled=false;
   });
 
   boot();

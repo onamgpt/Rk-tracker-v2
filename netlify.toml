@@ -48,3 +48,8 @@
   schedule = "*/15 * * * *"
 
 # reorder-nudge-background declares its own schedule in the function file.
+
+# Daily fare watch — 09:00 IST (03:30 UTC). One SerpApi search per active
+# watch; Telegram alert on a new low or when a fare hits the target.
+[functions."fare-watch"]
+  schedule = "30 3 * * *"
