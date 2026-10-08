@@ -101,7 +101,7 @@ async function runWatch(w) {
   w.last = { price: best.price, airline: best.airlines, at: new Date().toISOString(), link: r.link };
   const hitTarget = w.target && best.price <= w.target;
   const newLow = isFinite(prevLow) && best.price < prevLow * 0.97;
-  if (hitTarget || newLow) {
+  if ((hitTarget || newLow) && (w.owner || "main") === "main") {
     const route = w.legs.map(l => l.from + "→" + l.to).join(", ");
     await sendTelegram("✈️ <b>Fare alert</b> · " + (w.label || route) + "\n₹" + best.price.toLocaleString("en-IN") + " per person · " + best.airlines +
       (hitTarget ? "\nBelow your target ₹" + Number(w.target).toLocaleString("en-IN") : "\nLowest seen so far") + (r.link ? "\n" + r.link : ""));
@@ -129,10 +129,13 @@ function driveId(url) {
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: H, body: "" };
   let b = {}; try { b = JSON.parse(event.body || "{}"); } catch (e) { return OK({ error: "bad json" }); }
+  const user = String(b.user || "main").toLowerCase().replace(/[^a-z0-9_-]/g, "") || "main";
+  const family = ["main", "wife", "daughter", "brunda", "tassmai"].includes(user);
+  const house = family ? "main" : user;
   try {
     switch (b.action) {
-      case "profileGet": return OK({ ok: true, profile: await kvGet("travel_profile") });
-      case "profileSave": await kvSet("travel_profile", b.profile || {}); return OK({ ok: true });
+      case "profileGet": return OK({ ok: true, profile: await kvGet(house === "main" ? "travel_profile" : "travel_profile_" + house) });
+      case "profileSave": await kvSet(house === "main" ? "travel_profile" : "travel_profile_" + house, b.profile || {}); return OK({ ok: true });
 
       case "planStart": {
         const job = genId();
@@ -156,10 +159,10 @@ exports.handler = async (event) => {
       case "hotel": return OK(Object.assign({ ok: true }, await hotelPrice(b.name, b.city, b.checkin, b.checkout, b.adults)));
       case "airbnb": return OK({ ok: true, list: await airbnb(b) });
 
-      case "watchList": return OK({ ok: true, watches: (await kvGet("fare_watches")) || [] });
+      case "watchList": return OK({ ok: true, watches: ((await kvGet("fare_watches")) || []).filter(w => (w.owner || "main") === house) });
       case "watchSave": {
         const list = (await kvGet("fare_watches")) || [];
-        const w = Object.assign({ id: genId(), created: new Date().toISOString(), history: [] }, b.watch || {});
+        const w = Object.assign({ id: genId(), created: new Date().toISOString(), history: [] }, b.watch || {}, { owner: house });
         const i = list.findIndex(x => x.id === w.id);
         if (i >= 0) list[i] = Object.assign(list[i], w); else list.push(w);
         let ran = w;
@@ -176,8 +179,8 @@ exports.handler = async (event) => {
         const e = { id: genId(), title: String(b.title || "Travel reminder").slice(0, 80), date: String(b.when || "").slice(0, 10),
           category: "Reminders", tags: ["Travel", "Pending"], notes: String(b.note || ""), reminder: b.when, reminderNote: String(b.note || b.title || ""),
           createdAt: new Date().toISOString() };
-        const s = await call({ action: "save", user: "main", entry: e });
-        if (s.ok) await smart.queueReminder(e, "main");
+        const s = await call({ action: "save", user: house, entry: e });
+        if (s.ok && house === "main") await smart.queueReminder(e, "main");
         return OK({ ok: !!s.ok });
       }
 

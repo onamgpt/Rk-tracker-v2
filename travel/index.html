@@ -315,6 +315,10 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   var KEY = 'rk_travel_desk_v1';
   // Who is looking. Same URL-param convention the main tracker uses.
   var USER = (new URLSearchParams(window.location.search).get('user') || 'main').toLowerCase();
+  // Ravi's family share one set of trips; anyone else (e.g. ?user=suresh) gets
+  // a completely separate, private travel desk.
+  var FAMILY = ['main','wife','daughter','brunda','tassmai'];
+  var HOUSE = FAMILY.indexOf(USER) >= 0 ? 'main' : USER;
   // The itinerary is shared — one family trip, one set of tickets, one vault.
   // Packing and money are personal: each person packs their own bag and carries
   // their own cards, so those live under that person's own record.
@@ -338,6 +342,8 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   }
 
   function defaultTrip(name){
+    if(HOUSE !== 'main') return {id: uid(), name: name || 'My next trip', start: new Date().toISOString().slice(0,10), pax: '1',
+      sectors: [{id:uid(), city:'', nights:2, mode:'flight'}], homeCity:'Bengaluru', binder:{}, vault:[], packing:[], expenses:[], wallets:[]};
     return {
       id: uid(), name: name || 'Switzerland, Italy & Egypt 2026',
       start: '2026-09-23', pax: '3',
@@ -486,7 +492,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async function(){
       try{ localStorage.setItem(KEY+'_'+USER, JSON.stringify({active:activeId, trips:trips})); }catch(e){}
-      var a = await dbAPI('savePortfolio', {key:SHARED_KEY,   data:splitShared()},   'main');
+      var a = await dbAPI('savePortfolio', {key:SHARED_KEY,   data:splitShared()},   HOUSE);
       var b = await dbAPI('savePortfolio', {key:PERSONAL_KEY, data:splitPersonal()}, USER);
       if((a&&(a.ok||a.saved)) && (b&&(b.ok||b.saved))) flash('Saved'); else flash('Saved on this device only');
     }, 400);
@@ -509,7 +515,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     renderAll();
     // 2. durable load — shared itinerary, then this person's own packing/money
     try{
-      var shared = await dbAPI('getPortfolio', {key:SHARED_KEY}, 'main');
+      var shared = await dbAPI('getPortfolio', {key:SHARED_KEY}, HOUSE);
       var d = shared && shared.data;
       if(d && d.trips && Object.keys(d.trips).length){
         trips = d.trips;
@@ -690,6 +696,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   }
 
   async function syncEntryReminder(dateISO, entry){
+    if(HOUSE !== 'main') return;   // Telegram alerts go to Ravi's chat only
     var tag = 'tg_travel_' + entry.id;
     var res = await dbAPI('getPortfolio', {key:'tg_scheduled'});
     var list = (res && res.ok && res.data && Array.isArray(res.data.scheduled)) ? res.data.scheduled : [];
@@ -1260,7 +1267,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     renderMoney(); save();
   });
 
-  var NAMES = {main:'Ravi', wife:'Brunda', daughter:'Tassmai'};
+  var NAMES = {main:'Ravi', wife:'Brunda', daughter:'Tassmai', suresh:'Suresh'};
   function whoLabel(){ return NAMES[USER] || USER; }
   document.getElementById('whoami').textContent =
     whoLabel() + ' · itinerary shared, packing & money your own';
@@ -1506,7 +1513,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   async function travelAPI(action, extra){
     try{
       var r = await fetch('/.netlify/functions/travel', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(Object.assign({action:action}, extra||{}))});
+        body: JSON.stringify(Object.assign({action:action, user:USER}, extra||{}))});
       return await r.json();
     }catch(e){ return {error:String(e)}; }
   }
@@ -1985,7 +1992,19 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     btn.disabled=false;
   });
 
-  boot();
+  // PIN (same PINs as the tracker), asked once per device
+  (async function gate(){
+    if(localStorage.getItem('rkpin_ok_'+USER)==='1') return boot();
+    var map={}; try{ var r=await dbAPI('getPortfolio',{key:'user_pins'},'main'); map=(r&&r.data)||{}; }catch(e){}
+    if(!map[USER]){ if(HOUSE==='main') return boot(); document.body.innerHTML='<div style="padding:40px;font-family:sans-serif;text-align:center">🔒 No PIN set for this user yet.<br>Ask Ravi to set one in PIN Access.</div>'; return; }
+    var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:#f6f1e7;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;font-family:sans-serif';
+    ov.innerHTML='<div style="font-size:30px">🔒</div><div>Travel Desk — '+(NAMES[USER]||USER)+'</div><input id="pinIn" type="password" inputmode="numeric" placeholder="PIN" style="font-size:22px;padding:10px;width:180px;text-align:center;letter-spacing:6px"><button id="pinGo" style="padding:10px 30px;font-size:16px">Unlock</button><div id="pinErr" style="color:#b33;font-size:13px"></div>';
+    document.body.appendChild(ov);
+    var go=async function(){ var pin=document.getElementById('pinIn').value.trim(); if(!pin) return;
+      var h=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('rkpin:'+pin)))).map(function(b){return b.toString(16).padStart(2,'0');}).join('');
+      if(h===map[USER]){ localStorage.setItem('rkpin_ok_'+USER,'1'); ov.remove(); boot(); } else document.getElementById('pinErr').textContent='Wrong PIN'; };
+    document.getElementById('pinGo').onclick=go; document.getElementById('pinIn').addEventListener('keydown',function(e){ if(e.key==='Enter') go(); });
+  })();
 })();
 </script>
 </body>
