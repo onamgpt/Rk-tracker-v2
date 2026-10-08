@@ -50,14 +50,15 @@ body.running{background:#0b0906}
 
   <div class="setup">
     <div class="lab">PRACTICE</div>
-    <select id="kind"><option>Vipassana</option><option>Anapana</option><option>Metta</option><option>Other</option></select>
+    <select id="kind"><option>Anapana · Vipassana · Metta</option><option>Vipassana</option><option>Anapana</option><option>Metta</option><option>Other</option></select>
     <div class="lab">MINUTES</div>
     <div class="chips" id="mins"></div>
-    <div class="lab">SMALL BELLS — WHEN THIS MUCH TIME IS LEFT</div>
+    <div class="lab">PHASES — A SMALL BELL MARKS EACH CHANGE</div>
     <div class="row">
-      <select id="b1"></select>
-      <select id="b2"></select>
+      <div><div class="lab" style="margin:0 0 4px">Anapana (start)</div><select id="p1"></select></div>
+      <div><div class="lab" style="margin:0 0 4px">Metta (end)</div><select id="p3"></select></div>
     </div>
+    <div class="note" id="split"></div>
   </div>
 
   <div class="ring">
@@ -88,7 +89,8 @@ body.running{background:#0b0906}
   var $=function(i){return document.getElementById(i);};
   var PREF="med_pref", KEY="meditation_log";
   var pref; try{ pref=JSON.parse(localStorage.getItem(PREF))||{}; }catch(e){ pref={}; }
-  pref=Object.assign({mins:60,b1:20,b2:10,kind:"Vipassana"},pref);
+  pref=Object.assign({mins:60,p1:20,p3:10,kind:"Anapana · Vipassana · Metta"},pref);
+  if(pref.p1==null) pref.p1=20; if(pref.p3==null) pref.p3=10;
   var log=[];
 
   // ── bells: struck-bowl tone made in the browser (no files to load) ──
@@ -112,23 +114,29 @@ body.running{background:#0b0906}
   });
   var cust=document.createElement("button"); cust.className="chip"; cust.textContent="Other"; cust.onclick=function(){ var v=parseInt(prompt("Minutes",pref.mins),10); if(v>0&&v<600){ pref.mins=v; savePref(); drawChips(); idle(); } }; $("mins").appendChild(cust);
   function drawChips(){ Array.prototype.forEach.call($("mins").children,function(b){ b.classList.toggle("on", String(pref.mins)===b.textContent || (b.textContent==="Other" && [10,20,30,45,60,90].indexOf(pref.mins)<0)); }); }
-  [["b1",[0,5,10,15,20,25,30,50]],["b2",[0,5,10,15,20]]].forEach(function(x){
-    $(x[0]).innerHTML=x[1].map(function(p){return '<option value="'+p+'">'+(p? p+'% left':'off')+'</option>';}).join("");
+  [["p1",[0,10,15,20,25,30,40,50]],["p3",[0,5,10,15,20]]].forEach(function(x){
+    $(x[0]).innerHTML=x[1].map(function(p){return '<option value="'+p+'">'+(p? p+'% of the sit':'none')+'</option>';}).join("");
     $(x[0]).value=pref[x[0]]; $(x[0]).onchange=function(){ pref[x[0]]=+this.value; savePref(); idle(); };
   });
   $("kind").value=pref.kind; $("kind").onchange=function(){ pref.kind=this.value; savePref(); };
   function savePref(){ try{ localStorage.setItem(PREF,JSON.stringify(pref)); }catch(e){} }
   function fmt(s){ s=Math.max(0,Math.round(s)); var h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(x).padStart(2,"0"); }
+  // Bells at the end of Anapana and at the start of Metta, e.g. 10 min with
+  // 20% / 10% → bell at 2:00, bell at 9:00, closing bells at 10:00.
+  function bellsAt(){ var out=[]; if(pref.p1) out.push(pref.p1/100); if(pref.p3) out.push(1-pref.p3/100); return out; }
+  function phaseAt(frac){ if(pref.p1 && frac<pref.p1/100) return "Anapana"; if(pref.p3 && frac>=1-pref.p3/100) return "Metta"; return "Vipassana"; }
   function marks(){ // tick marks where the small bells fall
     var total=pref.mins*60, g=$("ticks"); g.innerHTML="";
-    [pref.b1,pref.b2].filter(Boolean).forEach(function(p){
-      var a=(1-p/100)*2*Math.PI, x=60+54*Math.cos(a), y=60+54*Math.sin(a);
+    bellsAt().forEach(function(f){
+      var a=f*2*Math.PI, x=60+54*Math.cos(a), y=60+54*Math.sin(a);
       g.innerHTML+='<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="2.6" fill="#e9dcc0"/>';
     });
   }
   function idle(){ $("clock").textContent=fmt(pref.mins*60); $("arc").style.strokeDashoffset=0;
-    var parts=[pref.b1,pref.b2].filter(Boolean).map(function(p){return fmt(pref.mins*60*p/100)+" left";});
-    $("phase").textContent= parts.length? "small bells at "+parts.join(" & ") : "no small bells"; marks(); }
+    var T=pref.mins*60, a=T*pref.p1/100, m=T*pref.p3/100, v=T-a-m;
+    $("split").textContent=[pref.p1?"Anapana "+fmt(a):"",v>0?"Vipassana "+fmt(v):"",pref.p3?"Metta "+fmt(m):""].filter(Boolean).join("  →  ");
+    var at=bellsAt().map(function(f){return fmt(T*f);});
+    $("phase").textContent= at.length? "small bells at "+at.join(" & ") : "no small bells"; marks(); }
 
   // ── session ──
   var run=null, wake=null;
@@ -151,9 +159,9 @@ body.running{background:#0b0906}
     if(!run || run.paused) return;
     var el=(Date.now()-run.start)/1000, left=run.total-el;
     if(el<0){ $("clock").textContent=fmt(run.total); $("phase").textContent="settle in…"; return setTimeout(tick,250); }
-    $("clock").textContent=fmt(left); $("phase").textContent=run.kind;
+    $("clock").textContent=fmt(left); $("phase").textContent=phaseAt(el/run.total);
     $("arc").style.strokeDashoffset=(339.3*Math.min(1,el/run.total)).toFixed(1);
-    [pref.b1,pref.b2].forEach(function(p){ if(p && !run.rung[p] && left<=run.total*p/100){ run.rung[p]=1; bell(false); } });
+    bellsAt().forEach(function(f,i){ if(!run.rung[i] && el>=run.total*f){ run.rung[i]=1; bell(false); } });
     if(left<=0){ bells(3,true); return finish(run.total,true); }
     setTimeout(tick,250);
   }
