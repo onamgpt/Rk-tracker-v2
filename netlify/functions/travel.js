@@ -142,6 +142,14 @@ exports.handler = async (event) => {
           body: JSON.stringify({ job, brief: String(b.brief || "").slice(0, 3000), profile: b.profile || {} }) });
         return OK({ ok: true, job });
       }
+      case "transferStart": {
+        const job = genId();
+        await kvSet("travel_job_" + job, { status: "working", at: new Date().toISOString() });
+        const base = process.env.URL || "https://rk-tracker-v2.netlify.app";
+        await fetch(base + "/.netlify/functions/travel-background", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job, mode: "transfers", q: b.q || {} }) });
+        return OK({ ok: true, job });
+      }
       case "planStatus": return OK({ ok: true, job: await kvGet("travel_job_" + b.job) });
 
       case "flights": return OK(Object.assign({ ok: true }, await flights(b.legs || [])));

@@ -62,10 +62,52 @@ Call save_plan with exactly this shape:
 The nights of all sectors must add up to the trip length; days must cover start date to the day you land home. Budget in INR for all travellers together.`;
 }
 
+// ── Private transfers: live web research, then a clean structured list ──
+function askRaw(model, body) {
+  const data = JSON.stringify(Object.assign({ model }, body));
+  return new Promise((resolve, reject) => {
+    const req = https.request({ hostname: "api.anthropic.com", path: "/v1/messages", method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY || "", "anthropic-version": "2023-06-01", "Content-Length": Buffer.byteLength(data) } },
+      res => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { const j = JSON.parse(d); if (j.error) return reject(new Error(j.error.message)); resolve(j); } catch (e) { reject(e); } }); });
+    req.on("error", reject); req.setTimeout(240000, () => { req.destroy(); reject(new Error("timeout")); });
+    req.write(data); req.end();
+  });
+}
+const TRANSFER_TOOL = { name: "save_transfers", description: "Save private transfer options.", input_schema: { type: "object", properties: {
+  options: { type: "array", items: { type: "object", properties: {
+    provider: { type: "string" }, kind: { type: "string" }, priceLocal: { type: "string" }, priceINR: { type: "number" },
+    duration: { type: "string" }, why: { type: "string" }, link: { type: "string" }, pick: { type: "boolean" } } } },
+  tip: { type: "string" } }, required: ["options"] } };
+
+async function researchTransfers(q) {
+  const ask = `Find PRIVATE transfer options (pre-booked car with driver, meet & greet) for this trip leg:
+From: ${q.from}
+To: ${q.to}
+City/country: ${q.city}${q.country ? ", " + q.country : ""}
+Date: ${q.date || "not fixed"} · Travellers: ${q.pax || 2} adults with cabin bags only.
+Check Welcome Pickups first (the traveller liked it), then 2–4 other reputable options available there (e.g. Booking.com Taxi, GetTransfer, Kiwitaxi, Blacklane, the hotel's own car, a well-reviewed local company). For each: provider, vehicle type, approximate price for this group (local currency and INR), journey time, why it is good or not, and the exact booking page URL for this city/route. Say plainly if Welcome Pickups does not serve this place.`;
+  let notes = "";
+  try {
+    const r = await askRaw("claude-sonnet-5-5", { max_tokens: 4000, messages: [{ role: "user", content: ask }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }] });
+    notes = (r.content || []).filter(x => x.type === "text").map(x => x.text).join("\n");
+  } catch (e) { notes = ""; }
+  const r2 = await askRaw("claude-haiku-4-5-20251001", { max_tokens: 2500,
+    messages: [{ role: "user", content: "Turn these findings into transfer options. Mark the best value-for-comfort option pick:true. Keep only real providers with real URLs from the findings; if there are no findings, give well-known providers with their main site URL and say prices are estimates.\n\nLeg: " + q.from + " → " + q.to + " (" + q.city + ")\n\nFindings:\n" + (notes || "(web search unavailable)") }],
+    tools: [TRANSFER_TOOL], tool_choice: { type: "tool", name: "save_transfers" } });
+  const tu = (r2.content || []).find(x => x.type === "tool_use");
+  return tu ? tu.input : { options: [] };
+}
+
 exports.handler = async (event) => {
   let b = {}; try { b = JSON.parse(event.body || "{}"); } catch (e) { return; }
   if (!b.job) return;
   const key = "travel_job_" + b.job;
+  if (b.mode === "transfers") {
+    try { const res = await researchTransfers(b.q || {}); await kvSet(key, { status: "done", result: res, at: new Date().toISOString() }); }
+    catch (e) { await kvSet(key, { status: "error", error: String(e.message || e) }); }
+    return;
+  }
   try {
     let plan = null, lastErr = null;
     for (const model of ["claude-sonnet-5-5", "claude-sonnet-5-5", "claude-haiku-4-5-20251001"]) {

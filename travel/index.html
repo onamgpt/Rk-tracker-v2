@@ -1695,6 +1695,34 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       h += '</div>';
     });
 
+    // private transfers (Welcome Pickups first)
+    var legs = transferLegs(t); B.transfers = B.transfers || {};
+    h += '<div class="card"><label class="f">🚘 PRIVATE TRANSFERS — DRIVER MEETS YOU</label>';
+    legs.forEach(function(L, li){
+      var bt = B.transfers[L.id] = B.transfers[L.id] || {};
+      var opts = (bt.result && bt.result.options) || [];
+      h += '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)">'+
+        '<div class="etitle">'+esc(L.from)+' → '+esc(L.to)+'</div><div class="emeta">'+(L.date?fmt(L.date):'')+' · '+esc(L.city)+'</div>';
+      if(opts.length){
+        if(bt.pick==null){ var pk=opts.findIndex(function(o){return o.pick;}); bt.pick=pk<0?0:pk; }
+        opts.forEach(function(o, oi){
+          var on = bt.pick===oi;
+          h += '<label class="entry" style="cursor:pointer;'+(on?'outline:2px solid var(--go);':'')+'"><input type="radio" name="tr'+li+'" class="bkTrPick" data-l="'+L.id+'" data-i="'+oi+'"'+(on?' checked':'')+' style="margin-top:4px">'+
+            '<div class="ebody"><div class="etitle">'+esc(o.provider)+(o.kind?' · '+esc(o.kind):'')+'</div>'+
+            '<div class="emeta">'+(o.priceINR?'≈ '+inr(o.priceINR):'')+(o.priceLocal?' ('+esc(o.priceLocal)+')':'')+(o.duration?' · '+esc(o.duration):'')+'</div>'+
+            (o.why?'<div class="enote">'+esc(o.why)+'</div>':'')+
+            (o.link?'<div class="enote"><a href="'+esc(o.link)+'" target="_blank" rel="noopener">Book on '+esc(o.provider)+' ↗</a></div>':'')+'</div></label>';
+        });
+        if(bt.result.tip) h += '<div class="enote">💡 '+esc(bt.result.tip)+'</div>';
+      }
+      h += '<div class="row" style="margin-top:8px"><button class="mini bkTr" data-l="'+L.id+'">'+(opts.length?'Search again':'Find private transfer')+'</button>'+
+        '<a class="iconbtn" target="_blank" rel="noopener" href="https://www.welcomepickups.com/">Welcome Pickups</a></div>'+
+        '<div class="f bkTrMsg" data-l="'+L.id+'" style="margin-top:6px">'+(bt.working?'Researching… 1–2 minutes':'')+'</div>';
+      if(opts.length) h += bookRow('tr:'+L.id, 'Transfer', bt);
+      h += '</div>';
+    });
+    h += '</div>';
+
     // budget
     h += '<div class="card"><label class="f">BUDGET FOR '+pax+' — PLAN vs NOW</label><table style="width:100%;border-collapse:collapse;font-size:14px">';
     var rows = budgetRows(t), tp=0, tn=0;
@@ -1714,6 +1742,26 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     if(watchesCache===null){ watchesCache=[]; travelAPI('watchList').then(function(r){ watchesCache=(r&&r.watches)||[]; if(tab==='book') renderBook(); }); }
   }
 
+  // Transfer legs: home → airport, every arrival (airport/station → stay),
+  // the last departure (stay → airport) and airport → home.
+  function transferLegs(t){
+    var P=t.plan, B=P.book||{}, sd=sectorDates(t), legs=[], secs=P.sectors||[];
+    var stayName=function(si){ var bh=(B.hotels||{})[si]||{}, ps=secs[si]||{};
+      if(bh.kind==='airbnb'){ var al=bh.airbnb||(P.live&&P.live.airbnb&&P.live.airbnb[si])||[]; if(al[bh.apick||0]) return 'Airbnb, '+(ps.area||ps.city); }
+      var hs=(P.hotels||[]).find(function(x){return x.sector===si;}); var o=hs&&hs.options&&hs.options[bh.pick||0]; return o?o.name:(ps.area||ps.city)+' stay'; };
+    var home=P.homeCity||'Bengaluru', ha=P.homeAirport||'BLR';
+    legs.push({id:'home-out',from:'Home, '+home,to:ha+' airport',city:home,country:'India',date:P.start});
+    secs.forEach(function(ps,si){
+      var c=sd[ps._id]||{};
+      var via = ps.airport ? ps.airport+' airport' : (ps.mode==='train' ? ps.city+' railway station' : ps.city+' arrival point');
+      legs.push({id:'arr-'+si,from:via,to:stayName(si),city:ps.city,date:c.arrive});
+      if(si===secs.length-1) legs.push({id:'dep-'+si,from:stayName(si),to:(ps.airport||ps.city)+' airport',city:ps.city,date:c.depart});
+    });
+    var last=(P.days||[]).reduce(function(m,d){return d.date>m?d.date:m;},P.start);
+    legs.push({id:'home-in',from:ha+' airport',to:'Home, '+home,city:home,country:'India',date:last});
+    return legs;
+  }
+
   function bookRow(key, label, obj){
     obj = obj || {};
     return '<div class="row bkRow" data-k="'+key+'" style="margin-top:10px;gap:6px">'+
@@ -1727,6 +1775,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   function onlineTotal(t, key){
     var P=t.plan, B=P.book, pax=paxN(t);
     if(key==='fl'){ var lv=B.flightsLive||(P.live&&P.live.flights); return lv&&lv.lowest ? lv.lowest*pax : null; }
+    if(key.indexOf('tr:')===0){ var bt=(B.transfers||{})[key.slice(3)]||{}, op=bt.result&&bt.result.options&&bt.result.options[bt.pick||0]; return op&&op.priceINR?op.priceINR:null; }
     var s=+key.slice(1), hs=(P.hotels||[]).find(function(x){return x.sector===s;}), bh=B.hotels[s]||{}, ps=(P.sectors||[])[s]||{};
     if(bh.kind==='airbnb'){ var al=bh.airbnb||(P.live&&P.live.airbnb&&P.live.airbnb[s])||[]; var a=al[bh.apick||0]; if(a) return a.total; }
     var lv=bh.live; if(lv&&(lv.total||lv.perNight)) return lv.total||lv.perNight*(Number(ps.nights)||1);
@@ -1757,6 +1806,10 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       if(bh.paid){ hnow+=+bh.paid; src='paid/agent'; } else if(bh.agent){ hnow+=+bh.agent; src='paid/agent'; } else { if(bh.live && src==='estimate') src='live + estimate'; hnow+=onlineTotal(t,key)||0; }
     });
     rows.splice(1,0,{item:'Stays (Airbnb / hotels)', plan:hp, now:hnow||hp, src:src});
+    var tnow=0, tsrc='';
+    Object.keys(B.transfers||{}).forEach(function(id){ var bt=B.transfers[id];
+      if(bt.paid){ tnow+=+bt.paid; tsrc='paid'; } else if(bt.agent){ tnow+=+bt.agent; tsrc=tsrc||'agent'; } else { var v=onlineTotal(t,'tr:'+id); if(v){ tnow+=v; tsrc=tsrc||'researched'; } } });
+    if(tnow) rows.splice(2,0,{item:'Private transfers', plan:0, now:tnow, src:tsrc});
     return rows;
   }
 
@@ -1785,6 +1838,23 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       var w=(watchesCache||[]).find(function(x){return x.tripId===t.id;}); if(!w) return;
       await travelAPI('watchDelete',{id:w.id}); watchesCache=watchesCache.filter(function(x){return x.id!==w.id;}); renderBook();
     };
+    Array.prototype.forEach.call(document.querySelectorAll('.bkTrPick'),function(r){ r.onchange=function(){
+      var bt=B.transfers[r.dataset.l]; bt.pick=+r.dataset.i; syncTransferEntry(t, r.dataset.l); save(); renderBook(); }; });
+    Array.prototype.forEach.call(document.querySelectorAll('.bkTr'),function(b){ b.onclick=async function(){
+      var id=b.dataset.l, L=transferLegs(t).find(function(x){return x.id===id;}); if(!L) return;
+      var bt=B.transfers[id]=B.transfers[id]||{}, msg=document.querySelector('.bkTrMsg[data-l="'+id+'"]');
+      b.disabled=true; msg.textContent='Researching Welcome Pickups and other private transfers… 1–2 minutes';
+      var st=await travelAPI('transferStart',{q:{from:L.from,to:L.to,city:L.city,country:L.country||'',date:L.date,pax:paxN(t)}});
+      if(!st||!st.job){ b.disabled=false; msg.textContent='Could not start: '+((st&&st.error)||'unknown'); return; }
+      var t0=Date.now();
+      (async function poll(){
+        var r=await travelAPI('planStatus',{job:st.job}), j=r&&r.job;
+        if(j&&j.status==='done'){ bt.result=j.result; bt.pick=null; save(); if(tab==='book') renderBook(); flash('Transfers found'); return; }
+        if(j&&j.status==='error'){ b.disabled=false; msg.textContent='Research failed: '+j.error; return; }
+        if(Date.now()-t0>5*60*1000){ b.disabled=false; msg.textContent='Taking long — tap again in a minute'; return; }
+        msg.textContent='Researching… '+Math.round((Date.now()-t0)/1000)+' s'; setTimeout(poll,5000);
+      })();
+    }; });
     Array.prototype.forEach.call(document.querySelectorAll('.bkPickA'),function(r){ r.onchange=function(){
       var s=+r.dataset.s; B.hotels[s]=B.hotels[s]||{}; B.hotels[s].kind='airbnb'; B.hotels[s].userChose=true; B.hotels[s].apick=+r.dataset.i;
       syncHotelEntry(t, s); save(); renderBook(); }; });
@@ -1811,11 +1881,11 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       bh.live=r; save(); renderBook();
     }; });
     Array.prototype.forEach.call(document.querySelectorAll('.bkRow'),function(row){
-      var k=row.dataset.k, obj = k==='fl' ? (B.flights=B.flights||{}) : (B.hotels[+k.slice(1)]=B.hotels[+k.slice(1)]||{});
+      var k=row.dataset.k, obj = k==='fl' ? (B.flights=B.flights||{}) : k.indexOf('tr:')===0 ? ((B.transfers=B.transfers||{})[k.slice(3)]=B.transfers[k.slice(3)]||{}) : (B.hotels[+k.slice(1)]=B.hotels[+k.slice(1)]||{});
       var upd=function(){ obj.status=row.querySelector('.bkSt').value; obj.agent=+row.querySelector('.bkAgent').value||null;
         obj.paid=+row.querySelector('.bkPaid').value||null; obj.ref=row.querySelector('.bkRef').value.trim();
         row.querySelector('.bkCmp').textContent=agentCompare(k,obj);
-        if(k!=='fl') syncHotelEntry(t, +k.slice(1)); else syncFlightRefs(t, obj.ref);
+        if(k.indexOf('tr:')===0) syncTransferEntry(t, k.slice(3)); else if(k!=='fl') syncHotelEntry(t, +k.slice(1)); else syncFlightRefs(t, obj.ref);
         save(); };
       row.querySelector('.bkSt').onchange=function(){ upd(); renderBook(); };
       ['.bkAgent','.bkPaid','.bkRef'].forEach(function(c){ row.querySelector(c).onchange=function(){ upd(); renderBook(); }; });
@@ -1836,6 +1906,14 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     // drop the planner's own hotel line for that arrival day, then add the chosen one
     t.binder[c.arrive]=(t.binder[c.arrive]||[]).filter(function(e){return !(e.type==='hotel' && !e.ref && !e.doc && e.id.indexOf('hotel_')!==0);});
     t.binder[c.arrive].push({id:id,type:'hotel',time:'15:00',title:(bh.status==='Booked'?'':'(not booked yet) ')+o.name+', '+ps.city,ref:bh.ref||'',note:(o.area||'')+(bh.paid?' · paid '+inr(bh.paid):'')});
+  }
+  function syncTransferEntry(t, id){
+    var P=t.plan, bt=(P.book.transfers||{})[id]||{}, L=transferLegs(t).find(function(x){return x.id===id;});
+    if(!L||!L.date) return;
+    var op=bt.result&&bt.result.options&&bt.result.options[bt.pick||0]; if(!op) return;
+    var eid='tr_'+id;
+    Object.keys(t.binder).forEach(function(d){ t.binder[d]=(t.binder[d]||[]).filter(function(e){return e.id!==eid;}); });
+    (t.binder[L.date]=t.binder[L.date]||[]).push({id:eid,type:'taxi',time:'',title:(bt.status==='Booked'?'':'(not booked yet) ')+'Private transfer: '+L.from+' → '+L.to,ref:bt.ref||'',note:op.provider+(op.kind?' · '+op.kind:'')+(bt.paid?' · paid '+inr(bt.paid):op.priceINR?' · ≈ '+inr(op.priceINR):'')});
   }
   function syncFlightRefs(t, ref){
     if(!ref) return;
