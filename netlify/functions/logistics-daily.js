@@ -13,28 +13,36 @@ exports.handler = async () => {
     const s = await L.settings();
     const r = await call({ action: "getPortfolio", user: "main", key: "logistics_v2" });
     const data = (r && r.data) || { shipments: [] };
-    const today = ist(), lines = { del: [], pay: [], doc: [], fu: [] };
+    const today = ist(), lines = { del: [], pay: [], doc: [], fu: [], ord: [], mat: [] };
+    const soon = new Date(Date.now() + 5.5 * 3600e3 + 3 * 864e5).toISOString().slice(0, 10);
     let due = 0;
     (data.shipments || []).forEach(x => {
       if (x.cancelled) return;
-      const d = x.date || (x.createdAt || "").slice(0, 10);
-      const age = d ? days(d, today) : 0;
-      const name = L.esc(x.customer || "—") + (x.invoiceNo ? " (Inv " + L.esc(x.invoiceNo) + ")" : "");
+      const name = L.esc(x.customer || "—") + (x.invoiceNo ? " (Inv " + L.esc(x.invoiceNo) + ")" : x.orderNo ? " (PO " + L.esc(x.orderNo) + ")" : "");
+      const d = x.dispatchedOn || (x.orderDate === undefined ? x.date : "");
+      if (!d) {   // not dispatched yet: chase the order side
+        const pend = (x.materials || []).filter(m => !m.received);
+        if (x.expectedDispatch && x.expectedDispatch <= today) lines.ord.push("• " + name + " — dispatch was due " + x.expectedDispatch + " · " + L.esc(x.production || "Not started"));
+        else if (x.expectedDispatch && x.expectedDispatch <= soon && (x.production || "Not started") === "Not started") lines.ord.push("• " + name + " — dispatch by " + x.expectedDispatch + ", production not started");
+        if (pend.length && (!x.expectedDispatch || x.expectedDispatch <= soon)) lines.mat.push("• " + name + " — " + pend.map(m => L.esc(m.name) + (m.supplier ? " (" + L.esc(m.supplier) + ")" : "")).join(", "));
+      } else {
+      const age = days(d, today);
       if (!x.deliveredOn && age >= s.deliveryDays) lines.del.push("• " + name + " — " + age + " days, " + L.esc(x.transporter || "") + (x.lrNo ? " LR " + L.esc(x.lrNo) : ""));
       const bal = (Number(x.invoiceAmount) || 0) - paid(x);
       if (x.invoiceAmount && bal > 1 && age >= s.paymentDays) { lines.pay.push("• " + name + " — " + L.inr(bal) + " due, " + age + " days"); due += bal; }
       const types = new Set((x.files || []).map(f => f.kind));
       if (age >= s.docDays && !x.deliveredOn) { const miss = [["lr", "LR copy"], ["eway", "e-way bill"], ["invoice", "invoice"]].filter(k => !types.has(k[0])).map(k => k[1]); if (miss.length) lines.doc.push("• " + name + " — missing " + miss.join(", ")); }
+      }
       if (x.followUp && x.followUp <= today && !x.followUpDone) lines.fu.push("• " + name + (x.followUpNote ? " — " + L.esc(x.followUpNote) : ""));
     });
     const sec = (t, a) => a.length ? "\n\n<b>" + t + " (" + a.length + ")</b>\n" + a.slice(0, 15).join("\n") + (a.length > 15 ? "\n…and " + (a.length - 15) + " more" : "") : "";
-    const body = sec("📞 Follow up today", lines.fu) + sec("🚚 Not delivered yet", lines.del) + sec("💰 Payment pending", lines.pay) + sec("📎 Documents missing", lines.doc);
+    const body = sec("📅 Orders due for dispatch", lines.ord) + sec("🧪 Materials still pending", lines.mat) + sec("📞 Follow up today", lines.fu) + sec("🚚 Not delivered yet", lines.del) + sec("💰 Payment pending", lines.pay) + sec("📎 Documents missing", lines.doc);
     if (!body) return { statusCode: 200, body: "nothing due" };
-    const head = "☀️ <b>Dispatch Register — " + today + "</b>" + (due ? "\nTotal payment pending: <b>" + L.inr(due) + "</b>" : "");
+    const head = "☀️ <b>Orders & Dispatch — " + today + "</b>" + (due ? "\nTotal payment pending: <b>" + L.inr(due) + "</b>" : "");
     const link = "\n\nOpen: https://rk-tracker-v2.netlify.app/lr/";
     await L.tgSend([s.prakashChat || OWNER_CHAT], head + body + link + "?user=prakash");
     const digest = [].concat(s.digestToOwner && s.prakashChat ? [OWNER_CHAT] : []).concat(s.digestToGroup ? [s.groupChat] : []);
-    const summary = head + "\nPending deliveries: " + lines.del.length + " · Unpaid bills: " + lines.pay.length + " · Missing docs: " + lines.doc.length + " · Follow-ups today: " + lines.fu.length;
+    const summary = head + "\nOrders due: " + lines.ord.length + " · Materials pending: " + lines.mat.length + " · Pending deliveries: " + lines.del.length + " · Unpaid bills: " + lines.pay.length + " · Missing docs: " + lines.doc.length + " · Follow-ups today: " + lines.fu.length;
     if (digest.length) await L.tgSend(digest, summary);
   } catch (e) {}
   return { statusCode: 200, body: "ok" };

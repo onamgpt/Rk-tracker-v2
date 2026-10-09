@@ -46,7 +46,7 @@ const inr = (n) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
 exports.inr = inr;
 
 // arrays merged by id: incoming wins for the same id, nothing silently lost
-const ARR = ["files", "payments", "log", "reminders"];
+const ARR = ["files", "payments", "log", "reminders", "materials"];
 function merge(old, inc) {
   if (!old) return inc;
   const out = Object.assign({}, old, inc);
@@ -79,10 +79,18 @@ exports.handler = async (event) => {
       const isNew = i < 0;
       const inc = Object.assign({}, b.shipment, { updatedAt: new Date().toISOString(), updatedBy: me });
       if (isNew) { inc.createdAt = inc.createdAt || inc.updatedAt; inc.createdBy = me; }
-      const merged = merge(isNew ? null : list[i], inc);
+      const prev = isNew ? null : list[i];
+      const merged = merge(prev, inc);
+      const dispOf = (x) => x ? (x.dispatchedOn || (x.orderDate === undefined ? x.date : "")) : "";
       if (isNew) list.unshift(merged); else list[i] = merged;
       await kvSet(KEY, { shipments: list, updated: inc.updatedAt });
-      if (isNew) {
+      if (isNew && !dispOf(merged)) {
+        const t = "🧾 <b>New order</b> · " + esc(merged.customer || "—") + (merged.orderNo ? " · PO " + esc(merged.orderNo) : "") +
+          (merged.items ? "\n" + esc(String(merged.items).slice(0, 200)) : "") + (merged.expectedDispatch ? "\n📅 dispatch by " + esc(merged.expectedDispatch) : "") +
+          ((merged.materials || []).length ? "\n🧪 materials pending: " + esc(merged.materials.filter(m => !m.received).map(m => m.name).join(", ")) : "") + "\n— entered by " + esc(me);
+        await tgSend([OWNER_CHAT].concat(s.dispatchToGroup ? [s.groupChat] : []), t);
+      }
+      if (dispOf(merged) && !dispOf(prev)) {
         const t = "🚚 <b>Dispatched</b> · " + esc(merged.customer || "—") + (merged.invoiceNo ? " · Inv " + esc(merged.invoiceNo) : "") +
           (merged.invoiceAmount ? " · " + inr(merged.invoiceAmount) : "") + (merged.transporter ? "\n" + esc(merged.transporter) : "") + (merged.lrNo ? " · LR " + esc(merged.lrNo) : "") +
           (merged.freight ? " · freight " + inr(merged.freight) : "") + (merged.destination ? "\n📍 " + esc(merged.destination) : "") + "\n— entered by " + esc(me);
