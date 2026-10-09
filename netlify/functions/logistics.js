@@ -18,6 +18,7 @@ const DEFAULTS = { users: ["main", "prakash"], deliveryDays: 7, paymentDays: 30,
 
 async function settings() {
   const s = Object.assign({}, DEFAULTS, (await kvGet("logistics_settings")) || {});
+  if (!s.prakashEmail) s.prakashEmail = "prakashonam@gmail.com";   // given by Ravi, Oct 2026
   // Find Prakash and the team group in the bot's contact list if not set by hand.
   if (!s.prakashChat || !s.groupChat) {
     const contacts = (await kvGet("tg_contacts")) || [];
