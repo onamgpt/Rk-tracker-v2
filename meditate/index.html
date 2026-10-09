@@ -78,9 +78,9 @@ body.running{background:#0b0906}
       <div class="stat"><b id="sWeek">0</b><span>min this week</span></div>
       <div class="stat"><b id="sStreak">0</b><span>day streak</span></div>
     </div>
-    <div class="sub"><button id="addPast">+ Log a session I already did</button></div>
+    <div class="sub"><button id="testBell">🔔 Test bell</button><button id="addPast">+ Log a session I already did</button></div>
     <div class="hist" id="hist"></div>
-    <div class="note">Keep this screen open (it stays awake on its own). Place the phone face down — bells play even with the screen dimmed, but not if you switch apps or lock the phone.</div>
+    <div class="note">Keep this screen open (it stays awake on its own). Place the phone face down. Bells play even on silent mode — just keep the volume up and this page open; don't lock the phone or switch apps.</div>
   </div>
 </div>
 
@@ -93,20 +93,42 @@ body.running{background:#0b0906}
   if(pref.p1==null) pref.p1=20; if(pref.p3==null) pref.p3=10;
   var log=[];
 
-  // ── bells: struck-bowl tone made in the browser (no files to load) ──
-  var ctx=null;
-  function audio(){ if(!ctx){ var A=window.AudioContext||window.webkitAudioContext; ctx=new A(); } if(ctx.state==="suspended") ctx.resume(); return ctx; }
-  function bell(big, at){
-    var c=audio(), t=(at||c.currentTime)+0.02, base=big?196:392, dur=big?9:5, vol=big?0.5:0.22;
-    [[1,1],[2.76,0.45],[5.4,0.22],[8.93,0.1]].forEach(function(p){
-      var o=c.createOscillator(), g=c.createGain();
-      o.type="sine"; o.frequency.value=base*p[0];
-      g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vol*p[1],t+0.015);
-      g.gain.exponentialRampToValueAtTime(0.0001,t+dur/(p[0]>2?1.8:1));
-      o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+dur);
-    });
+  // ── bells ──────────────────────────────────────────────────────────────
+  // Bells are pre-made as small WAV sounds and played through an <audio>
+  // element. On iPhone that plays even with the ringer switch on silent (the
+  // old Web-Audio-only bells were muted by it — "sometimes no sound").
+  try{ if(navigator.audioSession) navigator.audioSession.type="playback"; }catch(e){}
+  function bowlWav(big, strikes){
+    var sr=22050, gap=big?4:2.5, dur=big?9:5, total=Math.ceil(sr*((strikes-1)*gap+dur));
+    var data=new Float32Array(total), base=big?196:392, parts=[[1,1],[2.76,0.45],[5.4,0.22],[8.93,0.1]];
+    for(var k=0;k<strikes;k++){
+      var off=Math.floor(k*gap*sr);
+      for(var i=0;i<dur*sr && off+i<total;i++){
+        var t=i/sr, v=0;
+        for(var j=0;j<parts.length;j++){ var p=parts[j], d=dur/(p[0]>2?1.8:1); v+=p[1]*Math.sin(2*Math.PI*base*p[0]*t)*Math.exp(-5*t/d); }
+        data[off+i]+= v*(t<0.01?t/0.01:1)*(big?0.5:0.3);
+      }
+    }
+    var buf=new ArrayBuffer(44+total*2), dv=new DataView(buf);
+    function str(o,s){ for(var i=0;i<s.length;i++) dv.setUint8(o+i,s.charCodeAt(i)); }
+    str(0,"RIFF"); dv.setUint32(4,36+total*2,true); str(8,"WAVEfmt "); dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
+    dv.setUint32(24,sr,true); dv.setUint32(28,sr*2,true); dv.setUint16(32,2,true); dv.setUint16(34,16,true); str(36,"data"); dv.setUint32(40,total*2,true);
+    for(var i=0;i<total;i++){ var x=Math.max(-1,Math.min(1,data[i])); dv.setInt16(44+i*2,x*32767,true); }
+    return URL.createObjectURL(new Blob([buf],{type:"audio/wav"}));
   }
-  function bells(n,big){ var c=audio(); for(var i=0;i<n;i++) bell(big,c.currentTime+i*(big?4:2.5)); }
+  var SND={};
+  function sounds(){ if(!SND.small){ SND.small=new Audio(bowlWav(false,1)); SND.big3=new Audio(bowlWav(true,3)); SND.small.preload=SND.big3.preload="auto"; } return SND; }
+  function play(a){ try{ a.currentTime=0; var p=a.play(); if(p&&p.catch) p.catch(function(){ fallbackTone(a===SND.big3); }); }catch(e){ fallbackTone(a===SND.big3); } }
+  function bell(big){ play(big?sounds().big3:sounds().small); }
+  function bells(n,big){ play(big?sounds().big3:sounds().small); }
+  // last resort: Web Audio tone
+  var ctx=null;
+  function fallbackTone(big){ try{ if(!ctx){ var A=window.AudioContext||window.webkitAudioContext; ctx=new A(); } if(ctx.state!=="running") ctx.resume();
+    var o=ctx.createOscillator(), g=ctx.createGain(), t=ctx.currentTime+0.02; o.frequency.value=big?196:392;
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(big?0.5:0.25,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+(big?8:4));
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t+(big?8:4)); }catch(e){} }
+  // iPhone only allows sound that starts from a tap: unlock both bells on Begin.
+  function unlock(){ var s=sounds(); [s.small,s.big3].forEach(function(a){ a.muted=true; var p=a.play(); if(p&&p.then) p.then(function(){ a.pause(); a.currentTime=0; a.muted=false; }).catch(function(){ a.muted=false; }); else { a.pause(); a.muted=false; } }); }
 
   // ── setup ──
   [10,20,30,45,60,90].forEach(function(m){
@@ -141,9 +163,12 @@ body.running{background:#0b0906}
   // ── session ──
   var run=null, wake=null;
   async function keepAwake(){ try{ if("wakeLock" in navigator){ wake=await navigator.wakeLock.request("screen"); } }catch(e){} }
-  document.addEventListener("visibilitychange",function(){ if(!document.hidden && run && !run.paused) keepAwake(); });
+  // Coming back to the page: wake the screen lock again and catch up on any
+  // bell that fell due while the page was hidden.
+  document.addEventListener("visibilitychange",function(){ if(!document.hidden && run && !run.paused){ keepAwake(); tick(); } });
   $("go").onclick=function(){
-    audio(); bells(3,true);
+    var s=sounds(); s.small.muted=true; var p=s.small.play(); if(p&&p.then) p.then(function(){ s.small.pause(); s.small.currentTime=0; s.small.muted=false; }).catch(function(){ s.small.muted=false; });
+    bells(3,true);
     var total=pref.mins*60;
     run={start:Date.now()+12000, total:total, paused:false, pausedAt:0, rung:{}, kind:pref.kind};  // 12 s for the opening bells to fade
     document.body.classList.add("running"); $("go").style.display="none"; $("sub").style.display="flex"; $("msg").textContent="";
@@ -188,6 +213,7 @@ body.running{background:#0b0906}
     try{ localStorage.setItem(KEY,JSON.stringify(log)); }catch(e){}
     api("getPortfolio").then(function(r){ var cur=((r&&r.data&&r.data.sessions)||[]).filter(function(x){return x.id!==id;}); return api("savePortfolio",{data:{sessions:cur}}); }).catch(function(){});
   }
+  $("testBell").onclick=function(){ bell(false); $("msg").textContent="If you heard nothing: turn the volume up (side buttons)."; setTimeout(function(){ $("msg").textContent=""; },4000); };
   $("addPast").onclick=function(){
     var m=parseInt(prompt("How many minutes?", "60"),10); if(!(m>0)) return;
     var d=prompt("Date (YYYY-MM-DD)", today()); if(!/^\d{4}-\d{2}-\d{2}$/.test(d||"")) return;
