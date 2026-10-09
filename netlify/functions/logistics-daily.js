@@ -40,8 +40,14 @@ exports.handler = async () => {
     if (!body) return { statusCode: 200, body: "nothing due" };
     const head = "☀️ <b>Orders & Dispatch — " + today + "</b>" + (due ? "\nTotal payment pending: <b>" + L.inr(due) + "</b>" : "");
     const link = "\n\nOpen: https://rk-tracker-v2.netlify.app/lr/";
-    await L.tgSend([s.prakashChat || OWNER_CHAT], head + body + link + "?user=prakash");
-    const digest = [].concat(s.digestToOwner && s.prakashChat ? [OWNER_CHAT] : []).concat(s.digestToGroup ? [s.groupChat] : []);
+    // Prakash: one email every morning (and Telegram too once his chat is known)
+    if (s.prakashEmail && s.emailToPrakash !== false) {
+      const html = "<div style='font-family:Arial,sans-serif;font-size:15px;line-height:1.5'>" +
+        (head + body).replace(/\n/g, "<br>") + "<br><br><a href='https://rk-tracker-v2.netlify.app/lr/?user=prakash' style='background:#1d3557;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none'>Open Orders &amp; Dispatch</a></div>";
+      try { await require("./mail.js").handler({ httpMethod: "POST", body: JSON.stringify({ to: s.prakashEmail, subject: "Orders & Dispatch — today's list (" + today + ")", html }) }); } catch (e) {}
+    }
+    if (s.prakashChat && s.telegramToPrakash !== false) await L.tgSend([s.prakashChat], head + body + link + "?user=prakash");
+    const digest = [].concat(s.digestToOwner ? [OWNER_CHAT] : []).concat(s.digestToGroup ? [s.groupChat] : []);
     const summary = head + "\nOrders due: " + lines.ord.length + " · Materials pending: " + lines.mat.length + " · Pending deliveries: " + lines.del.length + " · Unpaid bills: " + lines.pay.length + " · Missing docs: " + lines.doc.length + " · Follow-ups today: " + lines.fu.length;
     if (digest.length) await L.tgSend(digest, summary);
   } catch (e) {}

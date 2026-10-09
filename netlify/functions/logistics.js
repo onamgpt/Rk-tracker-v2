@@ -13,7 +13,8 @@ const OWNER_CHAT = "8632288596";
 const KEY = "logistics_v2";
 
 const DEFAULTS = { users: ["main", "prakash"], deliveryDays: 7, paymentDays: 30, docDays: 1, extra1: "Vehicle number", extra2: "Driver phone",
-  prakashChat: "", groupChat: "", dispatchToGroup: false, digestToGroup: true, digestToOwner: true };
+  prakashChat: "", groupChat: "", dispatchToGroup: false, digestToGroup: true, digestToOwner: true,
+  prakashEmail: "", emailToPrakash: true, telegramToPrakash: true };
 
 async function settings() {
   const s = Object.assign({}, DEFAULTS, (await kvGet("logistics_settings")) || {});
@@ -21,7 +22,7 @@ async function settings() {
   if (!s.prakashChat || !s.groupChat) {
     const contacts = (await kvGet("tg_contacts")) || [];
     if (!s.prakashChat) { const p = contacts.find(c => /prakash/i.test((c.label || "") + " " + (c.name || ""))); if (p) s.prakashChat = String(p.chatId); }
-    if (!s.groupChat) { const g = contacts.filter(c => String(c.chatId).indexOf("-") === 0); const pick = g.find(c => /onam|team|staff|despatch|dispatch|logist|office/i.test((c.label || "") + " " + (c.name || ""))) || (g.length === 1 ? g[0] : null); if (pick) s.groupChat = String(pick.chatId); }
+    if (!s.groupChat) { const g = contacts.filter(c => String(c.chatId).indexOf("-") === 0); const pick = g.find(c => /sales|order|onam|team|staff|despatch|dispatch|logist|office/i.test((c.label || "") + " " + (c.name || ""))) || (g.length === 1 ? g[0] : null); if (pick) s.groupChat = String(pick.chatId); }
   }
   return s;
 }
@@ -109,9 +110,10 @@ exports.handler = async (event) => {
       const cur = await kvGet("tg_scheduled"); const list = (cur && Array.isArray(cur.scheduled)) ? cur.scheduled : [];
       const to = [s.prakashChat || OWNER_CHAT].concat(b.toGroup && s.groupChat ? [s.groupChat] : []).concat(b.toOwner ? [OWNER_CHAT] : []);
       const id = "lr_rem_" + Date.now().toString(36);
-      list.push({ id, text: "⏰ " + esc(b.text), chatIds: Array.from(new Set(to.filter(Boolean))), when: new Date(b.when).toISOString(), repeat: "once", owner: me, created: new Date().toISOString() });
+      list.push({ id, text: "⏰ " + esc(b.text), chatIds: Array.from(new Set(to.filter(Boolean))), when: new Date(b.when).toISOString(), repeat: "once", owner: me, created: new Date().toISOString(),
+        emails: s.prakashEmail ? [s.prakashEmail] : [], subject: "Reminder: " + String(b.text).slice(0, 80), body: String(b.text) });
       await kvSet("tg_scheduled", { scheduled: list });
-      return OK({ ok: true, id, to: s.prakashChat ? "Prakash" : "Ravi (Prakash not found in Telegram contacts)" });
+      return OK({ ok: true, id, to: [s.prakashChat ? "Prakash on Telegram" : "", s.prakashEmail ? "Prakash by email" : "", !s.prakashChat && !s.prakashEmail ? "Ravi (no Telegram/email for Prakash yet)" : ""].filter(Boolean).join(" + ") });
     }
     if (b.action === "share" && b.text) { await tgSend(b.toGroup ? [s.groupChat] : [s.prakashChat || OWNER_CHAT], b.text); return OK({ ok: true }); }
     if (b.action === "contacts") { if (!owner) return OK({ error: "owner only" }); return OK({ ok: true, contacts: (await kvGet("tg_contacts")) || [] }); }
@@ -123,8 +125,10 @@ exports.handler = async (event) => {
       return OK({ ok: true, settings: Object.assign({}, DEFAULTS, next) });
     }
     if (b.action === "testAlert") {
+      let mail = null;
+      if (s.prakashEmail) { try { const m = require("./mail.js"); const r = await m.handler({ httpMethod: "POST", body: JSON.stringify({ to: s.prakashEmail, subject: "Orders & Dispatch — test email", text: "This is a test. Your morning summary will arrive here every day at 9:30." }) }); mail = JSON.parse(r.body); } catch (e) { mail = { ok: false, error: String(e) }; } }
       await tgSend([s.prakashChat, owner ? OWNER_CHAT : null].concat(b.toGroup ? [s.groupChat] : []), "✅ Dispatch Register test alert — Telegram is working.");
-      return OK({ ok: true, prakash: !!s.prakashChat, group: !!s.groupChat });
+      return OK({ ok: true, prakash: !!s.prakashChat, group: !!s.groupChat, email: mail ? (mail.ok ? "sent" : (mail.reason || mail.error || "failed")) : "no email set" });
     }
     return OK({ error: "unknown action" });
   } catch (e) { return OK({ error: String(e.message || e) }); }

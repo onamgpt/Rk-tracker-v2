@@ -335,7 +335,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#457b9d}
     h+='<div class="card"><h2>📞 Follow-up & reminders</h2>'+
       '<div class="row"><div><label>Next follow-up</label><input type="date" data-f="followUp" value="'+esc(x.followUp)+'"></div><div><label>About</label><input data-f="followUpNote" value="'+esc(x.followUpNote)+'" placeholder="e.g. ask for payment"></div></div>'+
       (x.followUp?'<div class="chk"><input type="checkbox" id="fud"'+(x.followUpDone?" checked":"")+'> <span>Follow-up done</span></div>':"")+
-      '<div class="hint">Automatic: every morning at 9:30 Telegram lists what is not delivered after '+(st.deliveryDays||7)+' days, unpaid after '+(st.paymentDays||30)+' days, missing documents and today\'s follow-ups.</div>'+
+      '<div class="hint">Automatic: every morning at 9:30 an email (and Telegram) lists what is not delivered after '+(st.deliveryDays||7)+' days, unpaid after '+(st.paymentDays||30)+' days, missing documents and today\'s follow-ups.</div>'+
       '<label>Manual reminder</label><div class="row"><input type="datetime-local" id="rWhen"><input id="rText" placeholder="Remind me to…"></div>'+
       '<div class="row" style="margin-top:8px"><label class="chk" style="margin:0"><input type="checkbox" id="rGrp"> also to group</label><button class="btn pri" id="rAdd">⏰ Set reminder</button></div>'+
       (x.reminders||[]).map(function(r){return '<div class="pay"><span>⏰ '+esc(new Date(r.when).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}))+' — '+esc(r.text)+'</span></div>';}).join("")+'</div>';
@@ -388,7 +388,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#457b9d}
       h+='<div class="card"><h2>⚙️ Settings (only Ravi sees this)</h2>'+
         '<div class="row"><div><label>Delivery alert after (days)</label><input id="sD" inputmode="numeric" value="'+(st.deliveryDays||7)+'"></div><div><label>Payment alert after (days)</label><input id="sP" inputmode="numeric" value="'+(st.paymentDays||30)+'"></div></div>'+
         '<div class="row"><div><label>Extra field 1 name</label><input id="sE1" value="'+esc(st.extra1||"")+'"></div><div><label>Extra field 2 name</label><input id="sE2" value="'+esc(st.extra2||"")+'"></div></div>'+
+        '<label>Prakash\'s email (morning list goes here)</label><input id="sEm" type="email" value="'+esc(st.prakashEmail||"")+'" placeholder="name@gmail.com">'+
+        '<div class="chk"><input type="checkbox" id="sEmOn"'+(st.emailToPrakash!==false?" checked":"")+'> Morning email to Prakash</div>'+
         '<label>Prakash on Telegram</label><select id="sPr"><option value="">(auto-detect)</option></select>'+
+        '<div class="chk"><input type="checkbox" id="sTgOn"'+(st.telegramToPrakash!==false?" checked":"")+'> Also send his morning list on Telegram</div>'+
         '<label>Team group on Telegram</label><select id="sGr"><option value="">(none / auto-detect)</option></select>'+
         '<div class="chk"><input type="checkbox" id="sDG"'+(st.dispatchToGroup?" checked":"")+'> Post every new dispatch in the group</div>'+
         '<div class="chk"><input type="checkbox" id="sDiG"'+(st.digestToGroup!==false?" checked":"")+'> Morning summary to the group</div>'+
@@ -413,10 +416,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#457b9d}
         $("sGr").innerHTML+=c.filter(function(z){return String(z.chatId)[0]==="-";}).map(function(z){return '<option value="'+esc(z.chatId)+'"'+(String(z.chatId)===String(st.groupChat)?" selected":"")+'>'+esc(z.label||z.name)+'</option>';}).join("");
       });
       $("sSave").onclick=function(){ var ns={deliveryDays:Number($("sD").value)||7,paymentDays:Number($("sP").value)||30,extra1:$("sE1").value,extra2:$("sE2").value,
-        prakashChat:$("sPr").value,groupChat:$("sGr").value,dispatchToGroup:$("sDG").checked,digestToGroup:$("sDiG").checked,digestToOwner:$("sDiO").checked,
+        prakashChat:$("sPr").value,prakashEmail:$("sEm").value.trim(),emailToPrakash:$("sEmOn").checked,telegramToPrakash:$("sTgOn").checked,groupChat:$("sGr").value,dispatchToGroup:$("sDG").checked,digestToGroup:$("sDiG").checked,digestToOwner:$("sDiO").checked,
         users:$("sU").value.split(",").map(function(u){return u.trim().toLowerCase();}).filter(Boolean)};
         api("settingsSave",{settings:ns}).then(function(r){ if(r.ok){ S.settings=Object.assign(S.settings,r.settings); $("sMsg").textContent="✓ Saved"; } else $("sMsg").textContent="Could not save"; }); };
-      $("sTest").onclick=function(){ api("testAlert",{toGroup:true}).then(function(r){ $("sMsg").textContent=r.ok?("Sent. Prakash found: "+(r.prakash?"yes":"NO")+" · Group found: "+(r.group?"yes":"NO")):"Failed"; }); };
+      $("sTest").onclick=function(){ api("testAlert",{toGroup:true}).then(function(r){ $("sMsg").textContent=r.ok?("Sent. Email: "+r.email+" · Prakash on Telegram: "+(r.prakash?"yes":"not found")+" · Group: "+(r.group?"yes":"not found")):"Failed"; }); };
     }
   }
 
