@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1d3557">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Dispatch">
+<meta name="robots" content="noindex">
+<title>Dispatch Register · Onam</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:#eef2f6;color:#14213d;font:17px/1.4 -apple-system,"Segoe UI",Roboto,system-ui,sans-serif;padding-bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+header{position:sticky;top:0;z-index:5;background:#1d3557;color:#fff;padding:calc(10px + env(safe-area-inset-top,0px)) 14px 10px;display:flex;align-items:center;gap:10px}
+header h1{font-size:19px;margin:0;flex:1}
+header .who{font-size:13px;opacity:.85}
+#net{font-size:12px;padding:3px 8px;border-radius:10px;background:#2a9d8f}
+#net.off{background:#e76f51}
+.wrap{max-width:720px;margin:0 auto;padding:12px}
+nav{position:fixed;bottom:0;left:0;right:0;z-index:6;background:#fff;border-top:1px solid #d4dbe3;display:flex;padding-bottom:env(safe-area-inset-bottom,0px)}
+nav button{flex:1;border:none;background:none;padding:9px 2px 10px;font-size:12px;color:#5c6b7a;display:flex;flex-direction:column;align-items:center;gap:2px}
+nav button b{font-size:22px;line-height:1}
+nav button.on{color:#1d3557;font-weight:700;background:#e8eef5}
+nav .ct{font-size:11px;background:#e63946;color:#fff;border-radius:9px;padding:0 6px;margin-left:2px}
+.card{background:#fff;border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.card h2{font-size:15px;margin:0 0 10px;color:#457b9d;text-transform:uppercase;letter-spacing:.4px}
+label{display:block;font-size:14px;color:#5c6b7a;margin:10px 0 4px}
+input,select,textarea{width:100%;font:inherit;font-size:17px;padding:12px;border:1.5px solid #c9d3de;border-radius:10px;background:#fff;color:#14213d}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#457b9d}
+.row{display:flex;gap:10px}.row>*{flex:1;min-width:0}
+.big{width:100%;padding:16px;border:none;border-radius:12px;font-size:18px;font-weight:700;color:#fff;background:#2a9d8f;cursor:pointer}
+.btn{padding:12px 14px;border-radius:10px;border:1.5px solid #c9d3de;background:#fff;font-size:15px;font-weight:600;color:#1d3557;cursor:pointer}
+.btn.pri{background:#1d3557;color:#fff;border-color:#1d3557}
+.btn.ok{background:#2a9d8f;color:#fff;border-color:#2a9d8f}
+.btn.warn{background:#f4a261;color:#3a2000;border-color:#f4a261}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.tile{border:2px dashed #a8b6c6;border-radius:12px;padding:12px 8px;text-align:center;background:#f7f9fb;position:relative}
+.tile b{display:block;font-size:26px}
+.tile span{font-size:14px;font-weight:600}
+.tile.has{border-style:solid;border-color:#2a9d8f;background:#ecf8f6}
+.tile .n{position:absolute;top:6px;right:8px;background:#2a9d8f;color:#fff;border-radius:10px;font-size:12px;padding:1px 7px}
+.tile .acts{display:flex;gap:6px;margin-top:8px}
+.tile .acts button{flex:1;padding:9px 4px;font-size:13px;border-radius:8px;border:1px solid #c9d3de;background:#fff}
+.thumbs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;justify-content:center}
+.thumbs a{position:relative;display:block;width:54px;height:54px;border-radius:8px;overflow:hidden;background:#dde4ec;font-size:11px;line-height:54px;text-align:center;color:#1d3557;text-decoration:none}
+.thumbs img{width:100%;height:100%;object-fit:cover}
+.thumbs .up{opacity:.5}
+.ship{background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:10px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.ship .t{display:flex;gap:8px;align-items:baseline}
+.ship .t b{flex:1;font-size:17px}
+.ship .m{font-size:14px;color:#5c6b7a;margin-top:3px}
+.badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.bd{font-size:12.5px;font-weight:700;padding:3px 9px;border-radius:10px;background:#e8eef5;color:#1d3557}
+.bd.red{background:#fde8e8;color:#b42318}.bd.amb{background:#fff1dc;color:#8a4b00}.bd.grn{background:#e3f6ee;color:#11704a}
+.qa{display:flex;gap:8px;margin-top:10px}.qa button{flex:1}
+.tot{display:flex;gap:10px;margin-bottom:12px}
+.tot div{flex:1;background:#fff;border-radius:12px;padding:10px 12px}
+.tot b{display:block;font-size:22px}
+.tot span{font-size:12.5px;color:#5c6b7a}
+.pay{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #eef1f4;font-size:15px}
+.pay span{flex:1}
+.x{border:none;background:none;color:#b42318;font-size:20px;padding:0 6px}
+#toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:#14213d;color:#fff;padding:10px 16px;border-radius:20px;font-size:15px;opacity:0;transition:opacity .2s;z-index:20;max-width:90%;text-align:center}
+#toast.show{opacity:1}
+.sticky{position:sticky;bottom:calc(74px + env(safe-area-inset-bottom,0px));z-index:4;background:linear-gradient(transparent,#eef2f6 30%);padding-top:14px}
+.hint{font-size:13px;color:#6b7a8a;margin-top:6px}
+.pin{max-width:340px;margin:16vh auto;text-align:center}
+.pin input{font-size:28px;text-align:center;letter-spacing:10px;margin:14px 0}
+.chk{display:flex;align-items:center;gap:10px;font-size:16px;margin:10px 0}
+.chk input{width:26px;height:26px}
+.seg{display:flex;border:1.5px solid #c9d3de;border-radius:10px;overflow:hidden}
+.seg button{flex:1;padding:12px;border:none;background:#fff;font-size:15px;font-weight:600;color:#5c6b7a}
+.seg button.on{background:#1d3557;color:#fff}
+@media(min-width:760px){body{font-size:16px}}
+</style>
+</head>
+<body>
+<div id="pinBox" class="pin" style="display:none">
+  <div style="font-size:40px">🚚</div>
+  <h2 style="margin:6px 0">Dispatch Register</h2>
+  <div class="hint">Enter your PIN</div>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="••••">
+  <button class="big" id="pinGo">Open</button>
+  <div id="pinErr" style="color:#b42318;margin-top:10px"></div>
+</div>
+
+<div id="app" style="display:none">
+  <header><h1>🚚 Dispatch Register</h1><span class="who" id="who"></span><span id="net">online</span></header>
+  <div class="wrap" id="view"></div>
+  <nav id="nav">
+    <button data-v="new"><b>➕</b>New</button>
+    <button data-v="transit"><b>🚚</b><span>On the way <span class="ct" id="ctT"></span></span></button>
+    <button data-v="due"><b>💰</b><span>Payment due <span class="ct" id="ctD"></span></span></button>
+    <button data-v="all"><b>📋</b>All</button>
+    <button data-v="more"><b>☰</b>More</button>
+  </nav>
+</div>
+<div id="toast"></div>
+
+<script>
+(function(){
+  var Q=new URLSearchParams(location.search), USER=(Q.get("user")||"prakash").toLowerCase();
+  var PK="lr_pin_"+USER, pin=localStorage.getItem(PK)||"";
+  var S={shipments:[],settings:{},owner:false}, view="new", edit=null, filter="";
+  var $=function(i){return document.getElementById(i);};
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function uid(p){return (p||"s")+Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+  function today(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+  function inr(n){return "₹"+Math.round(Number(n)||0).toLocaleString("en-IN");}
+  function fmt(iso){if(!iso)return"—";var d=new Date(iso+"T00:00:00");return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});}
+  function days(a){return a?Math.round((new Date(today()+"T00:00:00")-new Date(a+"T00:00:00"))/864e5):0;}
+  function toast(t){var e=$("toast");e.textContent=t;e.classList.add("show");clearTimeout(e._t);e._t=setTimeout(function(){e.classList.remove("show");},2600);}
+  function paid(x){return (x.payments||[]).reduce(function(a,p){return a+(Number(p.amount)||0);},0);}
+  function bal(x){return Math.max(0,(Number(x.invoiceAmount)||0)-paid(x));}
+  function payState(x){ if(!x.invoiceAmount) return paid(x)?"Partial":"—"; var b=bal(x); return b<=1?"Full":(paid(x)>0?"Partial":"Unpaid"); }
+
+  function api(action,extra){
+    return fetch("/.netlify/functions/logistics",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(Object.assign({action:action,user:USER,pin:pin},extra||{}))}).then(function(r){return r.json();});
+  }
+  function db(action,extra){
+    return fetch("/.netlify/functions/db",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(Object.assign({action:action,user:"main"},extra||{}))}).then(function(r){return r.json();});
+  }
+
+  /* ---------- offline outbox: records and photos wait here until sent ---------- */
+  var OUT="lr_outbox_"+USER;
+  function outbox(){try{return JSON.parse(localStorage.getItem(OUT))||[];}catch(e){return [];}}
+  function setOutbox(a){try{localStorage.setItem(OUT,JSON.stringify(a));}catch(e){toast("Phone storage full — connect to internet to send");}}
+  var idb=null;
+  function store(){return new Promise(function(res){ if(idb) return res(idb); if(typeof indexedDB==="undefined") return res(null); var r; try{ r=indexedDB.open("lr_photos",1); }catch(e){ return res(null); }
+    r.onupgradeneeded=function(){r.result.createObjectStore("p",{keyPath:"id"});}; r.onsuccess=function(){idb=r.result;res(idb);}; r.onerror=function(){res(null);}; });}
+  function putPhoto(o){return store().then(function(d){ if(!d) return; return new Promise(function(res){var t=d.transaction("p","readwrite");t.objectStore("p").put(o);t.oncomplete=res;t.onerror=res;}); });}
+  function allPhotos(){return store().then(function(d){ if(!d) return []; return new Promise(function(res){var r=d.transaction("p").objectStore("p").getAll();r.onsuccess=function(){res(r.result||[]);};r.onerror=function(){res([]);};}); });}
+  function delPhoto(id){return store().then(function(d){ if(!d) return; return new Promise(function(res){var t=d.transaction("p","readwrite");t.objectStore("p").delete(id);t.oncomplete=res;}); });}
+
+  var flushing=false;
+  async function flush(){
+    if(flushing||!navigator.onLine) return; flushing=true;
+    try{
+      // 1. photos first, so the record can carry their links
+      var ph=await allPhotos();
+      for(var i=0;i<ph.length;i++){
+        var p=ph[i];
+        if(!S.shipments.some(function(x){return x.id===p.sid;})) continue;   // not saved yet — wait for Save
+        try{
+          var r=await db("uploadFile",{file:{name:p.name,type:p.type,data:p.data}});
+          var url=r&&(r.url||r.link||(r.data&&String(r.data).indexOf("http")===0?r.data:null));
+          if(!url) continue;
+          var sh=S.shipments.find(function(x){return x.id===p.sid;});
+          if(sh){ (sh.files=sh.files||[]).forEach(function(f){ if(f.id===p.id){ f.url=url; delete f.pending; } }); queueSave(sh,true); }
+          await delPhoto(p.id);
+        }catch(e){}
+      }
+      // 2. records
+      var ob=outbox(), left=[];
+      for(var j=0;j<ob.length;j++){
+        try{ var res=await api("save",{shipment:ob[j]}); if(res.error==="pin"){ left=ob.slice(j); lock("PIN changed — enter it again"); break; }
+          if(res.ok){ var k=S.shipments.findIndex(function(x){return x.id===res.shipment.id;}); if(k>=0) S.shipments[k]=Object.assign({},res.shipment,{files:mergeFiles(S.shipments[k].files,res.shipment.files)}); } else left.push(ob[j]); }
+        catch(e){ left.push(ob[j]); }
+      }
+      setOutbox(left.concat(outbox().slice(ob.length)));
+      cache(); counts();
+    }finally{ flushing=false; net(); }
+  }
+  function mergeFiles(a,b){ var m={}; (b||[]).forEach(function(f){m[f.id]=f;}); (a||[]).forEach(function(f){ if(f.pending||!m[f.id]) m[f.id]=f; }); return Object.keys(m).map(function(k){return m[k];}); }
+  function queueSave(sh,quiet){
+    var o=outbox().filter(function(x){return x.id!==sh.id;}); o.push(JSON.parse(JSON.stringify(sh))); setOutbox(o); cache();
+    if(!quiet) toast(navigator.onLine?"✓ Saved":"📴 Saved on phone — will send when online");
+    setTimeout(flush,50);
+  }
+  function cache(){try{localStorage.setItem("lr_cache_"+USER,JSON.stringify(S));}catch(e){}}
+  function net(){ var e=$("net"), n=outbox().length; e.className=navigator.onLine?"":"off"; e.textContent=navigator.onLine?(n?"sending "+n+"…":"online"):"offline"+(n?" · "+n+" waiting":""); }
+  window.addEventListener("online",function(){net();flush();}); window.addEventListener("offline",net);
+
+  /* ---------- photos ---------- */
+  var KINDS=[["invoice","📄","Invoice"],["eway","🧾","E-way bill"],["lr","🚛","LR copy"],["goods","📦","Goods on lorry"],["pod","✅","Delivery proof"],["other","📎","Other"]];
+  function shrink(file){
+    return new Promise(function(res){
+      var r=new FileReader();
+      r.onload=function(e){
+        if(!/^image\//.test(file.type)){ res({name:file.name,type:file.type||"application/pdf",data:e.target.result}); return; }
+        var img=new Image();
+        img.onload=function(){ var M=1600,w=img.width,h=img.height; if(w>M||h>M){ if(w>h){h=Math.round(h*M/w);w=M;}else{w=Math.round(w*M/h);h=M;} }
+          var c=document.createElement("canvas"); c.width=w; c.height=h; c.getContext("2d").drawImage(img,0,0,w,h);
+          res({name:(file.name||"photo").replace(/\.\w+$/,"")+".jpg",type:"image/jpeg",data:c.toDataURL("image/jpeg",.8),thumb:(function(){var t=document.createElement("canvas"),s=120/Math.max(w,h);t.width=w*s;t.height=h*s;t.getContext("2d").drawImage(img,0,0,t.width,t.height);return t.toDataURL("image/jpeg",.6);})()}); };
+        img.onerror=function(){ res({name:file.name,type:file.type,data:e.target.result}); };
+        img.src=e.target.result;
+      };
+      r.readAsDataURL(file);
+    });
+  }
+  function pick(kind,camera){
+    var i=document.createElement("input"); i.type="file"; i.multiple=!camera;
+    i.accept=camera?"image/*":"image/*,application/pdf"; if(camera) i.setAttribute("capture","environment");
+    i.onchange=async function(){
+      var fs=Array.prototype.slice.call(i.files||[]); if(!fs.length) return;
+      for(var k=0;k<fs.length;k++){
+        if(fs[k].size>8e6 && !/^image/.test(fs[k].type)){ toast("PDF too big (max 8 MB)"); continue; }
+        var p=await shrink(fs[k]); var id=uid("f");
+        (edit.files=edit.files||[]).push({id:id,kind:kind,name:p.name,type:p.type,thumb:p.thumb||"",pending:true,at:new Date().toISOString()});
+        await putPhoto({id:id,sid:edit.id,name:p.name,type:p.type,data:p.data});
+      }
+      drawForm(); toast("📷 Added — tap Save");
+    };
+    i.click();
+  }
+  function driveThumb(u){ var m=String(u||"").match(/\/d\/([\w-]{10,})|[?&]id=([\w-]{10,})/); return m?"https://drive.google.com/thumbnail?id="+(m[1]||m[2])+"&sz=w200":""; }
+
+  /* ---------- views ---------- */
+  function counts(){
+    var t=S.shipments.filter(function(x){return !x.cancelled&&!x.deliveredOn;}).length;
+    var d=S.shipments.filter(function(x){return !x.cancelled&&x.invoiceAmount&&bal(x)>1;}).length;
+    $("ctT").textContent=t||""; $("ctD").textContent=d||"";
+  }
+  function go(v){ view=v; document.querySelectorAll("#nav button").forEach(function(b){b.classList.toggle("on",b.dataset.v===v);}); render(); window.scrollTo(0,0); }
+  document.querySelectorAll("#nav button").forEach(function(b){ b.onclick=function(){ if(b.dataset.v==="new"){ edit=null; } go(b.dataset.v); }; });
+
+  function render(){
+    counts(); net();
+    if(view==="new"){ if(!edit) edit=blank(); return drawForm(); }
+    if(view==="more") return drawMore();
+    var list=S.shipments.filter(function(x){return !x.cancelled;});
+    if(view==="transit") list=list.filter(function(x){return !x.deliveredOn;});
+    if(view==="due") list=list.filter(function(x){return x.invoiceAmount&&bal(x)>1;});
+    if(filter){ var f=filter.toLowerCase(); list=list.filter(function(x){return [x.customer,x.invoiceNo,x.lrNo,x.transporter,x.destination,x.ewayNo].join(" ").toLowerCase().indexOf(f)>=0;}); }
+    list.sort(function(a,b){return String(b.date).localeCompare(String(a.date));});
+    var h="";
+    if(view==="transit"||view==="due"){
+      var tot=view==="due"?list.reduce(function(a,x){return a+bal(x);},0):0;
+      h+='<div class="tot"><div><b>'+list.length+'</b><span>'+(view==="due"?"bills pending":"not delivered yet")+'</span></div>'+
+        (view==="due"?'<div><b>'+inr(tot)+'</b><span>to collect</span></div>':'<div><b>'+list.filter(function(x){return days(x.date)>=(S.settings.deliveryDays||7);}).length+'</b><span>over '+(S.settings.deliveryDays||7)+' days</span></div>')+'</div>'+
+        '<div class="row" style="margin-bottom:12px"><button class="btn" id="shTg">📨 Send list on Telegram</button><button class="btn" id="shWa">🟢 WhatsApp</button></div>';
+    }
+    h+='<input id="q" placeholder="🔍 Search customer, invoice, LR, transporter" value="'+esc(filter)+'" style="margin-bottom:12px">';
+    h+=list.map(card).join("")||'<div class="card" style="text-align:center;color:#6b7a8a">Nothing here 👍</div>';
+    $("view").innerHTML=h;
+    $("q").oninput=function(){ filter=this.value; var p=this.selectionStart; render(); var q=$("q"); q.focus(); q.setSelectionRange(p,p); };
+    if($("shTg")) $("shTg").onclick=function(){ shareList(list,false); };
+    if($("shWa")) $("shWa").onclick=function(){ shareList(list,true); };
+    document.querySelectorAll("[data-open]").forEach(function(b){ b.onclick=function(){ edit=JSON.parse(JSON.stringify(S.shipments.find(function(x){return x.id===b.dataset.open;}))); go("new"); }; });
+    document.querySelectorAll("[data-deliv]").forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var x=S.shipments.find(function(s){return s.id===b.dataset.deliv;}); x.deliveredOn=today(); log(x,"Marked delivered"); queueSave(x); render(); }; });
+    document.querySelectorAll("[data-pay]").forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var x=S.shipments.find(function(s){return s.id===b.dataset.pay;}); var a=prompt("Amount received ₹ (balance "+inr(bal(x))+")", bal(x)?Math.round(bal(x)):""); if(!a||!(Number(a)>0)) return;
+      (x.payments=x.payments||[]).push({id:uid("p"),date:today(),amount:Number(a),mode:"",note:""}); log(x,"Payment "+inr(a)); queueSave(x); render(); }; });
+  }
+  function card(x){
+    var age=days(x.date), ps=payState(x), docs=new Set((x.files||[]).map(function(f){return f.kind;}));
+    var miss=["invoice","eway","lr"].filter(function(k){return !docs.has(k);});
+    return '<div class="ship" data-open="'+x.id+'"><div class="t"><b>'+esc(x.customer||"—")+'</b><span class="m">'+fmt(x.date)+'</span></div>'+
+      '<div class="m">'+(x.invoiceNo?"Inv "+esc(x.invoiceNo)+" · ":"")+(x.invoiceAmount?inr(x.invoiceAmount):"")+(x.destination?" · "+esc(x.destination):"")+'</div>'+
+      '<div class="m">'+esc(x.transporter||"")+(x.lrNo?" · LR "+esc(x.lrNo):"")+(x.freight?" · freight "+inr(x.freight):"")+'</div>'+
+      '<div class="badges">'+(x.deliveredOn?'<span class="bd grn">✅ Delivered '+fmt(x.deliveredOn)+'</span>':'<span class="bd '+(age>=(S.settings.deliveryDays||7)?"red":"amb")+'">🚚 On the way · '+age+'d</span>')+
+      (x.invoiceAmount?'<span class="bd '+(ps==="Full"?"grn":ps==="Partial"?"amb":"red")+'">💰 '+(ps==="Full"?"Paid":ps==="Partial"?"Part paid · "+inr(bal(x))+" due":"Unpaid "+inr(bal(x)))+'</span>':"")+
+      (miss.length?'<span class="bd red">📎 missing '+miss.length+'</span>':'<span class="bd grn">📎 docs ok</span>')+
+      (x.followUp&&!x.followUpDone?'<span class="bd '+(x.followUp<=today()?"red":"")+'">📞 '+fmt(x.followUp)+'</span>':"")+
+      ((x.files||[]).some(function(f){return f.pending;})?'<span class="bd amb">⏳ photos sending</span>':"")+'</div>'+
+      '<div class="qa">'+(x.deliveredOn?"":'<button class="btn ok" data-deliv="'+x.id+'">✅ Delivered</button>')+(x.invoiceAmount&&bal(x)>1?'<button class="btn warn" data-pay="'+x.id+'">💰 Payment</button>':"")+'</div></div>';
+  }
+  function shareList(list,wa){
+    var t=(view==="due"?"💰 Payment pending":"🚚 Not delivered yet")+" — "+fmt(today())+"\n"+list.map(function(x,i){return (i+1)+". "+(x.customer||"—")+(x.invoiceNo?" (Inv "+x.invoiceNo+")":"")+" — "+(view==="due"?inr(bal(x))+" due":days(x.date)+" days, "+(x.transporter||"")+(x.lrNo?" LR "+x.lrNo:""));}).join("\n");
+    if(wa){ window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank"); return; }
+    var g=S.settings.groupChat&&confirm("Send to the team Telegram group too?\nOK = group · Cancel = only me");
+    api("share",{text:t.replace(/[&<>]/g,""),toGroup:!!g}).then(function(r){ toast(r.ok?"📨 Sent on Telegram":"Could not send"); });
+  }
+  function log(x,t){ (x.log=x.log||[]).push({id:uid("l"),at:new Date().toISOString(),by:USER,text:t}); }
+  function blank(){ return {id:uid("s"),date:today(),customer:"",invoiceNo:"",invoiceAmount:"",destination:"",qty:"",transporter:"",lrNo:"",freight:"",ewayNo:"",extra1:"",extra2:"",files:[],payments:[],log:[],reminders:[],deliveredOn:"",followUp:"",followUpNote:"",notes:""}; }
+
+  function drawForm(){
+    var x=edit, isNew=!S.shipments.some(function(s){return s.id===x.id;});
+    var custs=Array.from(new Set(S.shipments.map(function(s){return s.customer;}).filter(Boolean))).sort();
+    var trans=Array.from(new Set(S.shipments.map(function(s){return s.transporter;}).filter(Boolean))).sort();
+    var st=S.settings||{};
+    var h='<div class="card"><h2>'+(isNew?"➕ New dispatch":"✏️ "+esc(x.customer||"Dispatch"))+'</h2>'+
+      '<div class="row"><div><label>Date</label><input type="date" data-f="date" value="'+esc(x.date)+'"></div><div><label>Invoice no.</label><input data-f="invoiceNo" value="'+esc(x.invoiceNo)+'"></div></div>'+
+      '<label>Customer name</label><input data-f="customer" list="custL" value="'+esc(x.customer)+'" placeholder="Start typing…" autocomplete="off"><datalist id="custL">'+custs.map(function(c){return '<option value="'+esc(c)+'">';}).join("")+'</datalist>'+
+      '<div class="row"><div><label>Invoice amount ₹</label><input data-f="invoiceAmount" inputmode="decimal" value="'+esc(x.invoiceAmount)+'"></div><div><label>Boxes / qty</label><input data-f="qty" value="'+esc(x.qty)+'"></div></div>'+
+      '<label>Destination / place</label><input data-f="destination" value="'+esc(x.destination)+'"></div>';
+    h+='<div class="card"><h2>🚛 Transport</h2>'+
+      '<label>Transporter / lorry company</label><input data-f="transporter" list="trL" value="'+esc(x.transporter)+'" autocomplete="off"><datalist id="trL">'+trans.map(function(c){return '<option value="'+esc(c)+'">';}).join("")+'</datalist>'+
+      '<div class="row"><div><label>LR number</label><input data-f="lrNo" value="'+esc(x.lrNo)+'"></div><div><label>Freight ₹</label><input data-f="freight" inputmode="decimal" value="'+esc(x.freight)+'"></div></div>'+
+      '<label>E-way bill number</label><input data-f="ewayNo" inputmode="numeric" value="'+esc(x.ewayNo)+'">'+
+      '<div class="row"><div><label>'+esc(st.extra1||"Extra 1")+'</label><input data-f="extra1" value="'+esc(x.extra1)+'"></div><div><label>'+esc(st.extra2||"Extra 2")+'</label><input data-f="extra2" value="'+esc(x.extra2)+'"></div></div></div>';
+    h+='<div class="card"><h2>📷 Photos & documents</h2><div class="tiles">'+KINDS.map(function(k){
+      var fs=(x.files||[]).filter(function(f){return f.kind===k[0];});
+      return '<div class="tile'+(fs.length?" has":"")+'">'+(fs.length?'<span class="n">'+fs.length+'</span>':"")+'<b>'+k[1]+'</b><span>'+k[2]+'</span>'+
+        '<div class="acts"><button data-cam="'+k[0]+'">📷 Camera</button><button data-file="'+k[0]+'">📁 File</button></div>'+
+        (fs.length?'<div class="thumbs">'+fs.map(function(f){ var t=f.thumb||(/image/.test(f.type||"")?driveThumb(f.url):"");
+          return '<a href="'+esc(f.url||"#")+'" target="_blank" rel="noopener" class="'+(f.pending?"up":"")+'" data-fid="'+f.id+'">'+(t?'<img src="'+esc(t)+'" alt="">':(/pdf/.test(f.type||f.name)?"PDF":"file"))+'</a>';}).join("")+'</div>':"")+'</div>';
+    }).join("")+'</div><div class="hint">Tap a photo to open it. Long-press a photo to remove it.</div></div>';
+    var pd=paid(x), ps=payState(x);
+    h+='<div class="card"><h2>📦 Status</h2>'+
+      '<div class="chk"><input type="checkbox" id="dl"'+(x.deliveredOn?" checked":"")+'> <span>Delivered</span>'+(x.deliveredOn?'<input type="date" data-f="deliveredOn" value="'+esc(x.deliveredOn)+'" style="flex:1">':"")+'</div>'+
+      '<div class="chk"><input type="checkbox" id="cx"'+(x.cancelled?" checked":"")+'> <span>Cancelled / returned</span></div></div>';
+    h+='<div class="card"><h2>💰 Payment '+(x.invoiceAmount?'<span class="bd '+(ps==="Full"?"grn":ps==="Partial"?"amb":"red")+'" style="float:right">'+(ps==="Full"?"FULL":ps==="Partial"?"PARTIAL":"UNPAID")+'</span>':"")+'</h2>'+
+      (x.invoiceAmount?'<div class="m" style="margin-bottom:6px">Received '+inr(pd)+' of '+inr(x.invoiceAmount)+' · <b>Balance '+inr(bal(x))+'</b></div>':'<div class="hint">Enter invoice amount above to track balance.</div>')+
+      (x.payments||[]).map(function(p){return '<div class="pay"><span>'+fmt(p.date)+' · <b>'+inr(p.amount)+'</b>'+(p.mode?" · "+esc(p.mode):"")+(p.note?" · "+esc(p.note):"")+'</span><button class="x" data-delp="'+p.id+'">×</button></div>';}).join("")+
+      '<div class="row" style="margin-top:8px"><input id="pAmt" inputmode="decimal" placeholder="Amount ₹"><select id="pMode"><option value="">Mode</option><option>NEFT/RTGS</option><option>UPI</option><option>Cheque</option><option>Cash</option></select></div>'+
+      '<div class="row" style="margin-top:8px"><input type="date" id="pDate" value="'+today()+'"><button class="btn ok" id="pAdd">+ Add payment</button></div>'+
+      (x.invoiceAmount&&bal(x)>1?'<button class="btn" id="pFull" style="width:100%;margin-top:8px">✅ Full balance received ('+inr(bal(x))+')</button>':"")+'</div>';
+    h+='<div class="card"><h2>📞 Follow-up & reminders</h2>'+
+      '<div class="row"><div><label>Next follow-up</label><input type="date" data-f="followUp" value="'+esc(x.followUp)+'"></div><div><label>About</label><input data-f="followUpNote" value="'+esc(x.followUpNote)+'" placeholder="e.g. ask for payment"></div></div>'+
+      (x.followUp?'<div class="chk"><input type="checkbox" id="fud"'+(x.followUpDone?" checked":"")+'> <span>Follow-up done</span></div>':"")+
+      '<div class="hint">Automatic: every morning at 9:30 Telegram lists what is not delivered after '+(st.deliveryDays||7)+' days, unpaid after '+(st.paymentDays||30)+' days, missing documents and today\'s follow-ups.</div>'+
+      '<label>Manual reminder</label><div class="row"><input type="datetime-local" id="rWhen"><input id="rText" placeholder="Remind me to…"></div>'+
+      '<div class="row" style="margin-top:8px"><label class="chk" style="margin:0"><input type="checkbox" id="rGrp"> also to group</label><button class="btn pri" id="rAdd">⏰ Set reminder</button></div>'+
+      (x.reminders||[]).map(function(r){return '<div class="pay"><span>⏰ '+esc(new Date(r.when).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}))+' — '+esc(r.text)+'</span></div>';}).join("")+'</div>';
+    h+='<div class="card"><h2>📝 Notes</h2><textarea data-f="notes" rows="3">'+esc(x.notes)+'</textarea>'+
+      ((x.log||[]).length?'<div class="hint" style="margin-top:8px">'+x.log.slice(-5).reverse().map(function(l){return esc(new Date(l.at).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}))+" · "+esc(l.by)+" · "+esc(l.text);}).join("<br>")+'</div>':"")+'</div>';
+    h+='<div class="sticky"><button class="big" id="save">💾 Save</button>'+(S.owner&&!isNew?'<button class="btn" id="del" style="width:100%;margin-top:8px;color:#b42318">Delete this dispatch</button>':"")+'</div>';
+    $("view").innerHTML=h;
+    document.querySelectorAll("[data-f]").forEach(function(i){ i.oninput=i.onchange=function(){ x[i.dataset.f]=i.value; }; });
+    document.querySelectorAll("[data-cam]").forEach(function(b){ b.onclick=function(){ pick(b.dataset.cam,true); }; });
+    document.querySelectorAll("[data-file]").forEach(function(b){ b.onclick=function(){ pick(b.dataset.file,false); }; });
+    document.querySelectorAll("[data-fid]").forEach(function(a){
+      var t; a.addEventListener("touchstart",function(){ t=setTimeout(function(){ rmFile(a.dataset.fid); },700); },{passive:true});
+      a.addEventListener("touchend",function(){ clearTimeout(t); }); a.oncontextmenu=function(e){ e.preventDefault(); rmFile(a.dataset.fid); };
+      a.onclick=function(e){ var f=(x.files||[]).find(function(z){return z.id===a.dataset.fid;}); if(!f||!f.url){ e.preventDefault(); toast(f&&f.pending?"Still sending this photo…":""); } };
+    });
+    $("dl").onchange=function(){ x.deliveredOn=this.checked?(x.deliveredOn||today()):""; drawForm(); };
+    $("cx").onchange=function(){ x.cancelled=this.checked; };
+    if($("fud")) $("fud").onchange=function(){ x.followUpDone=this.checked; };
+    $("pAdd").onclick=function(){ var a=Number($("pAmt").value); if(!(a>0)) return toast("Enter amount");
+      (x.payments=x.payments||[]).push({id:uid("p"),date:$("pDate").value||today(),amount:a,mode:$("pMode").value,note:""}); log(x,"Payment "+inr(a)); drawForm(); toast("Added — tap Save"); };
+    if($("pFull")) $("pFull").onclick=function(){ var a=bal(x); (x.payments=x.payments||[]).push({id:uid("p"),date:today(),amount:a,mode:"",note:"full"}); log(x,"Full payment "+inr(a)); drawForm(); toast("Added — tap Save"); };
+    document.querySelectorAll("[data-delp]").forEach(function(b){ b.onclick=function(){ if(!confirm("Remove this payment?")) return; x.payments=x.payments.filter(function(p){return p.id!==b.dataset.delp;}); (x._del_payments=x._del_payments||[]).push(b.dataset.delp); drawForm(); }; });
+    $("rAdd").onclick=function(){ var w=$("rWhen").value, t=$("rText").value.trim(); if(!w||!t) return toast("Pick date-time and write the reminder");
+      var text=t+" — "+(x.customer||"")+(x.invoiceNo?" (Inv "+x.invoiceNo+")":"");
+      api("remind",{when:new Date(w).toISOString(),text:text,toGroup:$("rGrp").checked}).then(function(r){ if(r.ok){ (x.reminders=x.reminders||[]).push({id:r.id,when:new Date(w).toISOString(),text:t}); drawForm(); toast("⏰ Reminder set on Telegram ("+r.to+") — tap Save"); } else toast(r.error==="pin"?"PIN problem":"Could not set reminder (offline?)"); }); };
+    $("save").onclick=function(){
+      if(!x.customer.trim()){ toast("Enter customer name"); return; }
+      var isNew2=!S.shipments.some(function(s){return s.id===x.id;});
+      if(isNew2) log(x,"Dispatched"); 
+      var i=S.shipments.findIndex(function(s){return s.id===x.id;}); if(i>=0) S.shipments[i]=x; else S.shipments.unshift(x);
+      queueSave(x); edit=null;
+      go(isNew2?"transit":view==="new"?"transit":view);
+    };
+    if($("del")) $("del").onclick=function(){ if(!confirm("Delete this dispatch for good?")) return; api("delete",{id:x.id}).then(function(r){ if(r.ok){ S.shipments=S.shipments.filter(function(s){return s.id!==x.id;}); cache(); edit=null; go("all"); toast("Deleted"); } else toast(r.error||"Could not delete"); }); };
+  }
+  function rmFile(fid){ if(!confirm("Remove this photo?")) return; edit.files=edit.files.filter(function(f){return f.id!==fid;}); (edit._del_files=edit._del_files||[]).push(fid); delPhoto(fid); drawForm(); }
+
+  function drawMore(){
+    var st=S.settings||{}, h='<div class="card"><h2>📊 Reports</h2>'+
+      '<button class="btn" style="width:100%;margin-bottom:8px" id="csv">⬇️ Download all as Excel (CSV)</button>'+
+      '<button class="btn" style="width:100%;margin-bottom:8px" id="frt">🚛 Freight paid this month</button><div id="frtOut" class="hint"></div></div>';
+    h+='<div class="card"><h2>💡 Tips</h2><div class="hint" style="font-size:15px;line-height:1.6">• Add this page to your Home screen: Chrome menu ⋮ → <b>Add to Home screen</b>.<br>• No signal near the lorry? Fill everything and tap Save — it sends by itself when the network comes back.<br>• Photos: tap 📷 Camera to shoot straight away.</div></div>';
+    if(S.owner){
+      h+='<div class="card"><h2>⚙️ Settings (only Ravi sees this)</h2>'+
+        '<div class="row"><div><label>Delivery alert after (days)</label><input id="sD" inputmode="numeric" value="'+(st.deliveryDays||7)+'"></div><div><label>Payment alert after (days)</label><input id="sP" inputmode="numeric" value="'+(st.paymentDays||30)+'"></div></div>'+
+        '<div class="row"><div><label>Extra field 1 name</label><input id="sE1" value="'+esc(st.extra1||"")+'"></div><div><label>Extra field 2 name</label><input id="sE2" value="'+esc(st.extra2||"")+'"></div></div>'+
+        '<label>Prakash on Telegram</label><select id="sPr"><option value="">(auto-detect)</option></select>'+
+        '<label>Team group on Telegram</label><select id="sGr"><option value="">(none / auto-detect)</option></select>'+
+        '<div class="chk"><input type="checkbox" id="sDG"'+(st.dispatchToGroup?" checked":"")+'> Post every new dispatch in the group</div>'+
+        '<div class="chk"><input type="checkbox" id="sDiG"'+(st.digestToGroup!==false?" checked":"")+'> Morning summary to the group</div>'+
+        '<div class="chk"><input type="checkbox" id="sDiO"'+(st.digestToOwner!==false?" checked":"")+'> Morning summary to me</div>'+
+        '<label>People who can use this page (tracker user names, comma separated)</label><input id="sU" value="'+esc((st.users||["main","prakash"]).join(", "))+'">'+
+        '<div class="row" style="margin-top:12px"><button class="btn pri" id="sSave">Save settings</button><button class="btn" id="sTest">Send test alert</button></div><div id="sMsg" class="hint"></div></div>';
+    }
+    h+='<button class="btn" style="width:100%" id="lock">🔒 Lock this phone</button>';
+    $("view").innerHTML=h;
+    $("csv").onclick=function(){
+      var cols=["date","customer","invoiceNo","invoiceAmount","destination","qty","transporter","lrNo","freight","ewayNo","extra1","extra2","deliveredOn","paid","balance","payment","followUp","notes","photos"];
+      var rows=[cols.join(",")].concat(S.shipments.map(function(x){ var v={paid:paid(x),balance:bal(x),payment:payState(x),photos:(x.files||[]).map(function(f){return f.kind+": "+(f.url||"pending");}).join(" | ")};
+        return cols.map(function(c){ var s=String(v[c]!=null?v[c]:(x[c]==null?"":x[c])); return '"'+s.replace(/"/g,'""')+'"'; }).join(","); }));
+      var a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["\ufeff"+rows.join("\n")],{type:"text/csv"})); a.download="dispatch-register-"+today()+".csv"; a.click(); };
+    $("frt").onclick=function(){ var m=today().slice(0,7), l=S.shipments.filter(function(x){return String(x.date).slice(0,7)===m&&!x.cancelled;});
+      var by={}; l.forEach(function(x){ var k=x.transporter||"—"; by[k]=(by[k]||0)+(Number(x.freight)||0); });
+      $("frtOut").innerHTML=Object.keys(by).map(function(k){return esc(k)+": <b>"+inr(by[k])+"</b>";}).join("<br>")+"<br>Total: <b>"+inr(l.reduce(function(a,x){return a+(Number(x.freight)||0);},0))+"</b> on "+l.length+" dispatches"; };
+    $("lock").onclick=function(){ localStorage.removeItem(PK); location.reload(); };
+    if(S.owner){
+      api("contacts").then(function(r){ var c=(r&&r.contacts)||[];
+        $("sPr").innerHTML+=c.filter(function(z){return String(z.chatId)[0]!=="-";}).map(function(z){return '<option value="'+esc(z.chatId)+'"'+(String(z.chatId)===String(st.prakashChat)?" selected":"")+'>'+esc(z.label||z.name)+'</option>';}).join("");
+        $("sGr").innerHTML+=c.filter(function(z){return String(z.chatId)[0]==="-";}).map(function(z){return '<option value="'+esc(z.chatId)+'"'+(String(z.chatId)===String(st.groupChat)?" selected":"")+'>'+esc(z.label||z.name)+'</option>';}).join("");
+      });
+      $("sSave").onclick=function(){ var ns={deliveryDays:Number($("sD").value)||7,paymentDays:Number($("sP").value)||30,extra1:$("sE1").value,extra2:$("sE2").value,
+        prakashChat:$("sPr").value,groupChat:$("sGr").value,dispatchToGroup:$("sDG").checked,digestToGroup:$("sDiG").checked,digestToOwner:$("sDiO").checked,
+        users:$("sU").value.split(",").map(function(u){return u.trim().toLowerCase();}).filter(Boolean)};
+        api("settingsSave",{settings:ns}).then(function(r){ if(r.ok){ S.settings=Object.assign(S.settings,r.settings); $("sMsg").textContent="✓ Saved"; } else $("sMsg").textContent="Could not save"; }); };
+      $("sTest").onclick=function(){ api("testAlert",{toGroup:true}).then(function(r){ $("sMsg").textContent=r.ok?("Sent. Prakash found: "+(r.prakash?"yes":"NO")+" · Group found: "+(r.group?"yes":"NO")):"Failed"; }); };
+    }
+  }
+
+  /* ---------- start ---------- */
+  function lock(err){ $("app").style.display="none"; $("pinBox").style.display=""; $("pinErr").textContent=err||""; $("pin").value=""; $("pin").focus(); }
+  function load(){
+    return api("get").then(function(r){
+      if(r.error==="pin"){ localStorage.removeItem(PK); lock(pin?"Wrong PIN":""); return; }
+      if(!r.ok) throw new Error();
+      localStorage.setItem(PK,pin);
+      // keep anything still waiting on this phone
+      var ob=outbox(); var srv=r.shipments||[];
+      ob.forEach(function(o){ var i=srv.findIndex(function(s){return s.id===o.id;}); if(i>=0) srv[i]=Object.assign({},srv[i],o); else srv.unshift(o); });
+      S={shipments:srv,settings:r.settings||{},owner:!!r.owner}; cache();
+      $("pinBox").style.display="none"; $("app").style.display=""; $("who").textContent=r.me==="main"?"Ravi":r.me.charAt(0).toUpperCase()+r.me.slice(1);
+      render(); flush();
+    });
+  }
+  $("pinGo").onclick=function(){ pin=$("pin").value.trim(); if(pin) load().catch(function(){ lock("No internet — try again"); }); };
+  $("pin").addEventListener("keydown",function(e){ if(e.key==="Enter") $("pinGo").click(); });
+  try{ var c=JSON.parse(localStorage.getItem("lr_cache_"+USER)); if(c&&c.shipments) S=c; }catch(e){}
+  if(pin){
+    if(S.shipments.length||!navigator.onLine){ $("app").style.display=""; $("who").textContent=USER==="main"?"Ravi":USER; go("new"); }
+    load().catch(function(){ if($("app").style.display==="none") lock("No internet — try again"); });
+  } else lock("");
+  setInterval(flush,30000);
+})();
+</script>
+</body>
+</html>

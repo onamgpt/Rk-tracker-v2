@@ -53,3 +53,7 @@
 # watch; Telegram alert on a new low or when a fare hits the target.
 [functions."fare-watch"]
   schedule = "30 3 * * *"
+
+# Dispatch Register morning chase — 09:30 IST (04:00 UTC)
+[functions."logistics-daily"]
+  schedule = "0 4 * * *"
