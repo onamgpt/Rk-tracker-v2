@@ -72,7 +72,8 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
   var NEW; try{ if(Number(localStorage.getItem("gs1_new_v"))===PRESET_V) NEW=JSON.parse(localStorage.getItem("gs1_new")); }catch(e){}
   if(!NEW){ NEW=JSON.parse(JSON.stringify(PRESET)); try{ localStorage.setItem("gs1_new_v",PRESET_V); }catch(e){} }
   var CONTACT; try{ CONTACT=JSON.parse(localStorage.getItem("gs1_contact")); }catch(e){}
-  if(!CONTACT) CONTACT={contact_country:"India",contact_state:"Karnataka",contact_district:"Bengaluru Urban",contact_city:"Bengaluru",contact_person:"Ravikiran Karapakala",contact_email:"onamagarbathi@gmail.com",contact_no:"9740088979",contact_address:"35/36-70/71, N S Palya, Bannerghatta Road, Bengaluru 560076"};
+  if(!CONTACT) CONTACT={contact_country:"India",contact_state:"Karnataka",contact_district:"Bengaluru Urban",contact_city:"Bengaluru",contact_person:"Ravikiran Karapakala",contact_email:"onamagarbathi@gmail.com",contact_no:"9844725484",contact_address:"35/36-70/71, N S Palya, Bannerghatta Road, Bengaluru 560076"};
+  if(CONTACT.contact_no==="9740088979"||!CONTACT.contact_no){ CONTACT.contact_no="9844725484"; try{localStorage.setItem("gs1_contact",JSON.stringify(CONTACT));}catch(e){} }   // Ravi: contact number is 9844725484
   function saveLocal(){ try{ localStorage.setItem("gs1_new",JSON.stringify(NEW)); localStorage.setItem("gs1_contact",JSON.stringify(CONTACT)); }catch(e){} }
 
   function items(d){ if(!d) return []; if(Array.isArray(d.items)) return d.items; if(d.data&&Array.isArray(d.data.items)) return d.data.items; if(Array.isArray(d.data)) return d.data; return []; }
