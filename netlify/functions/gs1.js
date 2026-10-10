@@ -90,6 +90,19 @@ exports.handler = async (event) => {
         const r = await gs1("GET", "/console/products/barcode", null, { gtin: b.gtin, type: b.type || "barcode", format: b.format || "PNG" });
         return OK({ ok: r.ok, status: r.status, file: r.file || null, data: r.json || r.text });
       }
+      case "images": {   // ClickIT PUSH: pack photos for a product (base64 JPEG)
+        const im = b.images || {}, body = { gtin: String(b.gtin), gcp: GCP };
+        ["front", "back", "top", "bottom", "left", "right"].forEach(k => { if (im[k]) { body["img_" + k] = im[k]; body["is_" + k + "_original"] = true; } });
+        let r = await gs1("POST", "/console/clickit/products/upload_images", body);
+        if (!r.ok && r.status !== 401) {   // some APIs want a data URI instead of plain base64
+          const b2 = Object.assign({}, body); Object.keys(b2).forEach(k => { if (/^img_/.test(k)) b2[k] = "data:image/jpeg;base64," + b2[k]; });
+          const r2 = await gs1("POST", "/console/clickit/products/upload_images", b2); if (r2.ok) r = r2;
+        }
+        const log = (await kvGet("gs1_log")) || [];
+        log.unshift({ at: new Date().toISOString(), action: "photos (" + Object.keys(im).join(", ") + ")", gtins: [String(b.gtin)], status: r.status, ok: r.ok, result: r.json || r.text });
+        await kvSet("gs1_log", log.slice(0, 100));
+        return OK({ ok: r.ok, status: r.status, data: r.json || r.text || r.error });
+      }
       case "log": return OK({ ok: true, log: (await kvGet("gs1_log")) || [] });
       default: return OK({ error: "unknown action" });
     }

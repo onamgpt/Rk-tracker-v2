@@ -63,18 +63,127 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
   function api(action,extra){ return fetch("/.netlify/functions/gs1",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action:action,pin:pin},extra||{}))}).then(function(r){return r.json();}); }
   function status(ok,t){ var e=$("st"); e.className=ok?"ok":"bad"; e.textContent=t; }
 
-  // ---------- new products: pre-filled from the barcode register ----------
-  var REG=[["8901226005614","Kesar Chandan Bambooless"],["8901226005621","Golden Buddha Bambooless"],["8901226005638","Vismaya Lavender Bambooless"],["8901226005645","Jasmine Bambooless"]];
-  // Preset prepared with Ravi (v2): Kesar Chandan is already in DataKart; Golden Buddha ready to send.
-  var PRESET_V=2, PRESET=[
-    {gtin:"8901226005621",product_name:"Golden Buddha",product_description:"Golden Buddha Bambooless Dhoop Sticks, 30 sticks",net_weight:"101",mrp:"80",nameChecked:false}
+  // ---------- new products (clone of an existing product + images) ----------
+  var PRESET_V=3, PRESET=[
+    {id:"r1",from:"8901226005614",gtin:"8901226005621",product_name:"Golden Buddha",product_description:"Golden Buddha Bambooless Dhoop Sticks, 30 sticks",net_weight:"101",mrp:"80",nameChecked:false}
   ];
   var NEW; try{ if(Number(localStorage.getItem("gs1_new_v"))===PRESET_V) NEW=JSON.parse(localStorage.getItem("gs1_new")); }catch(e){}
-  if(!NEW){ NEW=JSON.parse(JSON.stringify(PRESET)); try{ localStorage.setItem("gs1_new_v",PRESET_V); }catch(e){} }
+  if(!NEW){ var old=null; try{ old=JSON.parse(localStorage.getItem("gs1_new")); }catch(e){}
+    NEW=JSON.parse(JSON.stringify(PRESET));
+    (old||[]).forEach(function(o){ if(o&&o.gtin&&!NEW.some(function(n){return n.gtin===o.gtin;})&&o.gtin!=="8901226005614") NEW.push(Object.assign({id:"r"+Math.random().toString(36).slice(2,7),from:"8901226005614"},o)); });
+    NEW.forEach(function(n){ if(n.gtin==="8901226005621"){ n.net_weight=n.net_weight||"101"; n.mrp=n.mrp||"80"; } });
+    try{ localStorage.setItem("gs1_new_v",PRESET_V); }catch(e){} }
+  NEW.forEach(function(n){ if(!n.id) n.id="r"+Math.random().toString(36).slice(2,7); if(!n.from) n.from="8901226005614"; });
   var CONTACT; try{ CONTACT=JSON.parse(localStorage.getItem("gs1_contact")); }catch(e){}
   if(!CONTACT) CONTACT={contact_country:"India",contact_state:"Karnataka",contact_district:"Bengaluru Urban",contact_city:"Bengaluru",contact_person:"Ravikiran Karapakala",contact_email:"onamagarbathi@gmail.com",contact_no:"9844725484",contact_address:"35/36-70/71, N S Palya, Bannerghatta Road, Bengaluru 560076"};
-  if(CONTACT.contact_no==="9740088979"||!CONTACT.contact_no){ CONTACT.contact_no="9844725484"; try{localStorage.setItem("gs1_contact",JSON.stringify(CONTACT));}catch(e){} }   // Ravi: contact number is 9844725484
+  if(CONTACT.contact_no==="9740088979"||!CONTACT.contact_no){ CONTACT.contact_no="9844725484"; }
   function saveLocal(){ try{ localStorage.setItem("gs1_new",JSON.stringify(NEW)); localStorage.setItem("gs1_contact",JSON.stringify(CONTACT)); }catch(e){} }
+  saveLocal();
+
+  // templates (full details of existing products), cached
+  var TPL={};
+  try{ var t0=JSON.parse(localStorage.getItem("gs1_template")); if(t0&&t0.gtin) TPL[String(t0.gtin)]=t0; }catch(e){}
+  function getTpl(g){ g=String(g); if(TPL[g]) return Promise.resolve(TPL[g]);
+    return api("details",{gtins:[g]}).then(function(r){ var d=(r.data&&Array.isArray(r.data.data))?r.data.data[0]:null; if(d) TPL[g]=d; return d; }); }
+
+  // images: kept on this device (IndexedDB) until sent
+  var IMG={}, SLOTS=[["front","Front *"],["back","Back *"],["top","Top"],["bottom","Bottom"],["left","Left"],["right","Right"]];
+  var idb=null;
+  function store(){ return new Promise(function(res){ if(idb) return res(idb); if(typeof indexedDB==="undefined") return res(null);
+    var r; try{ r=indexedDB.open("gs1_imgs",1); }catch(e){ return res(null); }
+    r.onupgradeneeded=function(){ r.result.createObjectStore("i"); }; r.onsuccess=function(){ idb=r.result; res(idb); }; r.onerror=function(){ res(null); }; }); }
+  function imgPut(k,v){ return store().then(function(d){ if(!d) return; return new Promise(function(res){ var t=d.transaction("i","readwrite"); if(v==null) t.objectStore("i").delete(k); else t.objectStore("i").put(v,k); t.oncomplete=res; t.onerror=res; }); }); }
+  function imgLoadAll(){ return store().then(function(d){ if(!d) return; return new Promise(function(res){ var t=d.transaction("i"), s=t.objectStore("i"), rq=s.openCursor();
+    rq.onsuccess=function(){ var c=rq.result; if(c){ var p=String(c.key).split(":"); (IMG[p[0]]=IMG[p[0]]||{})[p[1]]=c.value; c.continue(); } else res(); }; rq.onerror=function(){ res(); }; }); }); }
+  function shrink(file){ return new Promise(function(res){ var fr=new FileReader(); fr.onload=function(e){ var img=new Image(); img.onload=function(){
+      var M=1600,w=img.width,h=img.height; if(w>M||h>M){ if(w>h){h=Math.round(h*M/w);w=M;}else{w=Math.round(w*M/h);h=M;} }
+      var c=document.createElement("canvas"); c.width=w; c.height=h; var x=c.getContext("2d"); x.fillStyle="#fff"; x.fillRect(0,0,w,h); x.drawImage(img,0,0,w,h); res(c.toDataURL("image/jpeg",0.85)); };
+      img.onerror=function(){ res(null); }; img.src=e.target.result; }; fr.readAsDataURL(file); }); }
+  function tiles(key){ var m=IMG[key]||{};
+    return '<div class="row" style="margin-top:8px">'+SLOTS.map(function(s){ var v=m[s[0]];
+      return '<div style="flex:0 0 96px;min-width:96px;text-align:center"><label style="margin:0 0 3px">'+s[1]+'</label>'+
+        '<div data-pick="'+key+':'+s[0]+'" style="width:96px;height:96px;border:2px dashed '+(v?'#1e8e5a':'#b8c3cf')+';border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;background:#fff">'+
+        (v?'<img src="'+v+'" style="max-width:100%;max-height:100%">':'<span style="font-size:24px">📷</span>')+'</div>'+
+        (v?'<button class="btn" data-clr="'+key+':'+s[0]+'" style="padding:3px 8px;margin-top:3px;font-size:12px">remove</button>':'')+'</div>'; }).join("")+'</div>'; }
+  function wireTiles(after){
+    document.querySelectorAll("[data-pick]").forEach(function(t){ t.onclick=function(){ var k=t.dataset.pick.split(":"), i=document.createElement("input"); i.type="file"; i.accept="image/*";
+      i.onchange=function(){ var f=i.files&&i.files[0]; if(!f) return; shrink(f).then(function(d){ if(!d) return alert("Could not read this image — use a JPG or PNG.");
+        (IMG[k[0]]=IMG[k[0]]||{})[k[1]]=d; imgPut(k[0]+":"+k[1],d).then(after); }); }; i.click(); }; });
+    document.querySelectorAll("[data-clr]").forEach(function(b){ b.onclick=function(){ var k=b.dataset.clr.split(":"); if(IMG[k[0]]) delete IMG[k[0]][k[1]]; imgPut(k[0]+":"+k[1],null).then(after); }; });
+  }
+  function imagesFor(key){ var m=IMG[key]||{}, o={}; Object.keys(m).forEach(function(s){ if(m[s]) o[s]=String(m[s]).split(",")[1]; }); return o; }
+  function sendImages(gtin,key){ var im=imagesFor(key); if(!Object.keys(im).length) return Promise.resolve(null); return api("images",{gtin:gtin,images:im}); }
+
+  // next free barcode from the register (refs 00565 onwards), skipping any already used
+  function chk(s){ var t=0; for(var i=0;i<12;i++) t+=Number(s[i])*(i%2?3:1); return (10-t%10)%10; }
+  function nextFree(){ var used=(products||[]).map(function(p){return String(p.gtin);}).concat(NEW.map(function(n){return n.gtin;}));
+    for(var r=565;r<1000;r++){ var b="8901226"+String(r).padStart(5,"0"), g=b+chk(b); if(used.indexOf(g)<0) return g; } return ""; }
+  function cloneFrom(p){ var w=p.weights_and_measures||{}, m=(p.mrp&&p.mrp[0])||{};
+    NEW.push({id:"r"+Date.now().toString(36),from:String(p.gtin),gtin:nextFree(),product_name:"",product_description:"",net_weight:String(w.net_weight||""),mrp:String(m.mrp||""),nameChecked:false});
+    saveLocal(); }
+
+  function build(n){
+    var t=JSON.parse(JSON.stringify(TPL[n.from]||{}));
+    ["digital_link","barcode_url","qrcode_url","status","gcp","images","product_url","video_url","alt_sku_code","deactivation_date"].forEach(function(k){delete t[k];});
+    var p=Object.assign(t,CONTACT,{gtin:n.gtin,product_name:n.product_name.trim(),product_description:(n.product_description||n.product_name).trim(),sku_id:n.gtin.slice(-6),activation_date:today()});
+    if(n.brand) p.brand=n.brand;
+    if(n.net_weight){ p.weights_and_measures=Object.assign({},t.weights_and_measures||{}, {net_weight:String(n.net_weight)}); }
+    if(n.mrp){ var m=(t.mrp&&t.mrp[0])?Object.assign({},t.mrp[0]):{target_market:"India",location:"India"}; m.mrp=String(n.mrp); m.activation_date=today(); p.mrp=[m]; }
+    return p;
+  }
+  function drawAdd(){
+    if(products===null){ $("view").innerHTML='<div class="card">Loading your products…</div>'; return api("list").then(function(r){ products=items(r.data); drawAdd(); }); }
+    var need=NEW.map(function(n){return n.from;}).filter(function(g,i,a){return g&&!TPL[g]&&a.indexOf(g)===i;});
+    if(need.length){ $("view").innerHTML='<div class="card">Loading the products to copy from…</div>'; return Promise.all(need.map(getTpl)).then(drawAdd); }
+    var opts=function(sel){ return (products||[]).map(function(p){ return '<option value="'+esc(p.gtin)+'"'+(String(p.gtin)===String(sel)?" selected":"")+'>'+esc(p.name||p.product_name)+' · '+esc(p.gtin)+'</option>'; }).join(""); };
+    var have=(products||[]).map(function(p){return String(p.gtin);});
+    var h='<div class="card"><h2>New products — each is a copy of an existing product</h2><div class="hint">Everything (category, HS code, GST, packaging, sizes, attributes) is copied from the product you choose. You change only the barcode, name, weight, MRP and photos. Name and brand can NOT be changed later.</div></div>';
+    h+=NEW.map(function(n,i){ var tp=TPL[n.from];
+      return '<div class="card"><button class="x" data-rm="'+i+'" style="float:right;border:none;background:none;color:#c0392b;font-size:20px;cursor:pointer">×</button>'+
+        '<h2>'+esc(n.product_name||"New product "+(i+1))+'</h2>'+
+        '<label>Copy everything from</label><select data-from="'+i+'">'+opts(n.from)+'</select>'+
+        (tp?'<div class="hint">Copying: '+esc(tp.category||"")+(tp.sub_category?" › "+esc(tp.sub_category):"")+' · HS '+esc(tp.hs_code||"—")+' · GST '+esc(tp.igst||"—")+' · '+esc(tp.packaging_type||"")+'</div>':'')+
+        '<div class="row"><div><label>GTIN (barcode)</label><input data-i="'+i+'" data-k="gtin" value="'+esc(n.gtin)+'" inputmode="numeric"></div><div style="flex:2"><label>Product name (final)</label><input data-i="'+i+'" data-k="product_name" value="'+esc(n.product_name)+'"></div></div>'+
+        (have.indexOf(n.gtin)>=0?'<div style="color:#c0392b;font-weight:700;margin-top:6px">⚠ This GTIN is already in DataKart — change it or remove this product.</div>':'')+
+        '<div class="row"><div><label>Net weight</label><input data-i="'+i+'" data-k="net_weight" value="'+esc(n.net_weight)+'" inputmode="decimal"></div><div><label>MRP ₹</label><input data-i="'+i+'" data-k="mrp" value="'+esc(n.mrp)+'" inputmode="decimal"></div><div><label>Brand (blank = same)</label><input data-i="'+i+'" data-k="brand" value="'+esc(n.brand||"")+'"></div></div>'+
+        '<label>Description</label><input data-i="'+i+'" data-k="product_description" value="'+esc(n.product_description)+'">'+
+        '<label style="margin-top:10px">Pack photos — front and back are needed for approval</label>'+tiles(n.id)+
+        '<label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" data-i="'+i+'" data-k="nameChecked" style="width:20px"'+(n.nameChecked?" checked":"")+'> Name checked — final spelling</label></div>'; }).join("");
+    h+='<div class="card"><div class="row"><select id="cloneSel">'+opts("8901226005614")+'</select><button class="btn" id="addRow">+ Add a copy of this product</button></div></div>';
+    h+='<div class="card"><h2>Company contact (sent with each product)</h2><div class="row">'+Object.keys(CONTACT).map(function(k){return '<div><label>'+esc(k.replace("contact_","").replace("_"," "))+'</label><input data-c="'+k+'" value="'+esc(CONTACT[k])+'"></div>';}).join("")+'</div></div>';
+    h+='<div class="card"><h2>Check & send</h2><div class="row"><button class="btn" id="prev">👁 Preview</button><button class="btn" id="val">✔ Check GTINs with GS1</button></div>'+
+      '<div class="row" style="margin-top:10px"><button class="btn go" id="send">📤 Send to GS1 as DRAFT (with photos)</button></div>'+
+      '<div class="hint" style="margin-top:6px">Drafts are not published. Review them in DataKart and submit there.</div><div id="out" class="msg"></div></div>';
+    $("view").innerHTML=h;
+    wireTiles(drawAdd);
+    document.querySelectorAll("[data-k]").forEach(function(e){ e.oninput=e.onchange=function(){ var n=NEW[+e.dataset.i]; n[e.dataset.k]=e.type==="checkbox"?e.checked:e.value; saveLocal(); }; });
+    document.querySelectorAll("[data-from]").forEach(function(e){ e.onchange=function(){ NEW[+e.dataset.from].from=e.value; saveLocal(); drawAdd(); }; });
+    document.querySelectorAll("[data-c]").forEach(function(e){ e.oninput=function(){ CONTACT[e.dataset.c]=e.value; saveLocal(); }; });
+    document.querySelectorAll("[data-rm]").forEach(function(b){ b.onclick=function(){ if(confirm("Remove this product?")){ var n=NEW.splice(+b.dataset.rm,1)[0]; SLOTS.forEach(function(s){ imgPut(n.id+":"+s[0],null); }); delete IMG[n.id]; saveLocal(); drawAdd(); } }; });
+    $("addRow").onclick=function(){ var p=(products||[]).find(function(x){return String(x.gtin)===$("cloneSel").value;}); if(p){ cloneFrom(p); drawAdd(); } };
+    $("prev").onclick=function(){ $("out").innerHTML='<pre>'+esc(JSON.stringify(NEW.map(function(n){ var p=build(n); p.photos=Object.keys(IMG[n.id]||{}); return p; }),null,2))+'</pre>'; };
+    $("val").onclick=function(){ $("out").textContent="Checking…"; Promise.all(NEW.map(function(n){ return api("validate",{gtin:n.gtin}).then(function(r){ return n.gtin+": "+(r.ok?"✓ "+JSON.stringify((r.data&&r.data.data&&r.data.data[0]&&r.data.data[0].gtinRecordStatus)||r.data&&r.data.message||"ok"):"✗ "+r.status+" "+JSON.stringify(r.data).slice(0,200)); }); })).then(function(a){ $("out").innerHTML='<pre>'+esc(a.join("\n"))+'</pre>'; }); };
+    $("send").onclick=function(){
+      var bad=NEW.filter(function(n){return !/^\d{13}$/.test(n.gtin)||!n.product_name.trim()||!n.nameChecked||!TPL[n.from];});
+      if(bad.length) return alert("Each product needs a 13-digit GTIN, a name, a product to copy from, and “name checked” ticked.");
+      var dup=NEW.filter(function(n){return have.indexOf(n.gtin)>=0;});
+      if(dup.length) return alert("Already in DataKart — change or remove:\n"+dup.map(function(n){return n.gtin+"  "+n.product_name;}).join("\n"));
+      var noPic=NEW.filter(function(n){ var m=IMG[n.id]||{}; return !m.front||!m.back; });
+      if(noPic.length&&!confirm("These have no front/back photo, and may not be approved:\n"+noPic.map(function(n){return n.product_name;}).join("\n")+"\n\nSend anyway?")) return;
+      if(!confirm("Send "+NEW.length+" product(s) to GS1 DataKart as DRAFT?\n\n"+NEW.map(function(n){return n.gtin+"  "+n.product_name;}).join("\n"))) return;
+      $("out").textContent="Creating products…";
+      api("create",{products:NEW.map(build)}).then(function(r){
+        var html='<b>'+(r.ok?"✅ Products created as drafts":"❌ GS1 replied with an error ("+r.status+")")+'</b><pre>'+esc(JSON.stringify(r.data,null,2))+'</pre>';
+        $("out").innerHTML=html; if(!r.ok) return;
+        products=null;
+        var chain=Promise.resolve();
+        NEW.forEach(function(n){ chain=chain.then(function(){ if(!Object.keys(IMG[n.id]||{}).length) return;
+          $("out").innerHTML=html+'<div>Uploading photos for '+esc(n.product_name)+'…</div>';
+          return sendImages(n.gtin,n.id).then(function(x){ html+='<b>'+(x&&x.ok?"🖼 Photos uploaded":"⚠ Photos failed")+' — '+esc(n.product_name)+'</b>'+(x&&x.ok?'':'<pre>'+esc(JSON.stringify(x&&x.data,null,2))+'</pre>'); $("out").innerHTML=html; }); }); });
+        chain.then(function(){ $("out").innerHTML=html+'<div class="hint">Send Claude a screenshot if anything shows ⚠ or ❌.</div>'; });
+      });
+    };
+  }
 
   function items(d){ if(!d) return []; if(Array.isArray(d.items)) return d.items; if(d.data&&Array.isArray(d.data.items)) return d.data.items; if(Array.isArray(d.data)) return d.data; return []; }
   function loadList(){
@@ -108,62 +217,20 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
     $("det").innerHTML='<div class="card">Loading full details for '+esc(gtin)+'…</div>';
     api("details",{gtins:[gtin]}).then(function(r){
       var d=(r.data&&Array.isArray(r.data.data))?r.data.data[0]:null;
-      $("det").innerHTML='<div class="card"><h2>'+esc(d?d.product_name:gtin)+'</h2>'+(d?'<button class="btn go" id="useT">Use as template for new products</button> ':'')+
+      if(d) TPL[String(d.gtin)]=d;
+      var key="p"+gtin;
+      $("det").innerHTML='<div class="card"><h2>'+esc(d?d.product_name:gtin)+'</h2>'+(d?'<button class="btn go" id="useT">⧉ Clone this product (new barcode)</button>':'')+
+        '<div style="margin-top:12px"><b>📷 Photos for this product</b><div class="hint">Add pack photos and tap Upload — front and back help approval.</div><div id="ptiles">'+tiles(key)+'</div>'+
+        '<button class="btn pri" id="pup" style="margin-top:8px">⬆ Upload photos to GS1</button> <span id="pmsg" class="hint"></span></div>'+
         '<pre>'+esc(JSON.stringify(d||r.data,null,2))+'</pre></div>';
-      if(d) $("useT").onclick=function(){ template=d; try{localStorage.setItem("gs1_template",JSON.stringify(d));}catch(e){} tab="add"; draw(); window.scrollTo(0,0); };
+      var rewire=function(){ $("ptiles").innerHTML=tiles(key); wireTiles(rewire); };
+      wireTiles(rewire);
+      $("pup").onclick=function(){ if(!Object.keys(IMG[key]||{}).length) return alert("Add at least one photo first.");
+        $("pmsg").textContent="Uploading…"; sendImages(gtin,key).then(function(x){ $("pmsg").innerHTML=x&&x.ok?"✅ Uploaded":'❌ Failed — send Claude a screenshot<pre>'+esc(JSON.stringify(x&&x.data,null,2))+'</pre>'; }); };
+      if(d) $("useT").onclick=function(){ var p=(products||[]).find(function(x){return String(x.gtin)===String(gtin);})||{gtin:gtin,weights_and_measures:d.weights_and_measures,mrp:d.mrp}; cloneFrom(p); tab="add"; draw(); window.scrollTo(0,0); };
     });
   }
 
-  function build(n){
-    var t=JSON.parse(JSON.stringify(template||{}));
-    ["digital_link","barcode_url","qrcode_url","status","gcp","images","product_url","video_url","alt_sku_code","deactivation_date"].forEach(function(k){delete t[k];});
-    var p=Object.assign(t,CONTACT,{gtin:n.gtin,product_name:n.product_name.trim(),product_description:(n.product_description||n.product_name).trim(),sku_id:n.gtin.slice(-6),activation_date:today()});
-    if(n.brand) p.brand=n.brand;
-    if(n.net_weight){ p.weights_and_measures=Object.assign({},t.weights_and_measures||{}, {net_weight:String(n.net_weight)}); }
-    if(n.mrp){ var m=(t.mrp&&t.mrp[0])?Object.assign({},t.mrp[0]):{target_market:"India",location:"India"}; m.mrp=String(n.mrp); m.activation_date=today(); p.mrp=[m]; }
-    return p;
-  }
-  function drawAdd(){
-    if(!template){ try{ template=JSON.parse(localStorage.getItem("gs1_template")); }catch(e){} }
-    if(!template){
-      $("view").innerHTML='<div class="card">Loading Kesar chandan (8901226005614) as the template…</div>';
-      api("details",{gtins:["8901226005614"]}).then(function(r){ var d=(r.data&&Array.isArray(r.data.data))?r.data.data[0]:null;
-        if(d){ template=d; try{localStorage.setItem("gs1_template",JSON.stringify(d));}catch(e){} } else template={};
-        drawAdd(); });
-      return;
-    }
-    var h='<div class="card"><h2>1 · Template</h2>'+(template&&template.gtin?'Copying category, HS code, GST, packaging, sizes from <b>'+esc(template.product_name)+'</b> ('+esc(template.gtin)+'). <button class="btn" id="chT">Change</button>':
-      '<div class="hint">Open <b>My products</b>, tap an existing product similar to the new ones (e.g. a Bambooless or Vamana pack) and tap <b>Use as template</b>.</div>')+'</div>';
-    h+='<div class="card"><h2>2 · New products</h2><div class="hint">Name and brand can NOT be changed after creation — tick “name checked” only when the spelling is final.</div>'+
-      NEW.map(function(n,i){ return '<div class="np"><button class="x" data-rm="'+i+'">×</button>'+
-        '<div class="row"><div><label>GTIN (barcode)</label><input data-i="'+i+'" data-k="gtin" value="'+esc(n.gtin)+'" inputmode="numeric"></div><div style="flex:2"><label>Product name (final)</label><input data-i="'+i+'" data-k="product_name" value="'+esc(n.product_name)+'"></div></div>'+
-        '<div class="row"><div><label>Net weight (same unit as template)</label><input data-i="'+i+'" data-k="net_weight" value="'+esc(n.net_weight)+'" inputmode="decimal"></div><div><label>MRP ₹</label><input data-i="'+i+'" data-k="mrp" value="'+esc(n.mrp)+'" inputmode="decimal"></div><div><label>Brand (blank = template)</label><input data-i="'+i+'" data-k="brand" value="'+esc(n.brand||"")+'"></div></div>'+
-        '<label>Description</label><input data-i="'+i+'" data-k="product_description" value="'+esc(n.product_description)+'" placeholder="e.g. Kesar Chandan bambooless incense sticks">'+
-        ((products||[]).some(function(p){return String(p.gtin)===n.gtin;})?'<div style="color:#c0392b;font-weight:700;margin-top:6px">⚠ This GTIN is already in DataKart — remove this row.</div>':'')+'<label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" data-i="'+i+'" data-k="nameChecked" style="width:20px"'+(n.nameChecked?" checked":"")+'> Name checked — final spelling</label></div>'; }).join("")+
-      '<button class="btn" id="addRow">+ Another product</button></div>';
-    h+='<div class="card"><h2>3 · Company contact (sent with each product)</h2><div class="row">'+Object.keys(CONTACT).map(function(k){return '<div><label>'+esc(k.replace("contact_","").replace("_"," "))+'</label><input data-c="'+k+'" value="'+esc(CONTACT[k])+'"></div>';}).join("")+'</div></div>';
-    h+='<div class="card"><h2>4 · Check & send</h2><div class="row"><button class="btn" id="prev">👁 Preview what will be sent</button><button class="btn" id="val">✔ Check GTINs with GS1</button></div>'+
-      '<div class="row" style="margin-top:10px"><button class="btn go" id="send">📤 Send to GS1 as DRAFT</button></div>'+
-      '<div class="hint" style="margin-top:6px">Drafts are not published. Review them in DataKart and submit there, or tell Claude to submit.</div><div id="out" class="msg"></div></div>';
-    $("view").innerHTML=h;
-    if($("chT")) $("chT").onclick=function(){ tab="list"; draw(); };
-    document.querySelectorAll("[data-k]").forEach(function(e){ e.oninput=e.onchange=function(){ var n=NEW[+e.dataset.i]; n[e.dataset.k]=e.type==="checkbox"?e.checked:e.value; saveLocal(); }; });
-    document.querySelectorAll("[data-c]").forEach(function(e){ e.oninput=function(){ CONTACT[e.dataset.c]=e.value; saveLocal(); }; });
-    document.querySelectorAll("[data-rm]").forEach(function(b){ b.onclick=function(){ if(confirm("Remove this row?")){ NEW.splice(+b.dataset.rm,1); saveLocal(); drawAdd(); } }; });
-    $("addRow").onclick=function(){ NEW.push({gtin:"",product_name:"",product_description:"",net_weight:"",mrp:"",nameChecked:false}); saveLocal(); drawAdd(); };
-    $("prev").onclick=function(){ $("out").innerHTML='<pre>'+esc(JSON.stringify(NEW.map(build),null,2))+'</pre>'; };
-    $("val").onclick=function(){ $("out").textContent="Checking…"; Promise.all(NEW.map(function(n){ return api("validate",{gtin:n.gtin}).then(function(r){ return n.gtin+": "+(r.ok?"✓ "+JSON.stringify((r.data&&r.data.data&&r.data.data[0]&&r.data.data[0].gtinRecordStatus)||r.data&&r.data.message||"ok"):"✗ "+r.status+" "+JSON.stringify(r.data).slice(0,200)); }); })).then(function(a){ $("out").innerHTML='<pre>'+esc(a.join("\n"))+'</pre>'; }); };
-    $("send").onclick=function(){
-      if(!template||!template.gtin) return alert("Pick a template product first (My products → tap a product → Use as template).");
-      var bad=NEW.filter(function(n){return !/^\d{13}$/.test(n.gtin)||!n.product_name.trim()||!n.nameChecked;});
-      if(bad.length) return alert("Each product needs a 13-digit GTIN, a name, and “name checked” ticked.");
-      var have=(products||[]).map(function(p){return String(p.gtin);}), dup=NEW.filter(function(n){return have.indexOf(n.gtin)>=0;});
-      if(dup.length) return alert("Already in DataKart — remove these rows first:\n"+dup.map(function(n){return n.gtin+"  "+n.product_name;}).join("\n"));
-      if(!confirm("Send "+NEW.length+" product(s) to GS1 DataKart as DRAFT?\n\n"+NEW.map(function(n){return n.gtin+"  "+n.product_name;}).join("\n"))) return;
-      $("out").textContent="Sending…";
-      api("create",{products:NEW.map(build)}).then(function(r){ $("out").innerHTML='<b>'+(r.ok?"✅ GS1 accepted the request":"❌ GS1 replied with an error ("+r.status+")")+'</b><pre>'+esc(JSON.stringify(r.data,null,2))+'</pre>'+(r.ok?'':'<div class="hint">Send Claude a screenshot of this box.</div>'); if(r.ok) products=null; });
-    };
-  }
   function drawCodes(){
     $("view").innerHTML='<div class="card"><h2>Official barcode from GS1</h2><div class="hint">Works only for products that are PUBLISHED in DataKart.</div>'+
       '<div class="row"><div><label>GTIN</label><input id="cg" inputmode="numeric" value="'+esc((NEW[0]||{}).gtin||"")+'"></div><div><label>Type</label><select id="ct"><option value="barcode">1D barcode (EAN)</option><option value="qrcode">QR code (Digital Link)</option></select></div><div><label>Format</label><select id="cf"><option>PNG</option><option>PDF</option></select></div></div>'+
@@ -183,7 +250,7 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
     api("log").then(function(r){
       if(r.error==="nopin") return lock("Set a PIN for 'main' first: Tracker → Menu → 🔒 PIN Access.");
       if(r.error==="pin") return lock(pin?"Wrong PIN":"");
-      localStorage.setItem("gs1_pin",pin); $("pinBox").style.display="none"; $("app").style.display=""; draw();
+      localStorage.setItem("gs1_pin",pin); $("pinBox").style.display="none"; $("app").style.display=""; imgLoadAll().then(draw,draw);
     }).catch(function(){ lock("No internet — try again"); });
   }
   $("pinGo").onclick=function(){ pin=$("pin").value.trim(); if(pin) start(); };
