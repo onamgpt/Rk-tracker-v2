@@ -57,7 +57,7 @@ h1 a{margin-left:auto;font-size:13px;font-weight:400;color:#8aa0b0;text-decorati
       {id:"sd",name:"SanDisk High Endurance 64 GB microSD",note:"Made for 24×7 recording — lasts far longer than normal cards",qty:1,price:900,link:A("SanDisk High Endurance 64GB microSD")},
       {id:"reader",name:"USB microSD card reader",note:"Only if your computer has no card slot — used once",qty:1,price:300,link:A("USB microSD card reader")}
     ]},
-    {id:"enose",title:"Electronic nose — fragrance QC (pro kit, recommended)",why:"Bosch's 8-sensor kit. Runs on your Windows laptop — no Raspberry Pi needed. Train it on your fragrances with Bosch's free BME AI-Studio (Windows), then plug the kit into the laptop by USB for daily batch checks.",parts:[
+    {id:"enose",title:"Electronic nose — Bosch 8-sensor kit (OUT OF STOCK — RS India expects more from 13 Jan 2027)",why:"Bosch's 8-sensor kit. Runs on your Windows laptop — no Raspberry Pi needed. Train it on your fragrances with Bosch's free BME AI-Studio (Windows), then plug the kit into the laptop by USB for daily batch checks.",parts:[
       {id:"bkit",name:"Bosch BME688 Development Kit (8 sensors)",note:"Being discontinued — stock is scarce. RS India lists it at ₹8,479; Tanotis as backup",qty:1,price:8500,link:"https://in.rsdelivers.com/product/bosch-sensortec/bme688-evaluation-kit-board/bosch-sensortec-bme688-evaluation-kit-board-board/2457081",alt:"https://www.tanotis.com/products/sparkfun-bosch-bme688-development-kit"},
       {id:"esp32",name:"Adafruit HUZZAH32 ESP32 Feather — part 3591 (headers already soldered)",note:"The kit plugs onto it. Prefer 3591 (no soldering). Part 3405 is the same board with LOOSE headers — needs 5 min soldering at any electronics shop. Not the V2.",qty:1,price:2100,link:"https://www.digikey.in/en/products/result?keywords=adafruit%203591",alt:"https://www.digikey.in/en/products/result?keywords=adafruit%203405"},
       {id:"sd32",name:"microSD card 32 GB (not bigger)",note:"The kit records sniffs onto it — must be 32 GB or smaller",qty:1,price:400,link:A("SanDisk 32GB microSD")},
@@ -67,6 +67,16 @@ h1 a{margin-left:auto;font-size:13px;font-weight:400;color:#8aa0b0;text-decorati
       {id:"fan",name:"30 mm 5V mini fan",note:"Stirs the air in the jar so every sniff is the same",qty:1,price:150,link:R("30mm 5V fan")},
       {id:"jar",name:"Glass jars with metal lids, ~500 ml",note:"Sniffing chambers",qty:3,price:150,link:A("glass jar 500ml metal lid")},
       {id:"strips",name:"Smelling / blotter strips",note:"You probably have these already",qty:1,price:0,link:A("perfume smelling strips")}
+    ]},
+    {id:"enose-diy",title:"Electronic nose — DIY version (in stock now, use this while the Bosch kit is out)",why:"3 single BME688 sensors, each heated to a different temperature pattern by my program — the same idea as Bosch's 8-sensor board, on a budget. Plugs into your Windows laptop by USB. When the Bosch kit is back, it can be added later.",parts:[
+      {id:"esp",name:"Adafruit HUZZAH32 ESP32 Feather — part 3591 (already on your DigiKey list)",note:"Same board as for the Bosch kit — buy once, use for both",qty:1,price:2002,link:"https://www.digikey.in/en/products/result?keywords=adafruit%203591"},
+      {id:"bme3",name:"BME688 sensor (7Semi probe or Adafruit breakout)",note:"Evelta, Mumbai — ships in 24 hours. 3 sensors = 3 different 'noses'",qty:3,price:1600,link:"https://evelta.com/bme688-temp-humidity-pressure-and-gas-sensor/",alt:R("BME688")},
+      {id:"mux",name:"Adafruit TCA9548A I2C multiplexer (STEMMA QT)",note:"Lets the board read 3 identical sensors",qty:1,price:700,link:R("TCA9548A multiplexer"),alt:A("Adafruit TCA9548A STEMMA QT")},
+      {id:"wires",name:"Jumper wires female-female + STEMMA QT cables (pack)",note:"Plug-in connections — no soldering",qty:1,price:250,link:R("STEMMA QT cable"),alt:A("female to female jumper wires")},
+      {id:"usb",name:"Micro-USB data cable",note:"Board to laptop — must be a data cable",qty:1,price:150,link:A("micro usb data cable")},
+      {id:"fan",name:"30 mm 5V mini fan",note:"Stirs the air in the jar",qty:1,price:150,link:R("30mm 5V fan")},
+      {id:"jar",name:"Glass jars with metal lids, ~500 ml",note:"Sniffing chambers",qty:3,price:150,link:A("glass jar 500ml metal lid")},
+      {id:"grove",name:"Optional: Seeed Grove Multichannel Gas Sensor V2 (4 more sensor types)",note:"Adds 4 different MEMS gas sensors — richer fingerprint. Buy only if a shop has it in stock",qty:1,price:3500,link:R("Grove Multichannel Gas Sensor V2"),alt:A("Grove Multichannel Gas Sensor V2")}
     ]},
     {id:"throw",title:"Throw & longevity rig — intensity, spread, smoke",why:"Three gas sensors at different distances in a test tunnel, plus a smoke sensor, all on the Pi. For every batch it records peak strength, how fast the scent travels, how long it lasts, and smoke level. Build after the e-nose.",parts:[
       {id:"bme3",name:"BME688 sensor breakout (one per distance)",note:"Reads scent strength at 0.25 m, 1 m and 2 m",qty:3,price:1100,link:R("BME688"),alt:A("BME688 breakout")},
