@@ -242,6 +242,7 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
       var d=(r.data&&Array.isArray(r.data.data))?r.data.data[0]:null;
       if(d) TPL[String(d.gtin)]=d;
       var key="p"+gtin;
+      if(!IMG[key]||!Object.keys(IMG[key]).length){ var row=NEW.find(function(n){return n.gtin===String(gtin)&&IMG[n.id]&&Object.keys(IMG[n.id]).length;}); if(row) IMG[key]=Object.assign({},IMG[row.id]); }
       $("det").innerHTML='<div class="card"><h2>'+esc(d?d.product_name:gtin)+'</h2>'+(d?'<button class="btn go" id="useT">⧉ Clone this product (new barcode)</button>':'')+
         '<div style="margin-top:12px"><b>📷 Photos for this product</b><div class="hint">Add pack photos and tap Upload — front and back help approval.</div><div id="ptiles">'+tiles(key)+'</div>'+
         '<button class="btn pri" id="pup" style="margin-top:8px">⬆ Upload photos to GS1</button> <span id="pmsg" class="hint"></span></div>'+

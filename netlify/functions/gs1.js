@@ -90,18 +90,31 @@ exports.handler = async (event) => {
         const r = await gs1("GET", "/console/products/barcode", null, { gtin: b.gtin, type: b.type || "barcode", format: b.format || "PNG" });
         return OK({ ok: r.ok, status: r.status, file: r.file || null, data: r.json || r.text });
       }
-      case "images": {   // ClickIT PUSH: pack photos for a product (base64 JPEG)
-        const im = b.images || {}, body = { gtin: String(b.gtin), gcp: GCP };
-        ["front", "back", "top", "bottom", "left", "right"].forEach(k => { if (im[k]) { body["img_" + k] = im[k]; body["is_" + k + "_original"] = true; } });
-        let r = await gs1("POST", "/console/clickit/products/upload_images", body);
-        if (!r.ok && r.status !== 401) {   // some APIs want a data URI instead of plain base64
-          const b2 = Object.assign({}, body); Object.keys(b2).forEach(k => { if (/^img_/.test(k)) b2[k] = "data:image/jpeg;base64," + b2[k]; });
-          const r2 = await gs1("POST", "/console/clickit/products/upload_images", b2); if (r2.ok) r = r2;
+      case "images": {   // pack photos → public image links (Supabase storage) → set on the product in DataKart
+        const im = b.images || {}, gtin = String(b.gtin || "");
+        if (!/^\d{13}$/.test(gtin)) return OK({ error: "bad gtin" });
+        const SB = (process.env.SUPABASE_URL || "").replace(/\/$/, ""), KEY = process.env.SUPABASE_SERVICE_KEY || "";
+        const sh = { apikey: KEY, Authorization: "Bearer " + KEY };
+        await fetch(SB + "/storage/v1/bucket", { method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, sh), body: JSON.stringify({ id: "gs1-images", name: "gs1-images", public: true }) }).catch(() => {});
+        const urls = {}, upErr = [];
+        for (const k of ["front", "back", "top", "bottom", "left", "right"]) {
+          if (!im[k]) continue;
+          const path = gtin + "/" + k + "_" + Date.now() + ".jpg";
+          const r = await fetch(SB + "/storage/v1/object/gs1-images/" + path, { method: "POST", headers: Object.assign({ "Content-Type": "image/jpeg", "x-upsert": "true" }, sh), body: Buffer.from(String(im[k]).replace(/^data:[^,]+,/, ""), "base64") });
+          if (r.ok) urls[k] = SB + "/storage/v1/object/public/gs1-images/" + path; else upErr.push(k + ": " + r.status + " " + (await r.text()).slice(0, 200));
         }
+        if (!Object.keys(urls).length) return OK({ ok: false, status: 0, data: { step: "storing photos", errors: upErr } });
+        // read the product, add the image links, save it back
+        const d = await gs1("POST", "/console/products/details/bulk", { gtins: [gtin] });
+        const obj = d.json && Array.isArray(d.json.data) && d.json.data[0];
+        if (!obj) return OK({ ok: false, status: d.status, data: { step: "reading product", reply: d.json || d.text || d.error } });
+        const upd = Object.assign({}, obj, { images: Object.assign({}, obj.images || {}, urls) });
+        ["product_name", "brand", "gcp", "digital_link", "barcode_url", "qrcode_url"].forEach(k => delete upd[k]);
+        const r = await gs1("PUT", "/console/products/bulk", [upd]);
         const log = (await kvGet("gs1_log")) || [];
-        log.unshift({ at: new Date().toISOString(), action: "photos (" + Object.keys(im).join(", ") + ")", gtins: [String(b.gtin)], status: r.status, ok: r.ok, result: r.json || r.text });
+        log.unshift({ at: new Date().toISOString(), action: "photos (" + Object.keys(urls).join(", ") + ")", gtins: [gtin], status: r.status, ok: r.ok, result: r.json || r.text, urls });
         await kvSet("gs1_log", log.slice(0, 100));
-        return OK({ ok: r.ok, status: r.status, data: r.json || r.text || r.error });
+        return OK({ ok: r.ok, status: r.status, urls, data: r.json || r.text || r.error });
       }
       case "log": return OK({ ok: true, log: (await kvGet("gs1_log")) || [] });
       default: return OK({ error: "unknown action" });
