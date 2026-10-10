@@ -65,10 +65,14 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
 
   // ---------- new products: pre-filled from the barcode register ----------
   var REG=[["8901226005614","Kesar Chandan Bambooless"],["8901226005621","Golden Buddha Bambooless"],["8901226005638","Vismaya Lavender Bambooless"],["8901226005645","Jasmine Bambooless"]];
-  var NEW; try{ NEW=JSON.parse(localStorage.getItem("gs1_new")); }catch(e){}
-  if(!NEW) NEW=REG.map(function(r){return {gtin:r[0],product_name:r[1],product_description:"",net_weight:"",mrp:"",nameChecked:false};});
+  // Preset prepared with Ravi (v2): Kesar Chandan is already in DataKart; Golden Buddha ready to send.
+  var PRESET_V=2, PRESET=[
+    {gtin:"8901226005621",product_name:"Golden Buddha",product_description:"Golden Buddha Bambooless Dhoop Sticks, 30 sticks",net_weight:"101",mrp:"80",nameChecked:false}
+  ];
+  var NEW; try{ if(Number(localStorage.getItem("gs1_new_v"))===PRESET_V) NEW=JSON.parse(localStorage.getItem("gs1_new")); }catch(e){}
+  if(!NEW){ NEW=JSON.parse(JSON.stringify(PRESET)); try{ localStorage.setItem("gs1_new_v",PRESET_V); }catch(e){} }
   var CONTACT; try{ CONTACT=JSON.parse(localStorage.getItem("gs1_contact")); }catch(e){}
-  if(!CONTACT) CONTACT={contact_country:"India",contact_state:"Karnataka",contact_district:"Bengaluru Urban",contact_city:"Bengaluru",contact_person:"Ravikiran Karapakala",contact_email:"onamagarbathi@gmail.com",contact_no:"",contact_address:"35/36-70/71, N S Palya, Bannerghatta Road, Bengaluru 560076"};
+  if(!CONTACT) CONTACT={contact_country:"India",contact_state:"Karnataka",contact_district:"Bengaluru Urban",contact_city:"Bengaluru",contact_person:"Ravikiran Karapakala",contact_email:"onamagarbathi@gmail.com",contact_no:"9740088979",contact_address:"35/36-70/71, N S Palya, Bannerghatta Road, Bengaluru 560076"};
   function saveLocal(){ try{ localStorage.setItem("gs1_new",JSON.stringify(NEW)); localStorage.setItem("gs1_contact",JSON.stringify(CONTACT)); }catch(e){} }
 
   function items(d){ if(!d) return []; if(Array.isArray(d.items)) return d.items; if(d.data&&Array.isArray(d.data.items)) return d.data.items; if(Array.isArray(d.data)) return d.data; return []; }
@@ -120,7 +124,14 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
   }
   function drawAdd(){
     if(!template){ try{ template=JSON.parse(localStorage.getItem("gs1_template")); }catch(e){} }
-    var h='<div class="card"><h2>1 · Template</h2>'+(template?'Copying category, HS code, GST, packaging, sizes from <b>'+esc(template.product_name)+'</b> ('+esc(template.gtin)+'). <button class="btn" id="chT">Change</button>':
+    if(!template){
+      $("view").innerHTML='<div class="card">Loading Kesar chandan (8901226005614) as the template…</div>';
+      api("details",{gtins:["8901226005614"]}).then(function(r){ var d=(r.data&&Array.isArray(r.data.data))?r.data.data[0]:null;
+        if(d){ template=d; try{localStorage.setItem("gs1_template",JSON.stringify(d));}catch(e){} } else template={};
+        drawAdd(); });
+      return;
+    }
+    var h='<div class="card"><h2>1 · Template</h2>'+(template&&template.gtin?'Copying category, HS code, GST, packaging, sizes from <b>'+esc(template.product_name)+'</b> ('+esc(template.gtin)+'). <button class="btn" id="chT">Change</button>':
       '<div class="hint">Open <b>My products</b>, tap an existing product similar to the new ones (e.g. a Bambooless or Vamana pack) and tap <b>Use as template</b>.</div>')+'</div>';
     h+='<div class="card"><h2>2 · New products</h2><div class="hint">Name and brand can NOT be changed after creation — tick “name checked” only when the spelling is final.</div>'+
       NEW.map(function(n,i){ return '<div class="np"><button class="x" data-rm="'+i+'">×</button>'+
@@ -142,7 +153,7 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
     $("prev").onclick=function(){ $("out").innerHTML='<pre>'+esc(JSON.stringify(NEW.map(build),null,2))+'</pre>'; };
     $("val").onclick=function(){ $("out").textContent="Checking…"; Promise.all(NEW.map(function(n){ return api("validate",{gtin:n.gtin}).then(function(r){ return n.gtin+": "+(r.ok?"✓ "+JSON.stringify((r.data&&r.data.data&&r.data.data[0]&&r.data.data[0].gtinRecordStatus)||r.data&&r.data.message||"ok"):"✗ "+r.status+" "+JSON.stringify(r.data).slice(0,200)); }); })).then(function(a){ $("out").innerHTML='<pre>'+esc(a.join("\n"))+'</pre>'; }); };
     $("send").onclick=function(){
-      if(!template) return alert("Pick a template product first (My products → tap a product → Use as template).");
+      if(!template||!template.gtin) return alert("Pick a template product first (My products → tap a product → Use as template).");
       var bad=NEW.filter(function(n){return !/^\d{13}$/.test(n.gtin)||!n.product_name.trim()||!n.nameChecked;});
       if(bad.length) return alert("Each product needs a 13-digit GTIN, a name, and “name checked” ticked.");
       var have=(products||[]).map(function(p){return String(p.gtin);}), dup=NEW.filter(function(n){return have.indexOf(n.gtin)>=0;});
