@@ -128,21 +128,26 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
     ["digital_link","barcode_url","qrcode_url","status","gcp","images"].forEach(function(k){delete t[k];});
     var p=Object.assign(t,CONTACT,{gtin:n.gtin,product_name:n.product_name.trim(),product_description:(n.product_description||n.product_name).trim(),sku_id:n.gtin.slice(-6),
       activation_date:today(),deactivation_date:deact,product_url:"",video_url:"",alt_sku_code:""});
-    // carton set-up: keep only complete entries (GS1 rejects ones without a pack type)
-    var PT=["Display Product","Inner Carton","Outer Carton","Pallet"];
-    var cc=(Array.isArray(p.case_configuration)?p.case_configuration:[]).map(function(c){ c=Object.assign({},c||{});
-      var pt=c.pack_type||c.packType||c.type||c.packaging_type||""; var hit=PT.find(function(x){return x.toLowerCase()===String(pt).toLowerCase();});
-      if(!hit) return null; c.pack_type=hit; delete c.packType; delete c.gtin; return c; }).filter(Boolean);
-    if(cc.length) p.case_configuration=cc; else delete p.case_configuration;
+    // carton set-up: always one explicit entry, from the Carton fields on the card
+    var cc={pack_type:n.cc_type||"Inner Carton"};
+    [["quantity","cc_qty"],["height","cc_h"],["width","cc_w"],["depth","cc_d"],["weight","cc_wt"]].forEach(function(k){ if(n[k[1]]!==undefined&&String(n[k[1]]).trim()!=="") cc[k[0]]=String(n[k[1]]).trim(); });
+    cc.weight_measurement_unit=n.cc_wu||"kg"; cc.dimension_measurement_unit=n.cc_du||"CM";
+    p.case_configuration=[cc];
     if(n.brand) p.brand=n.brand;
     if(n.net_weight){ p.weights_and_measures=Object.assign({},t.weights_and_measures||{}, {net_weight:String(n.net_weight)}); }
     if(n.mrp){ var m=(t.mrp&&t.mrp[0])?Object.assign({},t.mrp[0]):{target_market:"India",location:"India"}; m.mrp=String(n.mrp); m.activation_date=today(); p.mrp=[m]; }
     return p;
   }
+  function cartonOf(g){ var t=TPL[g]||{}, l=(products||[]).find(function(x){return String(x.gtin)===String(g);})||{};
+    var c=(Array.isArray(t.case_configuration)&&t.case_configuration[0])||(Array.isArray(l.case_configuration)&&l.case_configuration[0])||{};
+    var pt=c.pack_type||c.packType||c.type||"", PT=["Display Product","Inner Carton","Outer Carton","Pallet"];
+    return {cc_type:PT.find(function(x){return x.toLowerCase()===String(pt).toLowerCase();})||"Inner Carton",cc_qty:c.quantity!=null?String(c.quantity):"",cc_h:c.height!=null?String(c.height):"",cc_w:c.width!=null?String(c.width):"",cc_d:c.depth!=null?String(c.depth):"",cc_wt:c.weight!=null?String(c.weight):"",cc_wu:c.weight_measurement_unit||"kg",cc_du:c.dimension_measurement_unit||"CM"}; }
+  function fillCarton(n,force){ if(force||n.cc_type===undefined){ Object.assign(n,cartonOf(n.from)); saveLocal(); } }
   function drawAdd(){
     if(products===null){ $("view").innerHTML='<div class="card">Loading your products…</div>'; return api("list").then(function(r){ products=items(r.data); drawAdd(); }); }
     var need=NEW.map(function(n){return n.from;}).filter(function(g,i,a){return g&&!TPL[g]&&a.indexOf(g)===i;});
     if(need.length){ $("view").innerHTML='<div class="card">Loading the products to copy from…</div>'; return Promise.all(need.map(getTpl)).then(drawAdd); }
+    NEW.forEach(function(n){ fillCarton(n,false); });
     var opts=function(sel){ return (products||[]).map(function(p){ return '<option value="'+esc(p.gtin)+'"'+(String(p.gtin)===String(sel)?" selected":"")+'>'+esc(p.name||p.product_name)+' · '+esc(p.gtin)+'</option>'; }).join(""); };
     var have=(products||[]).map(function(p){return String(p.gtin);});
     var h='<div class="card"><h2>New products — each is a copy of an existing product</h2><div class="hint">Everything (category, HS code, GST, packaging, sizes, attributes) is copied from the product you choose. You change only the barcode, name, weight, MRP and photos. Name and brand can NOT be changed later.</div></div>';
@@ -155,6 +160,12 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
         (have.indexOf(n.gtin)>=0?'<div style="color:#c0392b;font-weight:700;margin-top:6px">⚠ This GTIN is already in DataKart — change it or remove this product.</div>':'')+
         '<div class="row"><div><label>Net weight</label><input data-i="'+i+'" data-k="net_weight" value="'+esc(n.net_weight)+'" inputmode="decimal"></div><div><label>MRP ₹</label><input data-i="'+i+'" data-k="mrp" value="'+esc(n.mrp)+'" inputmode="decimal"></div><div><label>Brand (blank = same)</label><input data-i="'+i+'" data-k="brand" value="'+esc(n.brand||"")+'"></div></div>'+
         '<label>Description</label><input data-i="'+i+'" data-k="product_description" value="'+esc(n.product_description)+'">'+
+        '<label style="margin-top:10px">Carton (case configuration)</label><div class="row">'+
+          '<div><label>Pack type</label><select data-i="'+i+'" data-k="cc_type">'+["Inner Carton","Outer Carton","Display Product","Pallet"].map(function(o){return '<option'+(n.cc_type===o?" selected":"")+'>'+o+'</option>';}).join("")+'</select></div>'+
+          '<div><label>Packs per carton</label><input data-i="'+i+'" data-k="cc_qty" value="'+esc(n.cc_qty)+'" inputmode="numeric"></div>'+
+          '<div><label>H × W × D ('+esc(n.cc_du||"CM")+')</label><div class="row" style="gap:4px"><input data-i="'+i+'" data-k="cc_h" value="'+esc(n.cc_h)+'" style="min-width:50px"><input data-i="'+i+'" data-k="cc_w" value="'+esc(n.cc_w)+'" style="min-width:50px"><input data-i="'+i+'" data-k="cc_d" value="'+esc(n.cc_d)+'" style="min-width:50px"></div></div>'+
+          '<div><label>Weight ('+esc(n.cc_wu||"kg")+')</label><input data-i="'+i+'" data-k="cc_wt" value="'+esc(n.cc_wt)+'" inputmode="decimal"></div></div>'+
+          '<div class="hint">Filled in from the product you copied — change if this pack is different.</div>'+
         '<label style="margin-top:10px">Pack photos — front and back are needed for approval</label>'+tiles(n.id)+
         '<label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" data-i="'+i+'" data-k="nameChecked" style="width:20px"'+(n.nameChecked?" checked":"")+'> Name checked — final spelling</label></div>'; }).join("");
     h+='<div class="card"><div class="row"><select id="cloneSel">'+opts("8901226005614")+'</select><button class="btn" id="addRow">+ Add a copy of this product</button></div></div>';
@@ -165,7 +176,7 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
     $("view").innerHTML=h;
     wireTiles(drawAdd);
     document.querySelectorAll("[data-k]").forEach(function(e){ e.oninput=e.onchange=function(){ var n=NEW[+e.dataset.i]; n[e.dataset.k]=e.type==="checkbox"?e.checked:e.value; saveLocal(); }; });
-    document.querySelectorAll("[data-from]").forEach(function(e){ e.onchange=function(){ NEW[+e.dataset.from].from=e.value; saveLocal(); drawAdd(); }; });
+    document.querySelectorAll("[data-from]").forEach(function(e){ e.onchange=function(){ var n=NEW[+e.dataset.from]; n.from=e.value; saveLocal(); getTpl(e.value).then(function(){ fillCarton(n,true); drawAdd(); }); }; });
     document.querySelectorAll("[data-c]").forEach(function(e){ e.oninput=function(){ CONTACT[e.dataset.c]=e.value; saveLocal(); }; });
     document.querySelectorAll("[data-rm]").forEach(function(b){ b.onclick=function(){ if(confirm("Remove this product?")){ var n=NEW.splice(+b.dataset.rm,1)[0]; SLOTS.forEach(function(s){ imgPut(n.id+":"+s[0],null); }); delete IMG[n.id]; saveLocal(); drawAdd(); } }; });
     $("addRow").onclick=function(){ var p=(products||[]).find(function(x){return String(x.gtin)===$("cloneSel").value;}); if(p){ cloneFrom(p); drawAdd(); } };
