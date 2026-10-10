@@ -164,8 +164,12 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
     $("prev").onclick=function(){ $("out").innerHTML='<pre>'+esc(JSON.stringify(NEW.map(function(n){ var p=build(n); p.photos=Object.keys(IMG[n.id]||{}); return p; }),null,2))+'</pre>'; };
     $("val").onclick=function(){ $("out").textContent="Checking…"; Promise.all(NEW.map(function(n){ return api("validate",{gtin:n.gtin}).then(function(r){ return n.gtin+": "+(r.ok?"✓ "+JSON.stringify((r.data&&r.data.data&&r.data.data[0]&&r.data.data[0].gtinRecordStatus)||r.data&&r.data.message||"ok"):"✗ "+r.status+" "+JSON.stringify(r.data).slice(0,200)); }); })).then(function(a){ $("out").innerHTML='<pre>'+esc(a.join("\n"))+'</pre>'; }); };
     $("send").onclick=function(){
-      var bad=NEW.filter(function(n){return !/^\d{13}$/.test(n.gtin)||!n.product_name.trim()||!n.nameChecked||!TPL[n.from];});
-      if(bad.length) return alert("Each product needs a 13-digit GTIN, a name, a product to copy from, and “name checked” ticked.");
+      var probs=[];
+      NEW.forEach(function(n,i){ var why=[];
+        if(!/^\d{13}$/.test(n.gtin)) why.push("13-digit barcode"); if(!n.product_name.trim()) why.push("name");
+        if(!TPL[n.from]) why.push("a product to copy from"); if(!n.nameChecked) why.push("tick “Name checked”");
+        if(why.length) probs.push((n.product_name||"Product "+(i+1))+": needs "+why.join(", ")); });
+      if(probs.length) return alert(probs.join("\n")+"\n\nFix these, or tap × to remove a product you don't want to send now.");
       var dup=NEW.filter(function(n){return have.indexOf(n.gtin)>=0;});
       if(dup.length) return alert("Already in DataKart — change or remove:\n"+dup.map(function(n){return n.gtin+"  "+n.product_name;}).join("\n"));
       var noPic=NEW.filter(function(n){ var m=IMG[n.id]||{}; return !m.front||!m.back; });
