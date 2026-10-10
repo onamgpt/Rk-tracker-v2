@@ -124,8 +124,11 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
 
   function build(n){
     var t=JSON.parse(JSON.stringify(TPL[n.from]||{}));
-    ["digital_link","barcode_url","qrcode_url","status","gcp","images","product_url","video_url","alt_sku_code","deactivation_date"].forEach(function(k){delete t[k];});
-    var p=Object.assign(t,CONTACT,{gtin:n.gtin,product_name:n.product_name.trim(),product_description:(n.product_description||n.product_name).trim(),sku_id:n.gtin.slice(-6),activation_date:today()});
+    var deact=String(t.deactivation_date||"").slice(0,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(deact)||deact<=today()){ var d10=new Date(); d10.setFullYear(d10.getFullYear()+10); deact=d10.toISOString().slice(0,10); }
+    ["digital_link","barcode_url","qrcode_url","status","gcp","images"].forEach(function(k){delete t[k];});
+    var p=Object.assign(t,CONTACT,{gtin:n.gtin,product_name:n.product_name.trim(),product_description:(n.product_description||n.product_name).trim(),sku_id:n.gtin.slice(-6),
+      activation_date:today(),deactivation_date:deact,product_url:"",video_url:"",alt_sku_code:""});
     if(n.brand) p.brand=n.brand;
     if(n.net_weight){ p.weights_and_measures=Object.assign({},t.weights_and_measures||{}, {net_weight:String(n.net_weight)}); }
     if(n.mrp){ var m=(t.mrp&&t.mrp[0])?Object.assign({},t.mrp[0]):{target_market:"India",location:"India"}; m.mrp=String(n.mrp); m.activation_date=today(); p.mrp=[m]; }
