@@ -124,8 +124,7 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
 
   function build(n){
     var t=JSON.parse(JSON.stringify(TPL[n.from]||{}));
-    var deact=String(t.deactivation_date||"").slice(0,10);
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(deact)||deact<=today()){ var d10=new Date(); d10.setFullYear(d10.getFullYear()+10); deact=d10.toISOString().slice(0,10); }
+    var deact="2099-01-01";   // Ravi's standard end date
     ["digital_link","barcode_url","qrcode_url","status","gcp","images"].forEach(function(k){delete t[k];});
     var p=Object.assign(t,CONTACT,{gtin:n.gtin,product_name:n.product_name.trim(),product_description:(n.product_description||n.product_name).trim(),sku_id:n.gtin.slice(-6),
       activation_date:today(),deactivation_date:deact,product_url:"",video_url:"",alt_sku_code:""});
