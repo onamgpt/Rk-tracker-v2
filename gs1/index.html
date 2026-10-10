@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>GS1 DataKart · Onam</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f4f6f8;color:#1b2430;font:15px/1.45 -apple-system,"Segoe UI",Roboto,sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+header{background:#002c6c;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+header h1{margin:0;font-size:18px;flex:1}
+header a{color:#cfe0ff;font-size:13px;text-decoration:none;border:1px solid #3b5c94;border-radius:8px;padding:5px 9px}
+#st{font-size:12px;padding:3px 8px;border-radius:10px;background:#5a6b85}
+#st.ok{background:#1e8e5a}#st.bad{background:#c0392b}
+.wrap{max-width:900px;margin:0 auto;padding:12px}
+.tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.tabs button{padding:9px 14px;border-radius:9px;border:1px solid #c9d2dc;background:#fff;font-weight:600;font-size:14px;cursor:pointer}
+.tabs button.on{background:#002c6c;color:#fff;border-color:#002c6c}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.card h2{font-size:14px;margin:0 0 10px;color:#002c6c;text-transform:uppercase;letter-spacing:.3px}
+label{display:block;font-size:12.5px;color:#5a6676;margin:8px 0 3px}
+input,select,textarea{width:100%;font:inherit;padding:9px;border:1px solid #c9d2dc;border-radius:8px;background:#fff}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1;min-width:140px}
+.btn{padding:10px 14px;border-radius:9px;border:1px solid #c9d2dc;background:#fff;font-weight:700;cursor:pointer;font-size:14px}
+.pri{background:#002c6c;color:#fff;border-color:#002c6c}.go{background:#1e8e5a;color:#fff;border-color:#1e8e5a}.warn{background:#f39c12;color:#2b1a00;border-color:#f39c12}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+td,th{padding:7px 6px;border-bottom:1px solid #edf0f3;text-align:left;vertical-align:top}
+th{font-size:12px;color:#5a6676}
+tr.click{cursor:pointer}tr.click:hover{background:#f6f9ff}
+.tag{font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:9px;background:#eef2f7}
+.tag.g{background:#e3f6ec;color:#11704a}.tag.a{background:#fff1dc;color:#8a4b00}
+pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12px;max-height:360px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.np{border:1px solid #dfe5ec;border-radius:10px;padding:10px;margin-bottom:10px;background:#fbfcfd}
+.np .x{float:right;border:none;background:none;color:#c0392b;font-size:18px;cursor:pointer}
+.hint{font-size:12.5px;color:#6b7686}
+.msg{margin-top:8px;font-size:13.5px}
+.pin{max-width:320px;margin:15vh auto;text-align:center}
+.pin input{font-size:26px;text-align:center;letter-spacing:8px;margin:12px 0}
+</style>
+</head>
+<body>
+<div id="pinBox" class="pin" style="display:none">
+  <div style="font-size:34px">🏷️</div><h2 style="margin:6px 0">GS1 DataKart</h2>
+  <div class="hint">Enter your tracker PIN</div>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off">
+  <button class="btn pri" id="pinGo" style="width:100%">Open</button>
+  <div id="pinErr" style="color:#c0392b;margin-top:10px"></div>
+</div>
+<div id="app" style="display:none">
+<header><h1>🏷️ GS1 DataKart · Onam (8901226)</h1><span id="st">…</span><a href="/">Tracker</a></header>
+<div class="wrap">
+  <div class="tabs"><button data-t="list" class="on">📋 My products</button><button data-t="add">➕ Add products</button><button data-t="codes">🔳 Official barcodes</button><button data-t="log">🧾 Activity</button></div>
+  <div id="view"></div>
+</div>
+</div>
+<script>
+(function(){
+  var $=function(i){return document.getElementById(i);};
+  var pin=localStorage.getItem("gs1_pin")||"", tab="list", products=null, template=null, cats=null;
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function today(){return new Date().toISOString().slice(0,10);}
+  function api(action,extra){ return fetch("/.netlify/functions/gs1",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action:action,pin:pin},extra||{}))}).then(function(r){return r.json();}); }
+  function status(ok,t){ var e=$("st"); e.className=ok?"ok":"bad"; e.textContent=t; }
+
+  // ---------- new products: pre-filled from the barcode register ----------
+  var REG=[["8901226005614","Kesar Chandan Bambooless"],["8901226005621","Golden Buddha Bambooless"],["8901226005638","Vismaya Lavender Bambooless"],["8901226005645","Jasmine Bambooless"]];
+  var NEW; try{ NEW=JSON.parse(localStorage.getItem("gs1_new")); }catch(e){}
+  if(!NEW) NEW=REG.map(function(r){return {gtin:r[0],product_name:r[1],product_description:"",net_weight:"",mrp:"",nameChecked:false};});
+  var CONTACT; try{ CONTACT=JSON.parse(localStorage.getItem("gs1_contact")); }catch(e){}
+  if(!CONTACT) CONTACT={contact_country:"India",contact_state:"Karnataka",contact_district:"Bengaluru Urban",contact_city:"Bengaluru",contact_person:"Ravikiran Karapakala",contact_email:"onamagarbathi@gmail.com",contact_no:"",contact_address:"35/36-70/71, N S Palya, Bannerghatta Road, Bengaluru 560076"};
+  function saveLocal(){ try{ localStorage.setItem("gs1_new",JSON.stringify(NEW)); localStorage.setItem("gs1_contact",JSON.stringify(CONTACT)); }catch(e){} }
+
+  function items(d){ if(!d) return []; if(Array.isArray(d.items)) return d.items; if(d.data&&Array.isArray(d.data.items)) return d.data.items; if(Array.isArray(d.data)) return d.data; return []; }
+  function loadList(){
+    $("view").innerHTML='<div class="card">Loading your products from GS1…</div>';
+    return api("list").then(function(r){
+      if(r.error==="pin"){ return lock("Wrong PIN"); }
+      if(!r.ok){ status(false,"GS1 error "+r.status); $("view").innerHTML='<div class="card"><b>GS1 replied with an error ('+r.status+').</b><pre>'+esc(JSON.stringify(r.data,null,2))+'</pre><div class="hint">Send me a screenshot of this box.</div></div>'; return; }
+      status(true,"connected"); products=items(r.data); draw();
+    }).catch(function(){ status(false,"offline"); $("view").innerHTML='<div class="card">Could not reach the tracker — check internet.</div>'; });
+  }
+  function draw(){
+    document.querySelectorAll(".tabs button").forEach(function(b){b.classList.toggle("on",b.dataset.t===tab);});
+    if(tab==="list") return drawList();
+    if(tab==="add") return drawAdd();
+    if(tab==="codes") return drawCodes();
+    if(tab==="log") return drawLog();
+  }
+  function drawList(){
+    if(products===null) return loadList();
+    var h='<div class="card"><h2>Products in DataKart ('+products.length+')</h2>'+
+      (products.length?'<table><tr><th>Product</th><th>GTIN</th><th>Net</th><th>MRP</th><th>Status</th></tr>'+products.map(function(p,i){
+        var w=p.weights_and_measures||{}, m=(p.mrp&&p.mrp[0])||{};
+        return '<tr class="click" data-i="'+i+'"><td><b>'+esc(p.name||p.product_name)+'</b><br><span class="hint">'+esc(p.brand||"")+(p.category?" · "+esc(p.category):"")+'</span></td><td>'+esc(p.gtin)+'</td><td>'+esc(w.net_weight||"")+' '+esc(w.measurement_unit||"")+'</td><td>'+(m.mrp?"₹"+esc(m.mrp):"")+'</td><td><span class="tag '+(/publish|active|yes|true/i.test(String(p.published||p.type||""))?"g":"a")+'">'+esc(p.published||p.notification||p.type||"—")+'</span></td></tr>';
+      }).join("")+'</table>':'<div class="hint">No products came back for prefix 8901226.</div>')+
+      '<div class="row" style="margin-top:10px"><button class="btn" id="reload">↻ Refresh</button></div></div><div id="det"></div>';
+    $("view").innerHTML=h;
+    $("reload").onclick=function(){ products=null; drawList(); };
+    document.querySelectorAll("tr.click").forEach(function(tr){ tr.onclick=function(){ var p=products[+tr.dataset.i]; showDetails(String(p.gtin)); }; });
+  }
+  function showDetails(gtin){
+    $("det").innerHTML='<div class="card">Loading full details for '+esc(gtin)+'…</div>';
+    api("details",{gtins:[gtin]}).then(function(r){
+      var d=(r.data&&Array.isArray(r.data.data))?r.data.data[0]:null;
+      $("det").innerHTML='<div class="card"><h2>'+esc(d?d.product_name:gtin)+'</h2>'+(d?'<button class="btn go" id="useT">Use as template for new products</button> ':'')+
+        '<pre>'+esc(JSON.stringify(d||r.data,null,2))+'</pre></div>';
+      if(d) $("useT").onclick=function(){ template=d; try{localStorage.setItem("gs1_template",JSON.stringify(d));}catch(e){} tab="add"; draw(); window.scrollTo(0,0); };
+    });
+  }
+
+  function build(n){
+    var t=JSON.parse(JSON.stringify(template||{}));
+    ["digital_link","barcode_url","qrcode_url","status","gcp","images","product_url","video_url","alt_sku_code","deactivation_date"].forEach(function(k){delete t[k];});
+    var p=Object.assign(t,CONTACT,{gtin:n.gtin,product_name:n.product_name.trim(),product_description:(n.product_description||n.product_name).trim(),sku_id:n.gtin.slice(-6),activation_date:today()});
+    if(n.brand) p.brand=n.brand;
+    if(n.net_weight){ p.weights_and_measures=Object.assign({},t.weights_and_measures||{}, {net_weight:String(n.net_weight)}); }
+    if(n.mrp){ var m=(t.mrp&&t.mrp[0])?Object.assign({},t.mrp[0]):{target_market:"India",location:"India"}; m.mrp=String(n.mrp); m.activation_date=today(); p.mrp=[m]; }
+    return p;
+  }
+  function drawAdd(){
+    if(!template){ try{ template=JSON.parse(localStorage.getItem("gs1_template")); }catch(e){} }
+    var h='<div class="card"><h2>1 · Template</h2>'+(template?'Copying category, HS code, GST, packaging, sizes from <b>'+esc(template.product_name)+'</b> ('+esc(template.gtin)+'). <button class="btn" id="chT">Change</button>':
+      '<div class="hint">Open <b>My products</b>, tap an existing product similar to the new ones (e.g. a Bambooless or Vamana pack) and tap <b>Use as template</b>.</div>')+'</div>';
+    h+='<div class="card"><h2>2 · New products</h2><div class="hint">Name and brand can NOT be changed after creation — tick “name checked” only when the spelling is final.</div>'+
+      NEW.map(function(n,i){ return '<div class="np"><button class="x" data-rm="'+i+'">×</button>'+
+        '<div class="row"><div><label>GTIN (barcode)</label><input data-i="'+i+'" data-k="gtin" value="'+esc(n.gtin)+'" inputmode="numeric"></div><div style="flex:2"><label>Product name (final)</label><input data-i="'+i+'" data-k="product_name" value="'+esc(n.product_name)+'"></div></div>'+
+        '<div class="row"><div><label>Net weight (same unit as template)</label><input data-i="'+i+'" data-k="net_weight" value="'+esc(n.net_weight)+'" inputmode="decimal"></div><div><label>MRP ₹</label><input data-i="'+i+'" data-k="mrp" value="'+esc(n.mrp)+'" inputmode="decimal"></div><div><label>Brand (blank = template)</label><input data-i="'+i+'" data-k="brand" value="'+esc(n.brand||"")+'"></div></div>'+
+        '<label>Description</label><input data-i="'+i+'" data-k="product_description" value="'+esc(n.product_description)+'" placeholder="e.g. Kesar Chandan bambooless incense sticks">'+
+        '<label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" data-i="'+i+'" data-k="nameChecked" style="width:20px"'+(n.nameChecked?" checked":"")+'> Name checked — final spelling</label></div>'; }).join("")+
+      '<button class="btn" id="addRow">+ Another product</button></div>';
+    h+='<div class="card"><h2>3 · Company contact (sent with each product)</h2><div class="row">'+Object.keys(CONTACT).map(function(k){return '<div><label>'+esc(k.replace("contact_","").replace("_"," "))+'</label><input data-c="'+k+'" value="'+esc(CONTACT[k])+'"></div>';}).join("")+'</div></div>';
+    h+='<div class="card"><h2>4 · Check & send</h2><div class="row"><button class="btn" id="prev">👁 Preview what will be sent</button><button class="btn" id="val">✔ Check GTINs with GS1</button></div>'+
+      '<div class="row" style="margin-top:10px"><button class="btn go" id="send">📤 Send to GS1 as DRAFT</button></div>'+
+      '<div class="hint" style="margin-top:6px">Drafts are not published. Review them in DataKart and submit there, or tell Claude to submit.</div><div id="out" class="msg"></div></div>';
+    $("view").innerHTML=h;
+    if($("chT")) $("chT").onclick=function(){ tab="list"; draw(); };
+    document.querySelectorAll("[data-k]").forEach(function(e){ e.oninput=e.onchange=function(){ var n=NEW[+e.dataset.i]; n[e.dataset.k]=e.type==="checkbox"?e.checked:e.value; saveLocal(); }; });
+    document.querySelectorAll("[data-c]").forEach(function(e){ e.oninput=function(){ CONTACT[e.dataset.c]=e.value; saveLocal(); }; });
+    document.querySelectorAll("[data-rm]").forEach(function(b){ b.onclick=function(){ if(confirm("Remove this row?")){ NEW.splice(+b.dataset.rm,1); saveLocal(); drawAdd(); } }; });
+    $("addRow").onclick=function(){ NEW.push({gtin:"",product_name:"",product_description:"",net_weight:"",mrp:"",nameChecked:false}); saveLocal(); drawAdd(); };
+    $("prev").onclick=function(){ $("out").innerHTML='<pre>'+esc(JSON.stringify(NEW.map(build),null,2))+'</pre>'; };
+    $("val").onclick=function(){ $("out").textContent="Checking…"; Promise.all(NEW.map(function(n){ return api("validate",{gtin:n.gtin}).then(function(r){ return n.gtin+": "+(r.ok?"✓ "+JSON.stringify((r.data&&r.data.data&&r.data.data[0]&&r.data.data[0].gtinRecordStatus)||r.data&&r.data.message||"ok"):"✗ "+r.status+" "+JSON.stringify(r.data).slice(0,200)); }); })).then(function(a){ $("out").innerHTML='<pre>'+esc(a.join("\n"))+'</pre>'; }); };
+    $("send").onclick=function(){
+      if(!template) return alert("Pick a template product first (My products → tap a product → Use as template).");
+      var bad=NEW.filter(function(n){return !/^\d{13}$/.test(n.gtin)||!n.product_name.trim()||!n.nameChecked;});
+      if(bad.length) return alert("Each product needs a 13-digit GTIN, a name, and “name checked” ticked.");
+      if(!confirm("Send "+NEW.length+" product(s) to GS1 DataKart as DRAFT?\n\n"+NEW.map(function(n){return n.gtin+"  "+n.product_name;}).join("\n"))) return;
+      $("out").textContent="Sending…";
+      api("create",{products:NEW.map(build)}).then(function(r){ $("out").innerHTML='<b>'+(r.ok?"✅ GS1 accepted the request":"❌ GS1 replied with an error ("+r.status+")")+'</b><pre>'+esc(JSON.stringify(r.data,null,2))+'</pre>'+(r.ok?'':'<div class="hint">Send Claude a screenshot of this box.</div>'); if(r.ok) products=null; });
+    };
+  }
+  function drawCodes(){
+    $("view").innerHTML='<div class="card"><h2>Official barcode from GS1</h2><div class="hint">Works only for products that are PUBLISHED in DataKart.</div>'+
+      '<div class="row"><div><label>GTIN</label><input id="cg" inputmode="numeric" value="'+esc((NEW[0]||{}).gtin||"")+'"></div><div><label>Type</label><select id="ct"><option value="barcode">1D barcode (EAN)</option><option value="qrcode">QR code (Digital Link)</option></select></div><div><label>Format</label><select id="cf"><option>PNG</option><option>PDF</option></select></div></div>'+
+      '<button class="btn pri" id="cget" style="margin-top:10px">Download</button><div id="cout" class="msg"></div></div>';
+    $("cget").onclick=function(){ $("cout").textContent="Fetching…"; api("barcode",{gtin:$("cg").value.trim(),type:$("ct").value,format:$("cf").value}).then(function(r){
+      if(r.file){ var a=document.createElement("a"); a.href="data:"+r.file.type+";base64,"+r.file.data; a.download="GS1_"+$("cg").value.trim()+"_"+$("ct").value+"."+($("cf").value==="PDF"?"pdf":"png"); a.click(); $("cout").textContent="✓ Downloaded"; }
+      else $("cout").innerHTML='<pre>'+esc(JSON.stringify(r.data||r,null,2))+'</pre>'; }); };
+  }
+  function drawLog(){
+    $("view").innerHTML='<div class="card">Loading…</div>';
+    api("log").then(function(r){ var l=r.log||[]; $("view").innerHTML='<div class="card"><h2>Activity sent to GS1</h2>'+(l.length?l.map(function(x){return '<div style="border-bottom:1px solid #eee;padding:8px 0"><b>'+esc(new Date(x.at).toLocaleString("en-IN"))+'</b> · '+esc(x.action)+' · '+(x.ok?"✅":"❌ "+x.status)+'<br><span class="hint">'+esc((x.gtins||[]).join(", "))+'</span></div>';}).join(""):'<div class="hint">Nothing sent yet.</div>')+'</div>'; });
+  }
+  document.querySelectorAll(".tabs button").forEach(function(b){ b.onclick=function(){ tab=b.dataset.t; draw(); }; });
+
+  function lock(err){ localStorage.removeItem("gs1_pin"); $("app").style.display="none"; $("pinBox").style.display=""; $("pinErr").textContent=err||""; }
+  function start(){
+    api("log").then(function(r){
+      if(r.error==="nopin") return lock("Set a PIN for 'main' first: Tracker → Menu → 🔒 PIN Access.");
+      if(r.error==="pin") return lock(pin?"Wrong PIN":"");
+      localStorage.setItem("gs1_pin",pin); $("pinBox").style.display="none"; $("app").style.display=""; draw();
+    }).catch(function(){ lock("No internet — try again"); });
+  }
+  $("pinGo").onclick=function(){ pin=$("pin").value.trim(); if(pin) start(); };
+  $("pin").addEventListener("keydown",function(e){ if(e.key==="Enter") $("pinGo").click(); });
+  if(pin) start(); else lock("");
+})();
+</script>
+</body>
+</html>
