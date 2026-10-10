@@ -92,7 +92,7 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
     var h='<div class="card"><h2>Products in DataKart ('+products.length+')</h2>'+
       (products.length?'<table><tr><th>Product</th><th>GTIN</th><th>Net</th><th>MRP</th><th>Status</th></tr>'+products.map(function(p,i){
         var w=p.weights_and_measures||{}, m=(p.mrp&&p.mrp[0])||{};
-        return '<tr class="click" data-i="'+i+'"><td><b>'+esc(p.name||p.product_name)+'</b><br><span class="hint">'+esc(p.brand||"")+(p.category?" · "+esc(p.category):"")+'</span></td><td>'+esc(p.gtin)+'</td><td>'+esc(w.net_weight||"")+' '+esc(w.measurement_unit||"")+'</td><td>'+(m.mrp?"₹"+esc(m.mrp):"")+'</td><td><span class="tag '+(/publish|active|yes|true/i.test(String(p.published||p.type||""))?"g":"a")+'">'+esc(p.published||p.notification||p.type||"—")+'</span></td></tr>';
+        return '<tr class="click" data-i="'+i+'"><td><b>'+esc(p.name||p.product_name)+'</b><br><span class="hint">'+esc(p.brand||"")+(p.category?" · "+esc(p.category):"")+'</span></td><td>'+esc(p.gtin)+'</td><td>'+esc(w.net_weight||"")+' '+esc(w.measurement_unit||"")+'</td><td>'+(m.mrp?"₹"+esc(m.mrp):"")+'</td><td>'+(p.published&&/\d{4}-\d{2}-\d{2}/.test(String(p.published))?'<span class="tag g">Published '+esc(String(p.published).slice(0,10))+'</span>':'<span class="tag a">'+esc(p.published||"Not published")+'</span>')+(p.type?' <span class="tag">'+esc(p.type)+'</span>':'')+'</td></tr>';
       }).join("")+'</table>':'<div class="hint">No products came back for prefix 8901226.</div>')+
       '<div class="row" style="margin-top:10px"><button class="btn" id="reload">↻ Refresh</button></div></div><div id="det"></div>';
     $("view").innerHTML=h;
@@ -127,7 +127,7 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
         '<div class="row"><div><label>GTIN (barcode)</label><input data-i="'+i+'" data-k="gtin" value="'+esc(n.gtin)+'" inputmode="numeric"></div><div style="flex:2"><label>Product name (final)</label><input data-i="'+i+'" data-k="product_name" value="'+esc(n.product_name)+'"></div></div>'+
         '<div class="row"><div><label>Net weight (same unit as template)</label><input data-i="'+i+'" data-k="net_weight" value="'+esc(n.net_weight)+'" inputmode="decimal"></div><div><label>MRP ₹</label><input data-i="'+i+'" data-k="mrp" value="'+esc(n.mrp)+'" inputmode="decimal"></div><div><label>Brand (blank = template)</label><input data-i="'+i+'" data-k="brand" value="'+esc(n.brand||"")+'"></div></div>'+
         '<label>Description</label><input data-i="'+i+'" data-k="product_description" value="'+esc(n.product_description)+'" placeholder="e.g. Kesar Chandan bambooless incense sticks">'+
-        '<label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" data-i="'+i+'" data-k="nameChecked" style="width:20px"'+(n.nameChecked?" checked":"")+'> Name checked — final spelling</label></div>'; }).join("")+
+        ((products||[]).some(function(p){return String(p.gtin)===n.gtin;})?'<div style="color:#c0392b;font-weight:700;margin-top:6px">⚠ This GTIN is already in DataKart — remove this row.</div>':'')+'<label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" data-i="'+i+'" data-k="nameChecked" style="width:20px"'+(n.nameChecked?" checked":"")+'> Name checked — final spelling</label></div>'; }).join("")+
       '<button class="btn" id="addRow">+ Another product</button></div>';
     h+='<div class="card"><h2>3 · Company contact (sent with each product)</h2><div class="row">'+Object.keys(CONTACT).map(function(k){return '<div><label>'+esc(k.replace("contact_","").replace("_"," "))+'</label><input data-c="'+k+'" value="'+esc(CONTACT[k])+'"></div>';}).join("")+'</div></div>';
     h+='<div class="card"><h2>4 · Check & send</h2><div class="row"><button class="btn" id="prev">👁 Preview what will be sent</button><button class="btn" id="val">✔ Check GTINs with GS1</button></div>'+
@@ -145,6 +145,8 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
       if(!template) return alert("Pick a template product first (My products → tap a product → Use as template).");
       var bad=NEW.filter(function(n){return !/^\d{13}$/.test(n.gtin)||!n.product_name.trim()||!n.nameChecked;});
       if(bad.length) return alert("Each product needs a 13-digit GTIN, a name, and “name checked” ticked.");
+      var have=(products||[]).map(function(p){return String(p.gtin);}), dup=NEW.filter(function(n){return have.indexOf(n.gtin)>=0;});
+      if(dup.length) return alert("Already in DataKart — remove these rows first:\n"+dup.map(function(n){return n.gtin+"  "+n.product_name;}).join("\n"));
       if(!confirm("Send "+NEW.length+" product(s) to GS1 DataKart as DRAFT?\n\n"+NEW.map(function(n){return n.gtin+"  "+n.product_name;}).join("\n"))) return;
       $("out").textContent="Sending…";
       api("create",{products:NEW.map(build)}).then(function(r){ $("out").innerHTML='<b>'+(r.ok?"✅ GS1 accepted the request":"❌ GS1 replied with an error ("+r.status+")")+'</b><pre>'+esc(JSON.stringify(r.data,null,2))+'</pre>'+(r.ok?'':'<div class="hint">Send Claude a screenshot of this box.</div>'); if(r.ok) products=null; });

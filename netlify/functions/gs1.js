@@ -38,9 +38,16 @@ exports.handler = async (event) => {
   if (!b.pin || pins.main !== hash(String(b.pin))) return OK({ error: "pin" });
   try {
     switch (b.action) {
-      case "list": {   // all Onam products in DataKart
-        const r = await gs1("POST", "/console/products", { gcp: [GCP], page: Number(b.page) || 1 });
-        return OK({ ok: r.ok, status: r.status, data: r.json || r.text || r.error });
+      case "list": {   // all Onam products in DataKart — every page
+        let all = [], page = 1, total = 1, first = null;
+        do {
+          const r = await gs1("POST", "/console/products", { gcp: [GCP], page });
+          if (!r.ok) return OK({ ok: false, status: r.status, data: r.json || r.text || r.error });
+          first = first || r.json;
+          const j = r.json || {}; all = all.concat(j.items || []);
+          total = (j.pageInfo && j.pageInfo.totalPage) || 1; page++;
+        } while (page <= total && page <= 20);
+        return OK({ ok: true, status: 200, data: { items: all, pageInfo: first && first.pageInfo } });
       }
       case "details": {
         const r = await gs1("POST", "/console/products/details/bulk", { gtins: (b.gtins || []).slice(0, 25).map(String) });
