@@ -128,6 +128,12 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
     ["digital_link","barcode_url","qrcode_url","status","gcp","images"].forEach(function(k){delete t[k];});
     var p=Object.assign(t,CONTACT,{gtin:n.gtin,product_name:n.product_name.trim(),product_description:(n.product_description||n.product_name).trim(),sku_id:n.gtin.slice(-6),
       activation_date:today(),deactivation_date:deact,product_url:"",video_url:"",alt_sku_code:""});
+    // carton set-up: keep only complete entries (GS1 rejects ones without a pack type)
+    var PT=["Display Product","Inner Carton","Outer Carton","Pallet"];
+    var cc=(Array.isArray(p.case_configuration)?p.case_configuration:[]).map(function(c){ c=Object.assign({},c||{});
+      var pt=c.pack_type||c.packType||c.type||c.packaging_type||""; var hit=PT.find(function(x){return x.toLowerCase()===String(pt).toLowerCase();});
+      if(!hit) return null; c.pack_type=hit; delete c.packType; delete c.gtin; return c; }).filter(Boolean);
+    if(cc.length) p.case_configuration=cc; else delete p.case_configuration;
     if(n.brand) p.brand=n.brand;
     if(n.net_weight){ p.weights_and_measures=Object.assign({},t.weights_and_measures||{}, {net_weight:String(n.net_weight)}); }
     if(n.mrp){ var m=(t.mrp&&t.mrp[0])?Object.assign({},t.mrp[0]):{target_market:"India",location:"India"}; m.mrp=String(n.mrp); m.activation_date=today(); p.mrp=[m]; }
