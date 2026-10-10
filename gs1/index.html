@@ -76,7 +76,7 @@ pre{background:#0f1720;color:#d6e2f0;padding:10px;border-radius:8px;font-size:12
     $("view").innerHTML='<div class="card">Loading your products from GS1…</div>';
     return api("list").then(function(r){
       if(r.error==="pin"){ return lock("Wrong PIN"); }
-      if(!r.ok){ status(false,"GS1 error "+r.status); $("view").innerHTML='<div class="card"><b>GS1 replied with an error ('+r.status+').</b><pre>'+esc(JSON.stringify(r.data,null,2))+'</pre><div class="hint">Send me a screenshot of this box.</div></div>'; return; }
+      if(!r.ok){ status(false,"GS1 error "+r.status); $("view").innerHTML='<div class="card"><b>GS1 replied with an error ('+r.status+').</b><pre>'+esc(JSON.stringify(r.data||r.error||r,null,2))+'</pre><div class="hint">Send me a screenshot of this box.</div></div>'; return; }
       status(true,"connected"); products=items(r.data); draw();
     }).catch(function(){ status(false,"offline"); $("view").innerHTML='<div class="card">Could not reach the tracker — check internet.</div>'; });
   }

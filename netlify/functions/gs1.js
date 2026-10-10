@@ -40,27 +40,27 @@ exports.handler = async (event) => {
     switch (b.action) {
       case "list": {   // all Onam products in DataKart
         const r = await gs1("POST", "/console/products", { gcp: [GCP], page: Number(b.page) || 1 });
-        return OK({ ok: r.ok, status: r.status, data: r.json || r.text });
+        return OK({ ok: r.ok, status: r.status, data: r.json || r.text || r.error });
       }
       case "details": {
         const r = await gs1("POST", "/console/products/details/bulk", { gtins: (b.gtins || []).slice(0, 25).map(String) });
-        return OK({ ok: r.ok, status: r.status, data: r.json || r.text });
+        return OK({ ok: r.ok, status: r.status, data: r.json || r.text || r.error });
       }
       case "categories": {
         const r = await gs1("GET", "/console/category", null, b.category_id ? { category_id: b.category_id } : null);
-        return OK({ ok: r.ok, status: r.status, data: r.json || r.text });
+        return OK({ ok: r.ok, status: r.status, data: r.json || r.text || r.error });
       }
       case "attributes": {
         const r = await gs1("GET", "/console/products/attributes", null, { category: b.category, sub_category: b.sub_category });
-        return OK({ ok: r.ok, status: r.status, data: r.json || r.text });
+        return OK({ ok: r.ok, status: r.status, data: r.json || r.text || r.error });
       }
       case "hscodes": {
         const r = await gs1("GET", "/console/products/hscodes", null, { search: b.search || "3307", limit: 20 });
-        return OK({ ok: r.ok, status: r.status, data: r.json || r.text });
+        return OK({ ok: r.ok, status: r.status, data: r.json || r.text || r.error });
       }
       case "validate": {
         const r = await gs1("GET", "/console/gtin/validate", null, { gtin: b.gtin });
-        return OK({ ok: r.ok, status: r.status, data: r.json || r.text });
+        return OK({ ok: r.ok, status: r.status, data: r.json || r.text || r.error });
       }
       case "create": {   // DRAFT unless Ravi explicitly asked to submit
         const list = (b.products || []).slice(0, 25).map(p => Object.assign({}, p, { gcp: GCP, status: b.submit === true ? "ACTIVE" : "draft" }));
@@ -69,7 +69,7 @@ exports.handler = async (event) => {
         const log = (await kvGet("gs1_log")) || [];
         log.unshift({ at: new Date().toISOString(), action: b.submit === true ? "create+submit" : "create draft", gtins: list.map(p => p.gtin), status: r.status, ok: r.ok, result: r.json || r.text });
         await kvSet("gs1_log", log.slice(0, 100));
-        return OK({ ok: r.ok, status: r.status, data: r.json || r.text });
+        return OK({ ok: r.ok, status: r.status, data: r.json || r.text || r.error });
       }
       case "update": {
         const list = (b.products || []).slice(0, 25).map(p => { const q = Object.assign({}, p); delete q.product_name; delete q.brand; delete q.gcp; return q; });
@@ -77,7 +77,7 @@ exports.handler = async (event) => {
         const log = (await kvGet("gs1_log")) || [];
         log.unshift({ at: new Date().toISOString(), action: "update", gtins: list.map(p => p.gtin), status: r.status, ok: r.ok, result: r.json || r.text });
         await kvSet("gs1_log", log.slice(0, 100));
-        return OK({ ok: r.ok, status: r.status, data: r.json || r.text });
+        return OK({ ok: r.ok, status: r.status, data: r.json || r.text || r.error });
       }
       case "barcode": {
         const r = await gs1("GET", "/console/products/barcode", null, { gtin: b.gtin, type: b.type || "barcode", format: b.format || "PNG" });
