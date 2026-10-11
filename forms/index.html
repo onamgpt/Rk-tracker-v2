@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Forms & Pay · Onam</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f3f5f8;color:#1b2430;font:15px/1.45 -apple-system,"Segoe UI",Roboto,sans-serif;padding-bottom:env(safe-area-inset-bottom,0)}
+header{background:#1d3557;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+header h1{margin:0;font-size:18px;flex:1}
+header a{color:#cfe0ff;font-size:13px;text-decoration:none;border:1px solid #3b5c94;border-radius:8px;padding:5px 9px}
+.wrap{max-width:720px;margin:0 auto;padding:12px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.tabs button{flex:1;min-width:110px;padding:10px;border-radius:9px;border:1px solid #c9d2dc;background:#fff;font-weight:700;font-size:14px}
+.tabs button.on{background:#1d3557;color:#fff;border-color:#1d3557}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.card h2{font-size:14px;margin:0 0 10px;color:#1d3557;text-transform:uppercase;letter-spacing:.3px}
+label{display:block;font-size:13px;color:#5a6676;margin:8px 0 3px}
+input,select,textarea{width:100%;font:inherit;font-size:16px;padding:10px;border:1px solid #c9d2dc;border-radius:9px;background:#fff}
+.row{display:flex;gap:8px;align-items:flex-end}.row>*{flex:1;min-width:0}
+.btn{padding:10px 14px;border-radius:9px;border:1px solid #c9d2dc;background:#fff;font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap}
+.pri{background:#1d3557;color:#fff;border-color:#1d3557}.go{background:#1e8e5a;color:#fff;border-color:#1e8e5a}.bad{background:#fbecee;color:#8a2434;border-color:#f0c3ca}
+.fld{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #eef1f4}
+.fld span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fld small{display:block;color:#7a8594;font-size:12px}
+.hint{font-size:13px;color:#6b7686}
+.msg{margin-top:8px;font-size:14px;color:#1e8e5a;min-height:18px}
+.pin{max-width:320px;margin:15vh auto;text-align:center}
+.pin input{font-size:26px;text-align:center;letter-spacing:8px;margin:12px 0}
+.tag{font-size:12px;font-weight:700;padding:2px 8px;border-radius:9px;background:#eef2f7}
+.tag.g{background:#e3f6ec;color:#11704a}
+</style>
+</head>
+<body>
+<div id="pinBox" class="pin" hidden>
+  <div style="font-size:34px">📝</div><h2 style="margin:6px 0">Forms & Pay</h2>
+  <div class="hint">Enter your tracker PIN</div>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off">
+  <button class="btn pri" id="pinGo" style="width:100%">Open</button>
+  <div id="pinErr" style="color:#b42318;margin-top:10px"></div>
+</div>
+
+<div id="app" hidden>
+<header><h1>📝 Forms & Pay</h1><a href="/">Tracker</a></header>
+<div class="wrap">
+  <div class="tabs">
+    <button data-t="me" class="on">👤 My details</button>
+    <button data-t="forms">📝 Forms</button>
+    <button data-t="pay">💳 Pay by UPI</button>
+    <button data-t="del">🗑 Delete</button>
+  </div>
+  <div id="view"></div>
+</div>
+</div>
+
+<script>
+(function(){
+  var $=function(i){return document.getElementById(i);};
+  var KEY="forms_v1", tab="me";
+  var FIELDS=[["name","Full name"],["business","Business name"],["gstin","GSTIN"],["pan","PAN"],["phone","Mobile"],["email","Email"],["address","Address"],["city","City"],["state","State"],["pincode","PIN code"],["upi","UPI ID (for receiving)"]];
+  var D={profile:{},forms:[],payments:[]};
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+  function today(){return new Date().toISOString().slice(0,10);}
+  function inr(n){return "₹"+Math.round(Number(n)||0).toLocaleString("en-IN");}
+  function toast(t){ $("msg") && ($("msg").textContent=t); setTimeout(function(){ if($("msg")&&$("msg").textContent===t) $("msg").textContent=""; },2200); }
+  function api(a,x){ return fetch("/.netlify/functions/db",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action:a,user:"main"},x||{}))}).then(function(r){return r.json();}); }
+  function save(){ try{ localStorage.setItem(KEY,JSON.stringify(D)); }catch(e){}
+    return api("savePortfolio",{key:KEY,data:D}).then(function(){ toast("✓ Saved"); return true; }).catch(function(){ toast("Saved on this phone — will sync when online"); return false; }); }
+  function copy(text,btn){ function done(){ if(btn){ var o=btn.textContent; btn.textContent="✓ Copied"; setTimeout(function(){btn.textContent=o;},1200);} }
+    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(String(text||"")).then(done,function(){ fallback(text); done(); }); }
+    else { fallback(text); done(); } }
+  function fallback(text){ var t=document.createElement("textarea"); t.value=String(text||""); document.body.appendChild(t); t.select(); try{document.execCommand("copy");}catch(e){} t.remove(); }
+  function copyBtn(text){ return '<button class="btn" data-copy="'+esc(text)+'">Copy</button>'; }
+  function wireCopy(){ document.querySelectorAll("[data-copy]").forEach(function(b){ b.onclick=function(){ copy(b.getAttribute("data-copy"),b); }; }); }
+
+  /* ---------- My details ---------- */
+  function drawMe(){
+    var p=D.profile;
+    $("view").innerHTML='<div class="card"><h2>👤 My details</h2>'+
+      '<div class="hint" style="margin-bottom:6px">Stored here only. Passwords are NOT stored here — keep them in your iPhone Passwords app.</div>'+
+      FIELDS.map(function(f){ return '<label>'+esc(f[1])+'</label><input data-pf="'+f[0]+'" value="'+esc(p[f[0]]||"")+'">'; }).join("")+
+      '<div class="row" style="margin-top:12px"><button class="btn go" id="saveMe">💾 Save my details</button></div></div>'+
+      '<div class="card"><h2>Show each detail with one tap</h2><div class="hint">Tap Copy, then paste into the website. On iPhone, Safari can also fill these itself — see the note below.</div>'+
+      FIELDS.filter(function(f){return p[f[0]];}).map(function(f){ return '<div class="fld"><span><small>'+esc(f[1])+'</small>'+esc(p[f[0]])+'</span>'+copyBtn(p[f[0]])+'</div>'; }).join("")+'</div>'+
+      '<div class="card"><h2>🍎 Let Safari fill it automatically</h2><div class="hint">Safari fills names, addresses and phone numbers from <b>your own Contacts card</b> — the tracker can\'t push data into other websites. To set it up once:<br>1. Open <b>Contacts</b> → your own card → fill name, address, phone and email.<br>2. Settings → <b>Safari → AutoFill</b> → turn on <b>Use Contact Info</b> and choose <b>My Info</b>.<br>3. Passwords: Settings → <b>Passwords</b> (iCloud Keychain). Safari offers them on login pages.</div></div>';
+    $("saveMe").onclick=function(){ document.querySelectorAll("[data-pf]").forEach(function(i){ D.profile[i.dataset.pf]=i.value.trim(); }); save().then(function(){ drawMe(); }); };
+    wireCopy();
+  }
+
+  /* ---------- Forms ---------- */
+  function drawForms(){
+    var h='<div class="card"><h2>📝 Your forms</h2><div class="hint">A form is a website plus the details you need to type into it. Tap Copy next to each field.</div>';
+    h+=D.forms.map(function(f,i){
+      return '<div style="border:1px solid #e3e8ef;border-radius:10px;padding:10px;margin-top:10px">'+
+        '<div class="row"><b style="flex:1">'+esc(f.name)+'</b><button class="btn" data-open="'+i+'">Open site</button><button class="btn bad" data-delf="'+i+'">×</button></div>'+
+        (f.url?'<div class="hint" style="word-break:break-all">'+esc(f.url)+'</div>':'')+
+        f.fields.map(function(x){ return '<div class="fld"><span><small>'+esc(x.label)+'</small>'+esc(x.value)+'</span>'+copyBtn(x.value)+'</div>'; }).join("")+
+        (f.notes?'<div class="hint" style="margin-top:6px">'+esc(f.notes)+'</div>':'')+'</div>';
+    }).join("")||'<div class="hint" style="margin-top:8px">No forms yet.</div>';
+    h+='</div>';
+    h+='<div class="card"><h2>+ New form</h2>'+
+      '<label>Name (e.g. Courier booking)</label><input id="fName">'+
+      '<label>Website address (optional)</label><input id="fUrl" placeholder="https://">'+
+      '<label>Details to fill — tick the ones this form needs</label>'+
+      FIELDS.slice(0,10).map(function(f){ return '<label style="display:flex;gap:8px;align-items:center;font-size:15px"><input type="checkbox" data-pick="'+f[0]+'" style="width:20px">'+esc(f[1])+'</label>'; }).join("")+
+      '<label>Any other field (label and value, one per line as "Label: value")</label><textarea id="fExtra" rows="3" placeholder="Vehicle number: KA01AB1234"></textarea>'+
+      '<label>Notes (optional)</label><input id="fNotes">'+
+      '<div class="row" style="margin-top:12px"><button class="btn go" id="fSave">💾 Save form</button></div></div>';
+    $("view").innerHTML=h;
+    document.querySelectorAll("[data-open]").forEach(function(b){ b.onclick=function(){ var f=D.forms[+b.dataset.open]; if(f.url) window.open(f.url,"_blank"); }; });
+    document.querySelectorAll("[data-delf]").forEach(function(b){ b.onclick=function(){ if(confirm("Delete this form?")){ D.forms.splice(+b.dataset.delf,1); save().then(drawForms); } }; });
+    $("fSave").onclick=function(){
+      var name=$("fName").value.trim(); if(!name) return alert("Give the form a name.");
+      var fields=[]; document.querySelectorAll("[data-pick]:checked").forEach(function(c){ var k=c.dataset.pick, lab=FIELDS.filter(function(f){return f[0]===k;})[0][1]; var v=D.profile[k]||""; if(v) fields.push({label:lab,value:v}); });
+      $("fExtra").value.split("\n").forEach(function(line){ var i=line.indexOf(":"); if(i>0){ var l=line.slice(0,i).trim(), v=line.slice(i+1).trim(); if(l&&v) fields.push({label:l,value:v}); } });
+      if(!fields.length) return alert("Tick at least one detail, or add an extra field.");
+      D.forms.push({id:uid(),name:name,url:$("fUrl").value.trim(),notes:$("fNotes").value.trim(),fields:fields,created:today()});
+      save().then(drawForms);
+    };
+    wireCopy();
+  }
+
+  /* ---------- Pay by UPI ---------- */
+  function upiLink(v){ var q=[["pa",v.upi],["pn",v.name],["am",String(Number(v.amount).toFixed(2))],["cu","INR"],["tn",v.note||"Payment"]];
+    return "upi://pay?"+q.map(function(x){return x[0]+"="+encodeURIComponent(x[1]||"");}).join("&"); }
+  function drawPay(){
+    var h='<div class="card"><h2>💳 Pay by UPI</h2><div class="hint">Nothing is paid automatically. The UPI app opens with the details filled in — you check them and enter your UPI PIN yourself.</div>'+
+      '<label>Pay to (name)</label><input id="pName">'+
+      '<label>Pay to (UPI ID)</label><input id="pUpi" placeholder="name@bank">'+
+      '<label>Amount ₹</label><input id="pAmt" inputmode="decimal">'+
+      '<label>Note (e.g. Courier Dec invoice 123)</label><input id="pNote">'+
+      '<div class="row" style="margin-top:12px"><button class="btn pri" id="pOpen">📲 Open in UPI app</button></div>'+
+      '<div class="hint" style="margin-top:8px">If your app does not open (common on iPhone), use the Copy buttons below and pay manually in Google Pay, PhonePe or Paytm.</div>'+
+      '<div id="pCopy"></div></div>';
+    h+='<div class="card"><h2>🧾 Payments log</h2>'+
+      (D.payments.length?D.payments.slice().reverse().map(function(p,ri){ var i=D.payments.length-1-ri; return '<div class="fld"><span><small>'+esc(p.date)+' · '+esc(p.note||"")+(p.ref?' · ref '+esc(p.ref):' · <span class="tag">not confirmed</span>')+'</small><b>'+inr(p.amount)+'</b> to '+esc(p.name)+'</span>'+
+        (p.ref?'':'<button class="btn go" data-conf="'+i+'">Mark paid</button>')+'</div>'; }).join(""):'<div class="hint">No payments yet.</div>')+'</div>';
+    $("view").innerHTML=h;
+    $("pOpen").onclick=function(){
+      var v={name:$("pName").value.trim(),upi:$("pUpi").value.trim(),amount:$("pAmt").value,note:$("pNote").value.trim()};
+      if(!v.upi||!(Number(v.amount)>0)) return alert("Enter the UPI ID and amount.");
+      var p={id:uid(),date:today(),name:v.name||v.upi,upi:v.upi,amount:Number(v.amount),note:v.note,ref:""};
+      D.payments.push(p); save();
+      $("pCopy").innerHTML='<div class="fld"><span><small>UPI ID</small>'+esc(v.upi)+'</span>'+copyBtn(v.upi)+'</div><div class="fld"><span><small>Amount</small>'+inr(v.amount)+'</span>'+copyBtn(String(Number(v.amount)))+'</div>';
+      wireCopy();
+      window.location.href=upiLink(v);
+      setTimeout(drawPay,600);
+    };
+    document.querySelectorAll("[data-conf]").forEach(function(b){ b.onclick=function(){ var ref=prompt("Enter the UPI reference / UTR number from the receipt (optional)","")||""; var p=D.payments[+b.dataset.conf]; p.ref=ref||"confirmed"; save().then(drawPay); }; });
+    wireCopy();
+  }
+
+  /* ---------- Delete module ---------- */
+  function drawDel(){
+    $("view").innerHTML='<div class="card"><h2>🗑 Delete Forms & Pay</h2><div class="hint">This erases your saved details, forms and payment log from the tracker. It cannot be undone.<br><br>To remove the whole module later, delete the <b>forms</b> folder and the "📝 Forms & Pay" line in the tracker menu (index.html).</div>'+
+      '<div class="row" style="margin-top:12px"><button class="btn bad" id="delAll">Erase all Forms & Pay data</button></div><div class="msg" id="delMsg"></div></div>';
+    $("delAll").onclick=function(){
+      if(!confirm("Erase all saved details, forms and payments?")) return;
+      if(!confirm("Final check: this cannot be undone. Erase?")) return;
+      D={profile:{},forms:[],payments:[]};
+      try{ localStorage.removeItem(KEY); }catch(e){}
+      api("savePortfolio",{key:KEY,data:D}).then(function(){ $("delMsg").textContent="✓ Erased."; }).catch(function(){ $("delMsg").textContent="Erased on this phone; server copy will be cleared when online."; });
+    };
+  }
+
+  function draw(){
+    document.querySelectorAll(".tabs button").forEach(function(b){ b.classList.toggle("on",b.dataset.t===tab); });
+    if(tab==="me") drawMe(); else if(tab==="forms") drawForms(); else if(tab==="pay") drawPay(); else drawDel();
+  }
+  document.querySelectorAll(".tabs button").forEach(function(b){ b.onclick=function(){ tab=b.dataset.t; draw(); window.scrollTo(0,0); }; });
+
+  /* ---------- PIN gate (same PIN as the tracker) ---------- */
+  function sha(p){ return crypto.subtle.digest("SHA-256",new TextEncoder().encode("rkpin:"+p)).then(function(b){ return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0");}).join(""); }); }
+  function open(){
+    $("pinBox").hidden=true; $("app").hidden=false;
+    api("getPortfolio",{key:KEY}).then(function(r){ if(r&&r.data&&typeof r.data==="object") D=Object.assign({profile:{},forms:[],payments:[]},r.data); try{localStorage.setItem(KEY,JSON.stringify(D));}catch(e){} draw(); })
+      .catch(function(){ try{ D=Object.assign(D,JSON.parse(localStorage.getItem(KEY))||{}); }catch(e){} draw(); });
+  }
+  function lock(err){ $("app").hidden=true; $("pinBox").hidden=false; $("pinErr").textContent=err||""; $("pin").value=""; }
+  $("pinGo").onclick=function(){
+    var pin=$("pin").value.trim(); if(!pin) return;
+    api("getPortfolio",{key:"user_pins"}).then(function(r){ var map=(r&&r.data)||{};
+      if(!map.main) return lock("No PIN is set. Set one in the tracker: Menu → 🔒 PIN Access.");
+      return sha(pin).then(function(h){ if(h===map.main){ sessionStorage.setItem("forms_ok","1"); open(); } else lock("Wrong PIN"); });
+    }).catch(function(){ lock("No internet — try again"); });
+  };
+  $("pin").addEventListener("keydown",function(e){ if(e.key==="Enter") $("pinGo").click(); });
+  if(sessionStorage.getItem("forms_ok")==="1") open(); else lock("");
+})();
+</script>
+</body>
+</html>
