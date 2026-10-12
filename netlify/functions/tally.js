@@ -1,110 +1,80 @@
-const https = require("https");
+// Tally (read-only): receives figures parsed in the browser from the
+// accountant's daily Tally exports, stores them, and sends reminders.
+// Nothing here ever connects to Tally itself.
+const crypto = require("crypto");
+const db = require("./db.js");
+const H = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Access-Control-Allow-Headers": "Content-Type" };
+const OK = (o) => ({ statusCode: 200, headers: H, body: JSON.stringify(o) });
+const call = async (b) => JSON.parse((await db.handler({ httpMethod: "POST", body: JSON.stringify(b) })).body || "{}");
+const kvGet = async (k) => { const r = await call({ action: "getPortfolio", user: "main", key: k }); return r && r.data != null ? r.data : null; };
+const kvSet = (k, d) => call({ action: "savePortfolio", user: "main", key: k, data: d });
+const hash = (p) => crypto.createHash("sha256").update("rkpin:" + p).digest("hex");
+const OWNER_CHAT = "8632288596";
+const DEFAULTS = { accountantEmail: "onammadhu@gmail.com", ownerEmail: "onamagarbathi@gmail.com", uploaders: ["main", "maadhu"], company: "" };
+exports.DEFAULTS = DEFAULTS;
+
+async function settings() { return Object.assign({}, DEFAULTS, (await kvGet("tally_settings")) || {}); }
+exports.settings = settings;
+async function mail(to, subject, text) {
+  try { const m = require("./mail.js"); const r = await m.handler({ httpMethod: "POST", body: JSON.stringify({ to, subject, text }) }); return JSON.parse(r.body || "{}"); }
+  catch (e) { return { ok: false, error: String(e) }; }
+}
+exports.mail = mail;
+async function tg(text) {
+  const base = process.env.URL || "https://rk-tracker-v2.netlify.app";
+  try { await fetch(base + "/.netlify/functions/telegram", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "send", chatIds: [OWNER_CHAT], message: text }) }); } catch (e) {}
+}
+exports.tg = tg;
 
 exports.handler = async (event) => {
-  const h = {
-    "Access-Control-Allow-Origin": "*",
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "POST, OPTIONS"
-  };
-  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: h, body: "" };
-
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: H, body: "" };
+  let b = {}; try { b = JSON.parse(event.body || "{}"); } catch (e) { return OK({ error: "bad request" }); }
+  const s = await settings();
+  const user = String(b.user || "main").toLowerCase();
+  const pins = (await kvGet("user_pins")) || {};
+  if (!pins[user]) return OK({ error: "nopin" });
+  if (!b.pin || pins[user] !== hash(String(b.pin))) return OK({ error: "pin" });
+  const owner = user === "main";
+  if (!owner && !(s.uploaders || []).includes(user)) return OK({ error: "not allowed" });
   try {
-    const body = JSON.parse(event.body || "{}");
-    const { action, tallyText, answers, month, year, extracted } = body;
-    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-
-    async function claudeCall(userPrompt, maxTokens) {
-      return new Promise((resolve, reject) => {
-        const postData = JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: maxTokens || 4000,
-          messages: [{ role: "user", content: userPrompt }]
-        });
-        const req = https.request({
-          hostname: "api.anthropic.com",
-          path: "/v1/messages",
-          method: "POST",
-          headers: {
-            "x-api-key": ANTHROPIC_KEY,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-            "Content-Length": Buffer.byteLength(postData)
-          }
-        }, (res) => {
-          let data = "";
-          res.on("data", c => data += c);
-          res.on("end", () => {
-            try {
-              const parsed = JSON.parse(data);
-              resolve((parsed.content && parsed.content[0] && parsed.content[0].text) || "");
-            } catch(e) { reject(e); }
-          });
-        });
-        req.on("error", reject);
-        req.write(postData);
-        req.end();
-      });
+    if (b.action === "ingest") {
+      const kind = b.kind, now = new Date().toISOString();
+      const meta = (await kvGet("tally_meta")) || {};
+      if (kind === "vouchers") {
+        // merge by type+number+date; keep ~13 months
+        const cur = (await kvGet("tally_vouchers")) || { list: [] };
+        const map = new Map(cur.list.map(v => [v.t + "|" + v.n + "|" + v.d, v]));
+        (b.data || []).forEach(v => { if (v && v.d) map.set(v.t + "|" + v.n + "|" + v.d, v); });
+        const cutoff = new Date(Date.now() - 400 * 864e5).toISOString().slice(0, 10);
+        const list = Array.from(map.values()).filter(v => v.d >= cutoff).sort((a, z) => a.d < z.d ? -1 : 1);
+        await kvSet("tally_vouchers", { list });
+        meta.vouchers = { at: now, by: user, count: list.length, upTo: list.length ? list[list.length - 1].d : null, file: b.file || "" };
+      } else if (["tb", "recv", "pay", "stock"].includes(kind)) {
+        await kvSet("tally_" + kind, { asof: b.asof || null, at: now, by: user, rows: b.data || [], file: b.file || "" });
+        meta[kind] = { at: now, by: user, rows: (b.data || []).length, asof: b.asof || null, file: b.file || "" };
+      } else return OK({ error: "unknown kind" });
+      meta.lastUpload = now; meta.lastBy = user;
+      await kvSet("tally_meta", meta);
+      return OK({ ok: true, meta });
     }
-
-    if (action === "parse") {
-      const prompt = `You are a Tally accounting expert for Onam Agarbathi Pvt. Ltd. (incense manufacturer, Bangalore).
-Read this TallyPrime Trial Balance and map every ledger to the correct financial category.
-
-TALLY DATA:
-${(tallyText || "").slice(0, 8000)}
-
-Map ledgers to these categories:
-- income.wholesale, income.retail, income.other
-- cogs.rawMaterials, cogs.packaging, cogs.jobWork, cogs.freightIn
-- opex.salary, opex.staffSalary, opex.pf, opex.rent, opex.electricity, opex.vehicle, opex.freightOut, opex.carLoanEMI, opex.bankCharges, opex.creditCard, opex.marketing, opex.professional, opex.telephone, opex.repairs, opex.gst, opex.other
-- bs.inventory, bs.debtors, bs.cash, bs.bank, bs.advanceToSuppliers, bs.creditors, bs.carLoanOutstanding, bs.otherLoan, bs.creditCardOutstanding, bs.customerAdvance, bs.gstPayable
-- owner.loanGiven, owner.drawings
-
-RULES:
-- Use absolute values (ignore Dr/Cr)
-- Sum multiple ledgers in same category
-- Set null if category not found
-- Always ask about online sales (not in Tally) and closing stock if unclear
-
-Return ONLY valid JSON:
-{"extracted":{"income":{"wholesale":null,"retail":null,"other":null},"cogs":{"rawMaterials":null,"packaging":null,"jobWork":null,"freightIn":null},"opex":{"salary":null,"staffSalary":null,"pf":null,"rent":null,"electricity":null,"vehicle":null,"freightOut":null,"carLoanEMI":null,"bankCharges":null,"creditCard":null,"marketing":null,"professional":null,"telephone":null,"repairs":null,"gst":null,"other":null},"bs":{"inventory":null,"debtors":null,"cash":null,"bank":null,"advanceToSuppliers":null,"creditors":null,"carLoanOutstanding":null,"otherLoan":null,"creditCardOutstanding":null,"customerAdvance":null,"gstPayable":null},"owner":{"loanGiven":null,"drawings":null}},"ledgerMap":[{"tallyLedger":"name","mappedTo":"category","amount":0}],"questions":[{"id":"q1","field":"bs.inventory","question":"What is your closing stock value?","hint":"Check stock register"}]}`;
-
-      const raw = await claudeCall(prompt, 4000);
-      const clean = raw.replace(/```json/g,"").replace(/```/g,"").trim();
-      const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
-      const parsed = JSON.parse(s >= 0 ? clean.substring(s, e+1) : clean);
-      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, ...parsed }) };
+    if (!owner) return OK({ error: "owner only" });
+    if (b.action === "get") {
+      const [meta, tb, recv, pay, stock, vch, lr] = await Promise.all(["tally_meta", "tally_tb", "tally_recv", "tally_pay", "tally_stock", "tally_vouchers", "logistics_v2"].map(kvGet));
+      return OK({ ok: true, settings: s, meta: meta || {}, tb, recv, pay, stock, vouchers: (vch && vch.list) || [], dispatches: ((lr && lr.shipments) || []).filter(x => x.invoiceNo).map(x => ({ customer: x.customer, invoiceNo: x.invoiceNo, date: x.dispatchedOn || x.date, amount: x.invoiceAmount })) });
     }
-
-    if (action === "finalize") {
-      const merged = JSON.parse(JSON.stringify(extracted || {}));
-      for (const [field, value] of Object.entries(answers || {})) {
-        const parts = field.split(".");
-        if (parts.length === 2) {
-          if (!merged[parts[0]]) merged[parts[0]] = {};
-          merged[parts[0]][parts[1]] = parseFloat(value) || 0;
-        }
-      }
-      const prompt = `You are an accountant for Onam Agarbathi Pvt. Ltd. Calculate P&L for ${month} ${year}.
-
-DATA: ${JSON.stringify(merged)}
-
-Calculate totals and write 3-5 bullet diagnosis: is business profitable? where is cash stuck? red flags? one recommendation.
-
-Return ONLY valid JSON:
-{"summary":{"totalIncome":0,"totalCOGS":0,"grossProfit":0,"grossMarginPct":0,"totalOpex":0,"operatingProfit":0,"operatingMarginPct":0},"merged":{},"diagnosis":["bullet1","bullet2"],"status":"profit"}`;
-
-      const raw = await claudeCall(prompt, 2000);
-      const clean = raw.replace(/```json/g,"").replace(/```/g,"").trim();
-      const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
-      const result = JSON.parse(s >= 0 ? clean.substring(s, e+1) : clean);
-      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, ...result }) };
+    if (b.action === "remind") {
+      const text = String(b.text || "").slice(0, 4000);
+      if (!text) return OK({ error: "empty" });
+      const r = await mail(s.accountantEmail, b.subject || "Pending in Tally — from Ravi", text + "\n\n— sent from RK Tracker");
+      const log = (await kvGet("tally_reminders")) || [];
+      log.unshift({ at: new Date().toISOString(), to: s.accountantEmail, subject: b.subject || "", text: text.slice(0, 500), ok: !!(r && r.ok) });
+      await kvSet("tally_reminders", log.slice(0, 200));
+      return OK({ ok: !!(r && r.ok), result: r });
     }
-
-    return { statusCode: 400, headers: h, body: JSON.stringify({ error: "Unknown action: " + action }) };
-
-  } catch(e) {
-    return { statusCode: 500, headers: h, body: JSON.stringify({ error: e.message }) };
-  }
+    if (b.action === "settingsSave") {
+      const next = Object.assign({}, (await kvGet("tally_settings")) || {}, b.settings || {});
+      await kvSet("tally_settings", next); return OK({ ok: true, settings: Object.assign({}, DEFAULTS, next) });
+    }
+    return OK({ error: "unknown action" });
+  } catch (e) { return OK({ error: String(e.message || e) }); }
 };

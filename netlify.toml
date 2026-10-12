@@ -57,3 +57,7 @@
 # Dispatch Register morning chase — 09:30 IST (04:00 UTC)
 [functions."logistics-daily"]
   schedule = "0 4 * * *"
+
+# Tally morning summary + stale-upload reminder — 09:15 IST (03:45 UTC)
+[functions."tally-daily"]
+  schedule = "45 3 * * *"
