@@ -254,11 +254,32 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     $("view").innerHTML='<div class="card"><h2>⬆ Upload Tally exports</h2>'+
       '<div class="hint">In Tally: open each report → <b>Alt+E (Export)</b>. Excel, PDF or XML all work. Upload the five reports:<br>Day Book (today) · Trial Balance · Outstandings → Receivables · Outstandings → Payables · Stock Summary.<br>Name the payables file with "payables" in it. Files are read on this computer — only the figures are sent.</div>'+
       '<div class="drop" id="drop" style="margin-top:12px"><div style="font-size:28px">📂</div><b>Tap to choose files</b> or drag them here</div><input type="file" id="fin" multiple accept=".xml,.xls,.xlsx,.xlsm,.csv,.pdf" hidden>'+
-      '<div class="log" id="uplog"></div></div>';
+      '<div class="log" id="uplog"></div></div>'+
+      (OWNER?'<div class="card"><h2>📧 Import from email</h2><div id="gm" class="hint">Checking Gmail connection…</div>'+
+        '<div class="hint" style="margin-top:6px">Each morning at 9:15 the tracker reads emails from <b>'+esc((D&&D.settings||{}).mailFrom||"onammadhu@gmail.com")+'</b> with <b>"'+esc((D&&D.settings||{}).mailSubject||"backup")+'"</b> in the subject and imports the attached Excel files. Read-only — it never sends, deletes or changes mail.</div>'+
+        '<div class="log" id="gmlog"></div></div>':'');
     var dz=$("drop"), fin=$("fin");
     dz.onclick=function(){ fin.click(); }; fin.onchange=function(){ handleFiles(fin.files); fin.value=""; };
     dz.ondragover=function(e){ e.preventDefault(); dz.classList.add("on"); }; dz.ondragleave=function(){ dz.classList.remove("on"); };
     dz.ondrop=function(e){ e.preventDefault(); dz.classList.remove("on"); handleFiles(e.dataTransfer.files); };
+    if(OWNER) drawGmail();
+  }
+  function gapi(a){ return fetch("/.netlify/functions/gmail-auth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:a,pin:pin})}).then(function(r){return r.json();}); }
+  function drawGmail(){
+    var el=$("gm"); if(!el) return;
+    gapi("status").then(function(r){
+      if(r.connected){
+        el.innerHTML='✅ Gmail connected (read-only): <b>'+esc(r.email||"")+'</b><div style="margin-top:8px"><button class="btn pri" id="gmNow">📥 Check email now</button> <button class="btn" id="gmOff">Disconnect</button> <span id="gmMsg" class="hint"></span></div>';
+        $("gmNow").onclick=function(){ $("gmMsg").textContent="Checking… (about a minute)"; api("mailNow").then(function(){ setTimeout(function(){ load(); $("gmMsg").textContent="Done — see the log below."; },45000); }); };
+        $("gmOff").onclick=function(){ if(confirm("Disconnect Gmail? Email import will stop.")) gapi("disconnect").then(drawGmail); };
+      } else {
+        el.innerHTML=(r.expired?'⚠️ Gmail sign-in expired — please reconnect.<br>':'Not connected yet.<br>')+
+          (r.configured===false?'<div style="color:#8a4b00;margin-top:6px">One-time Google setup still needed — see Claude\'s steps.<br>Redirect address to paste in Google: <code>'+esc(r.redirect||"")+'</code></div>':'')+
+          '<button class="btn pri" id="gmOn" style="margin-top:8px">🔗 Connect Gmail (read-only)</button> <span id="gmMsg" class="hint"></span>';
+        $("gmOn").onclick=function(){ gapi("start").then(function(x){ if(x.url) location.href=x.url; else $("gmMsg").textContent=x.message||x.error||"Couldn't start"; }); };
+      }
+      var lg=(D&&D.mailLog)||[]; if($("gmlog")) $("gmlog").innerHTML=lg.length?'<b>Recent email imports</b>\n'+lg.slice(0,5).map(function(e){ return esc(new Date(e.at).toLocaleString("en-IN"))+(e.manual?" (manual)":"")+(e.error?" — ⚠ "+esc(e.error):"")+"\n"+e.files.map(function(f){return "   • "+esc(f);}).join("\n"); }).join("\n"):"";
+    });
   }
   function load(){ api("get").then(function(r){ if(r.ok){ D=r; draw(); } }); }
 

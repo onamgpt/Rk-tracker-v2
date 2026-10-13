@@ -6,7 +6,7 @@ const call = async (b) => JSON.parse((await db.handler({ httpMethod: "POST", bod
 const kvGet = async (k) => { const r = await call({ action: "getPortfolio", user: "main", key: k }); return r && r.data != null ? r.data : null; };
 const inr = (n) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
 const ist = (d) => new Date((d ? new Date(d).getTime() : Date.now()) + 5.5 * 3600e3);
-exports.handler = async () => {
+async function summary() {
   try {
     const s = await T.settings();
     const meta = (await kvGet("tally_meta")) || {};
@@ -34,5 +34,14 @@ exports.handler = async () => {
       "\nOpen: https://rk-tracker-v2.netlify.app/tally/";
     await T.tg(msg);
   } catch (e) {}
+}
+exports.summary = summary;
+// Scheduled 9:15 IST: read Maadhu's backup email first (background), which then sends the summary.
+exports.handler = async () => {
+  const base = process.env.URL || "https://rk-tracker-v2.netlify.app";
+  try {
+    const r = await fetch(base + "/.netlify/functions/tally-mail-background", { method: "POST", headers: { "Content-Type": "application/json", "x-run-key": T.runKey() }, body: JSON.stringify({ notify: true }) });
+    if (r.status >= 400) await summary();
+  } catch (e) { await summary(); }
   return { statusCode: 200, body: "ok" };
 };
