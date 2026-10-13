@@ -186,7 +186,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   }
 
   /* ===================== Views ===================== */
-  var TABS=OWNER?[["home","🏠 Summary"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"]];
+  var TABS=OWNER?[["home","🏠 Summary"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"]];
   function drawTabs(){ $("tabs").innerHTML=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(t[0]===tab?"on":"")+'">'+t[1]+'</button>';}).join("");
     Array.prototype.forEach.call($("tabs").children,function(b){ b.onclick=function(){ tab=b.dataset.t; draw(); }; }); }
   function sales(){ return (D.vouchers||[]).filter(function(v){return /sales/i.test(v.t)&&!/order|return|credit/i.test(v.t);}); }
@@ -194,6 +194,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   function draw(){
     drawTabs();
     if(tab==="upload") return drawUpload();
+    if(tab==="ask") return drawAsk();
     if(!D) { $("view").innerHTML='<div class="card">Loading…</div>'; return; }
     var m=D.meta||{};
     $("asof").textContent=m.vouchers?"· data up to "+m.vouchers.upTo:"· no data yet";
@@ -281,6 +282,44 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
       var lg=(D&&D.mailLog)||[]; if($("gmlog")) $("gmlog").innerHTML=lg.length?'<b>Recent email imports</b>\n'+lg.slice(0,5).map(function(e){ return esc(new Date(e.at).toLocaleString("en-IN"))+(e.manual?" (manual)":"")+(e.error?" — ⚠ "+esc(e.error):"")+"\n"+e.files.map(function(f){return "   • "+esc(f);}).join("\n"); }).join("\n"):"";
     });
   }
+  /* ===================== Ask AI ===================== */
+  var CHAT=[], busy=false;
+  var SUGGEST=["Who should I chase for payment this week?","Compare sales month by month and explain the trend","Which customers bought less this month than usual?","What looks wrong or unusual in the books?","Summarise the business for a bank meeting","How much cash do I need for the next 30 days of payables?"];
+  function md(t){ var h=esc(t);
+    h=h.replace(/^### (.*)$/gm,'<b>$1</b>').replace(/^## (.*)$/gm,'<b>$1</b>').replace(/^# (.*)$/gm,'<b>$1</b>').replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+    h=h.replace(/((?:^\|.*\|\s*$\n?)+)/gm,function(tbl){ var rows=tbl.trim().split("\n").filter(function(r){ return !/^\|\s*:?-{2,}/.test(r); });
+      return '<div class="scroll"><table>'+rows.map(function(r,i){ var c=r.replace(/^\||\|$/g,"").split("|"); return "<tr>"+c.map(function(x){ return (i?"<td>":"<th>")+x.trim()+(i?"</td>":"</th>"); }).join("")+"</tr>"; }).join("")+'</table></div>'; });
+    return h.replace(/^\s*[-•] (.*)$/gm,'• $1').replace(/\n/g,"<br>"); }
+  function drawAsk(){
+    $("view").innerHTML='<div class="card"><h2>🤖 Ask AI about your Tally data</h2><div class="hint">Answers come only from the figures uploaded here'+((D&&D.meta&&D.meta.vouchers)?" (Day Book up to "+esc(D.meta.vouchers.upTo)+")":"")+'. Read-only — nothing in Tally is changed. Not a substitute for your CA.</div>'+
+      '<div id="chat" style="margin-top:10px"></div>'+
+      '<textarea id="q" rows="3" placeholder="e.g. Which customers owe more than 90 days?" style="margin-top:8px"></textarea>'+
+      '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" id="askGo">Ask</button><button class="btn" id="askNew">New topic</button></div>'+
+      '<div style="margin-top:10px">'+SUGGEST.map(function(x,i){ return '<button class="btn" data-sg="'+i+'" style="margin:3px 4px 0 0;font-size:12.5px;padding:6px 9px;font-weight:600">'+esc(x)+'</button>'; }).join("")+'</div></div>'+
+      '<div class="card"><h2>Earlier questions</h2><div id="askLog" class="hint">Loading…</div></div>';
+    drawChat();
+    $("askGo").onclick=function(){ ask($("q").value.trim()); };
+    $("q").addEventListener("keydown",function(e){ if(e.key==="Enter"&&(e.metaKey||e.ctrlKey)) $("askGo").click(); });
+    $("askNew").onclick=function(){ CHAT=[]; drawChat(); };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-sg]"),function(b){ b.onclick=function(){ ask(SUGGEST[+b.dataset.sg]); }; });
+    api("askLog").then(function(r){ var l=(r&&r.log)||[]; if(!$("askLog")) return;
+      $("askLog").innerHTML=l.length?l.slice(0,10).map(function(x,i){ return '<details style="margin:6px 0"><summary><b>'+esc(x.q)+'</b> <span class="hint">· '+esc(new Date(x.at).toLocaleString("en-IN"))+'</span></summary><div style="margin-top:6px;color:#1b2430">'+md(x.a)+'</div></details>'; }).join(""):"No questions yet."; });
+  }
+  function drawChat(){ var el=$("chat"); if(!el) return;
+    el.innerHTML=CHAT.map(function(m){ return '<div style="margin:8px 0;padding:10px;border-radius:10px;'+(m.role==="q"?'background:#eef6f1;font-weight:600':'background:#fff;border:1px solid #e3e8ef')+'">'+(m.role==="q"?esc(m.t):md(m.t))+'</div>'; }).join("")+(busy?'<div class="hint" style="margin:8px 0">🤖 Thinking… (usually 10–30 seconds)</div>':''); }
+  function ask(q){ if(!q||busy) return; busy=true; $("q").value="";
+    var history=[]; for(var i=0;i+1<CHAT.length;i+=2) history.push({q:CHAT[i].t,a:CHAT[i+1].t});
+    CHAT.push({role:"q",t:q}); drawChat();
+    api("ask",{q:q,history:history}).then(function(r){
+      if(!r.ok){ busy=false; CHAT.push({role:"a",t:"⚠ "+(r.error||"Couldn't ask")}); drawChat(); return; }
+      var tries=0;(function poll(){ setTimeout(function(){ api("askResult",{id:r.id}).then(function(x){
+        if(x.status==="done"){ busy=false; CHAT.push({role:"a",t:x.answer}); drawChat(); }
+        else if(x.status==="error"){ busy=false; CHAT.push({role:"a",t:"⚠ "+x.error}); drawChat(); }
+        else if(++tries<40) poll(); else { busy=false; CHAT.push({role:"a",t:"⚠ Taking too long — please try again."}); drawChat(); }
+      }).catch(function(){ if(++tries<40) poll(); }); },3000); })();
+    }).catch(function(){ busy=false; CHAT.push({role:"a",t:"⚠ No internet"}); drawChat(); });
+  }
+
   function load(){ api("get").then(function(r){ if(r.ok){ D=r; draw(); } }); }
 
   /* ===================== PIN ===================== */

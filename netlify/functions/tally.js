@@ -78,6 +78,20 @@ exports.handler = async (event) => {
       const gm = await kvGet("gmail_oauth"), mlog = (await kvGet("tally_mail_log")) || [];
       return OK({ ok: true, gmail: gm && gm.refresh ? { email: gm.email || "", at: gm.at } : null, mailLog: mlog.slice(0, 10), settings: s, meta: meta || {}, tb, recv, pay, stock, vouchers: (vch && vch.list) || [], dispatches: ((lr && lr.shipments) || []).filter(x => x.invoiceNo).map(x => ({ customer: x.customer, invoiceNo: x.invoiceNo, date: x.dispatchedOn || x.date, amount: x.invoiceAmount })) });
     }
+    if (b.action === "ask") {
+      const q = String(b.q || "").trim().slice(0, 1000); if (!q) return OK({ error: "empty question" });
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      await kvSet("tally_ask_" + id, { status: "pending", at: new Date().toISOString() });
+      const base = process.env.URL || "https://rk-tracker-v2.netlify.app";
+      await fetch(base + "/.netlify/functions/tally-ask-background", { method: "POST", headers: { "Content-Type": "application/json", "x-run-key": runKey() },
+        body: JSON.stringify({ id, q, history: Array.isArray(b.history) ? b.history.slice(-6) : [] }) }).catch(() => {});
+      return OK({ ok: true, id });
+    }
+    if (b.action === "askResult") {
+      const r = await kvGet("tally_ask_" + String(b.id || "").replace(/[^a-z0-9]/gi, ""));
+      return OK(Object.assign({ ok: true }, r || { status: "pending" }));
+    }
+    if (b.action === "askLog") return OK({ ok: true, log: ((await kvGet("tally_ask_log")) || []).slice(0, 20) });
     if (b.action === "remind") {
       const text = String(b.text || "").slice(0, 4000);
       if (!text) return OK({ error: "empty" });
