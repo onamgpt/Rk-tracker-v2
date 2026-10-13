@@ -105,28 +105,6 @@ async function checkGitHub() {
   return { name: "GitHub token", ok: true, detail: "valid" };
 }
 
-async function checkAppsScript() {
-  // The refresh token is the part that silently expires (7 days while the
-  // OAuth consent screen is still in Testing), so exchange it for real.
-  const rt = process.env.GOOGLE_APPS_SCRIPT_REFRESH_TOKEN;
-  const cid = process.env.GOOGLE_OAUTH_CLIENT_ID || process.env.Google_oauth_client_id || process.env.google_oauth_client_id;
-  const cs = process.env.GOOGLE_OAUTH_CLIENT_SECRET || process.env.Google_oauth_client_secret || process.env.google_oauth_client_secret;
-  if (!rt || !cid || !cs) return { name: "Apps Script (Gmail/Drive/GST)", ok: false, detail: "refresh token or OAuth client not set" };
-  const form = "client_id=" + encodeURIComponent(cid) +
-    "&client_secret=" + encodeURIComponent(cs) +
-    "&refresh_token=" + encodeURIComponent(rt) +
-    "&grant_type=refresh_token";
-  const r = await req({
-    hostname: "oauth2.googleapis.com", path: "/token", method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(form) }
-  }, form);
-  try {
-    const j = JSON.parse(r.body);
-    if (j.access_token) return { name: "Apps Script (Gmail/Drive/GST)", ok: true, detail: "refresh token valid" };
-    return { name: "Apps Script (Gmail/Drive/GST)", ok: false, detail: short(j.error_description || j.error, 110) };
-  } catch (e) { return { name: "Apps Script (Gmail/Drive/GST)", ok: false, detail: "HTTP " + r.status }; }
-}
-
 async function checkAnthropic() {
   const k = process.env.ANTHROPIC_API_KEY;
   if (!k) return { name: "Anthropic (AI features)", ok: false, detail: "ANTHROPIC_API_KEY not set" };
@@ -152,7 +130,7 @@ function tg(token, text) {
 exports.handler = async () => {
   const results = await Promise.all([
     checkTelegram(), checkResend(), checkWhatsApp(), checkSupabase(),
-    checkGitHub(), checkAppsScript(), checkAnthropic()
+    checkGitHub(), checkAnthropic()
   ]);
 
   const bad = results.filter(r => !r.ok);

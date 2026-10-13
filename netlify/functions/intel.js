@@ -104,9 +104,9 @@ exports.handler = async (event) => {
     try {
       return { statusCode: 200, headers: h, body: JSON.stringify(JSON.parse(raw)) };
     } catch (e) {
-      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: false, raw: String(raw).slice(0, 200) }) };
+      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: false, error: "Gmail import is unavailable — the Google Apps Script it used is not responding (it may have been removed). Use the upload pages instead, or ask Claude to connect Gmail directly.", raw: String(raw).slice(0, 200) }) };
     }
   } catch (e) {
-    return { statusCode: 500, headers: h, body: JSON.stringify({ error: e.message }) };
+    return { statusCode: 200, headers: h, body: JSON.stringify({ ok: false, error: "Gmail import is unavailable (" + e.message + "). Use the upload pages instead, or ask Claude to connect Gmail directly." }) };
   }
 };

@@ -5,23 +5,33 @@
 //  Uses Supabase REST (PostgREST) with the SERVICE ROLE key (server-side only).
 // ============================================================================
 const https = require("https");
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyeR53nHyQCmk7UGGVcdbapL62AcppjYn_HxhW2AserEoX5uZmHWYNv8q_EAw2k5CqEVw/exec";
-function appscriptPost(bodyObj){
-  return new Promise((resolve,reject)=>{
-    const u=new URL(SCRIPT_URL);
-    const bodyStr=JSON.stringify(bodyObj);
-    const req=https.request({hostname:u.hostname,path:u.pathname,method:"POST",headers:{"Content-Type":"application/json","Content-Length":Buffer.byteLength(bodyStr),"User-Agent":"Mozilla/5.0"}},(res)=>{
-      if([301,302,303,307,308].indexOf(res.statusCode)!==-1&&res.headers.location){
-        // follow redirect via GET
-        https.get(res.headers.location,{headers:{"User-Agent":"Mozilla/5.0"}},(r2)=>{let d="";r2.on("data",c=>d+=c);r2.on("end",()=>{try{resolve(JSON.parse(d));}catch(e){resolve({raw:d});}});}).on("error",reject);
-        return;
-      }
-      let d="";res.on("data",c=>d+=c);res.on("end",()=>{try{resolve(JSON.parse(d));}catch(e){resolve({raw:d});}});
-    });
-    req.on("error",reject);
-    req.setTimeout(25000,()=>{req.destroy();reject(new Error("Drive upload timeout"));});
-    req.write(bodyStr);req.end();
-  });
+const crypto = require("crypto");
+// Files (photos, PDFs, vouchers) live in Supabase Storage, in a PRIVATE bucket.
+// The app stores a permanent link to /.netlify/functions/file, which checks a
+// signature and hands out a short-lived signed URL. No Google Drive involved.
+const FILE_BUCKET = "tracker-files";
+function fileSig(path){ return crypto.createHmac("sha256", process.env.SUPABASE_SERVICE_KEY || "").update("file:" + path).digest("hex").slice(0, 32); }
+exports.fileSig = fileSig;
+exports.FILE_BUCKET = FILE_BUCKET;
+async function storageUpload(owner, file){
+  const SB = (process.env.SUPABASE_URL || "").replace(/\/$/, ""), KEY = process.env.SUPABASE_SERVICE_KEY || "";
+  const h = { apikey: KEY, Authorization: "Bearer " + KEY };
+  await fetch(SB + "/storage/v1/bucket", { method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, h),
+    body: JSON.stringify({ id: FILE_BUCKET, name: FILE_BUCKET, public: false }) }).catch(() => {});
+  let data = String(file.data || ""), type = String(file.type || "");
+  const m = data.match(/^data:([^;,]+)?(;base64)?,/);
+  if (m) { if (!type || type === "drive") type = m[1] || ""; data = data.slice(m[0].length); }
+  const buf = Buffer.from(data, "base64");
+  if (!buf.length) return { error: "empty file" };
+  const safe = String(file.name || "file").replace(/[^A-Za-z0-9._-]+/g, "_").slice(-80) || "file";
+  const now = new Date();
+  const path = String(owner || "main").replace(/[^a-z0-9_-]/gi, "") + "/" + now.toISOString().slice(0, 7) + "/" + now.getTime().toString(36) + "-" + crypto.randomBytes(4).toString("hex") + "-" + safe;
+  const r = await fetch(SB + "/storage/v1/object/" + FILE_BUCKET + "/" + path, { method: "POST",
+    headers: Object.assign({ "Content-Type": type || "application/octet-stream", "x-upsert": "true" }, h), body: buf });
+  if (!r.ok) return { error: "storage_upload_failed", detail: (await r.text()).slice(0, 300) };
+  const site = (process.env.URL || "https://rk-tracker-v2.netlify.app").replace(/\/$/, "");
+  const url = site + "/.netlify/functions/file?p=" + encodeURIComponent(path) + "&s=" + fileSig(path);
+  return { ok: true, url, link: url, id: path, name: file.name || safe, type, size: buf.length, storage: "supabase" };
 }
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
@@ -118,14 +128,10 @@ exports.handler = async (event) => {
   try {
     if (action === "ping") return OK({ ok: true, msg: "Supabase DB alive" });
 
-    // ---- UPLOAD FILE -> Google Drive (via Apps Script). Images live in Drive, links in Supabase.
+    // ---- UPLOAD FILE -> Supabase Storage (private bucket, permanent signed link)
     if (action === "uploadFile" && body.file) {
-      try {
-        const r = await appscriptPost({ action: "uploadFile", file: body.file });
-        return OK(r || { error: "no response from Drive" });
-      } catch (e) {
-        return OK({ error: "drive_upload_failed", detail: String(e && e.message || e) });
-      }
+      try { return OK(await storageUpload(owner, body.file)); }
+      catch (e) { return OK({ error: "storage_upload_failed", detail: String(e && e.message || e) }); }
     }
 
     // ---- READ ALL ----

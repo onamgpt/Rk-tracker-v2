@@ -13,7 +13,6 @@
 
 const https = require("https");
 
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyXP_nY13AqlYyif6Kf3rFRayQ_hzOsbisAxe_hT1bd8qkF5wcoJ5qI9dLtMbOTTd4uDg/exec";
 const BOT_TOKEN = "8852628858:AAHAZ3ZjosHPrEC0OU8fDnRXBNcKnwO2gus";
 const CHAT_ID = "8632288596";
 
@@ -30,9 +29,11 @@ function httpGet(targetUrl) {
   });
 }
 
-// Uses the SAME action name ("getAll") the live app already uses against this Apps Script.
-function getAllEntries() {
-  return httpGet(SCRIPT_URL + "?action=getAll");
+// Reads all entries from Supabase (via db.js) and returns the same JSON text as before.
+async function getAllEntries() {
+  const db = require("./db.js");
+  const r = await db.handler({ httpMethod: "POST", body: JSON.stringify({ action: "getAll", user: "main" }) });
+  return r.body;
 }
 
 function tgSend(text) {
