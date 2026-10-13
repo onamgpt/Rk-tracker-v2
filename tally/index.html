@@ -114,26 +114,72 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
       else if(el.tagName==="DSPSTKINFO"&&cur){ var q=txt(el,"DSPCLQTY"); cur.qty=num(q); cur.unit=(q.match(/[A-Za-z]+/)||[""])[0]; cur.rate=num(txt(el,"DSPCLRATE")); cur.val=Math.abs(num(txt(el,"DSPCLAMTA")||txt(el,"DSPCLAMT"))); } });
     return rows.filter(function(r){return r.item;}); }
 
+  /* ---------- Excel and PDF support (libraries loaded from cdnjs when needed) ---------- */
+  var LIBS={};
+  function loadScript(src){ return new Promise(function(res,rej){ var sc=document.createElement("script"); sc.src=src; sc.onload=res; sc.onerror=function(){ rej(new Error("couldn't load a helper library — check internet")); }; document.head.appendChild(sc); }); }
+  function xlsxLib(){ if(window.XLSX) return Promise.resolve(window.XLSX); if(!LIBS.x) LIBS.x=loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js").then(function(){ return window.XLSX; }); return LIBS.x; }
+  function pdfLib(){ if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib); if(!LIBS.p) LIBS.p=loadScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js").then(function(){ window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; return window.pdfjsLib; }); return LIBS.p; }
+  function readRowsExcel(file){ return file.arrayBuffer().then(function(buf){ return xlsxLib().then(function(X){
+    var wb=X.read(new Uint8Array(buf),{type:"array",cellDates:true}); return wb.SheetNames.map(function(n){ return {name:n,rows:X.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:null,blankrows:false})}; }); }); }); }
+  function readRowsPdf(file){ return file.arrayBuffer().then(function(buf){ return pdfLib().then(function(P){ return P.getDocument({data:new Uint8Array(buf)}).promise.then(function(doc){
+    var pages=[], chain=Promise.resolve();
+    for(var i=1;i<=doc.numPages;i++){ (function(n){ chain=chain.then(function(){ return doc.getPage(n).then(function(pg){ return pg.getTextContent(); }).then(function(tc){ pages.push(tc.items); }); }); })(i); }
+    return chain.then(function(){ var rows=[];
+      pages.forEach(function(items){ var lines={}; items.forEach(function(it){ if(!it.str||!it.str.trim()) return; var y=Math.round(it.transform[5]); (lines[y]=lines[y]||[]).push({x:it.transform[4],s:it.str,w:it.width||0}); });
+        Object.keys(lines).map(Number).sort(function(a,b){return b-a;}).forEach(function(y){ var arr=lines[y].sort(function(a,b){return a.x-b.x;}), cells=[], cur=null;
+          arr.forEach(function(t){ if(!cur||t.x-cur.end>10){ cur={text:t.s,end:t.x+t.w}; cells.push(cur); } else { cur.text+=" "+t.s; cur.end=t.x+t.w; } });
+          rows.push(cells.map(function(c){ return c.text.trim(); })); }); });
+      return [{name:file.name,rows:rows}]; }); }); }); }); }
+  function dateOf(v){ if(v&&typeof v.getFullYear==="function"&&!isNaN(v.getTime())) return v.getFullYear()+"-"+String(v.getMonth()+1).padStart(2,"0")+"-"+String(v.getDate()).padStart(2,"0");
+    if(typeof v==="number"&&v>20000&&v<80000){ var u=new Date(Math.round((v-25569)*864e5)); return dateOf(new Date(u.getUTCFullYear(),u.getUTCMonth(),u.getUTCDate())); }
+    return tdate(v==null?"":v); }
+  function classifyRows(sheets,fname){
+    var head=""; sheets.forEach(function(s){ (s.rows||[]).slice(0,14).forEach(function(r){ head+=(r||[]).map(function(c){ return c==null?"":String(c); }).join(" ")+"\n"; }); });
+    var k=null;
+    if(/day\s*book/i.test(head)) k="vouchers"; else if(/trial\s*balance/i.test(head)) k="tb"; else if(/bills\s*payable/i.test(head)) k="pay"; else if(/bills\s*receivable/i.test(head)) k="recv"; else if(/stock\s*summary/i.test(head)) k="stock";
+    if(!k){ var f=fname.toLowerCase(); if(/day.?book/.test(f)) k="vouchers"; else if(/trial/.test(f)) k="tb"; else if(/pay/.test(f)) k="pay"; else if(/recei|debtor/.test(f)) k="recv"; else if(/stock/.test(f)) k="stock"; }
+    return k; }
+  function dayBookRows(rows){ var out=[]; rows.forEach(function(r){ r=r||[]; var d=dateOf(r[0]); if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return; var t=String(r[2]==null?"":r[2]).trim(); if(!t) return;
+    out.push({d:d,t:t,n:String(r[3]==null?"":r[3]),p:String(r[1]==null?"":r[1]).trim(),a:Math.max(Math.abs(num(r[4])),Math.abs(num(r[5]))),r:""}); }); return out; }
+  function tbRows(rows){ var hi=-1; for(var i=0;i<rows.length;i++){ if((rows[i]||[]).some(function(c){ return /^debit$/i.test(String(c==null?"":c).trim()); })){ hi=i; break; } } if(hi<0) return [];
+    var out=[]; for(var j=hi+1;j<rows.length;j++){ var r=rows[j]||[], name=String(r[0]==null?"":r[0]).trim(); if(!name) continue; if(/grand total/i.test(name)) break; out.push({name:name,dr:Math.abs(num(r[1])),cr:Math.abs(num(r[2]))}); } return out; }
+  function billRows(rows){ var hi=-1; rows.some(function(r,i){ if((r||[]).some(function(c){ return /party/i.test(String(c==null?"":c)); })){ hi=i; return true; } return false; }); if(hi<0) return [];
+    var td=new Date(today()+"T00:00:00"), out=[];
+    for(var i=hi+1;i<rows.length;i++){ var r=rows[i]||[], party=String(r[2]==null?"":r[2]).trim(); if(!party||/total/i.test(party)) continue;
+      var d=dateOf(r[0]), due=dateOf(r[4]), over=num(r[5]);
+      if(!over&&/^\d{4}-\d{2}-\d{2}$/.test(d)) over=Math.max(0,Math.round((td-new Date(d+"T00:00:00"))/864e5));
+      out.push({date:/^\d{4}/.test(d)?d:"",ref:String(r[1]==null?"":r[1]),party:party,amt:Math.abs(num(r[3])),due:/^\d{4}/.test(due)?due:"",over:over}); }
+    return out; }
+  function stockRows(rows){ var hi=-1; for(var i=0;i<rows.length;i++){ if((rows[i]||[]).some(function(c){ return /closing/i.test(String(c==null?"":c)); })){ hi=i; break; } } if(hi<0) return [];
+    var sub=rows[hi+1]||[], idx=function(re){ return sub.findIndex(function(c){ return re.test(String(c==null?"":c)); }); };
+    var q=idx(/qty/i), rt=idx(/rate/i), v=idx(/value|amount/i); if(q<0&&v<0) return [];
+    var out=[]; for(var j=hi+2;j<rows.length;j++){ var r=rows[j]||[], name=String(r[0]==null?"":r[0]).trim(); if(!name||/total/i.test(name)) continue;
+      var qs=String(r[q]==null?"":r[q]); out.push({item:name,qty:num(qs),unit:(qs.match(/[A-Za-z]+/)||[""])[0],rate:rt>=0?num(r[rt]):0,val:v>=0?Math.abs(num(r[v])):0}); }
+    return out; }
+
   function handleFiles(files){
     var out=$("uplog"); out.textContent="";
     var line=function(t){ out.textContent+=t+"\n"; };
     var chain=Promise.resolve();
     Array.prototype.forEach.call(files,function(f){ chain=chain.then(function(){
       line("📄 "+f.name+" ("+Math.round(f.size/1024)+" KB) — reading…");
-      if(/\.xlsx?$/i.test(f.name)){ line("   ⚠ Excel files: please export as XML for now (Alt+E → Format: XML)."); return; }
-      return readText(f).then(function(t){
-        var x=parseXml(t), k=kindOf(x,f.name);
-        if(!k){ line("   ⚠ Couldn't recognise this report. Send this file to Claude."); return; }
-        var label={vouchers:"Day Book",tb:"Trial Balance",recv:"Receivables",pay:"Payables",stock:"Stock Summary"}[k];
-        if(k==="vouchers"){
-          var v=parseVouchers(x); line("   ✓ "+label+": "+v.length+" vouchers"+(v.length?" ("+v[0].d+" → "+v[v.length-1].d+")":""));
-          var parts=[]; for(var i=0;i<v.length;i+=2500) parts.push(v.slice(i,i+2500));
-          var c2=Promise.resolve(); parts.forEach(function(p,j){ c2=c2.then(function(){ return api("ingest",{kind:"vouchers",data:p,file:f.name}).then(function(r){ if(!r.ok) throw new Error(r.error||"upload failed"); if(parts.length>1) line("   …sent part "+(j+1)+" of "+parts.length); }); }); });
+      var ext=(f.name.split(".").pop()||"").toLowerCase(), prep;
+      if(ext==="xml") prep=readText(f).then(function(t){ var x=parseXml(t), k=kindOf(x,f.name); if(!k) throw new Error("Couldn't recognise this report"); return {k:k,x:x}; });
+      else if(["xlsx","xls","xlsm","csv"].indexOf(ext)>=0) prep=readRowsExcel(f).then(function(sh){ var k=classifyRows(sh,f.name); if(!k) throw new Error("Couldn't recognise this report"); return {k:k,sheets:sh}; });
+      else if(ext==="pdf") prep=readRowsPdf(f).then(function(sh){ var k=classifyRows(sh,f.name); if(!k) throw new Error("Couldn't recognise this report"); return {k:k,sheets:sh}; });
+      else { line("   ⚠ Unsupported file type: ."+ext); return; }
+      return prep.then(function(p){
+        var label={vouchers:"Day Book",tb:"Trial Balance",recv:"Receivables",pay:"Payables",stock:"Stock Summary"}[p.k], data=[];
+        if(p.x){ data = p.k==="vouchers"?parseVouchers(p.x): p.k==="tb"?parseTB(p.x): p.k==="stock"?parseStock(p.x): parseBills(p.x); }
+        else p.sheets.forEach(function(s){ var rr=s.rows; data=data.concat(p.k==="vouchers"?dayBookRows(rr): p.k==="tb"?tbRows(rr): p.k==="stock"?stockRows(rr): billRows(rr)); });
+        line("   ✓ "+label+": "+data.length+(p.k==="vouchers"?" vouchers":" rows")+(p.k==="vouchers"&&data.length?" ("+data[0].d+" → "+data[data.length-1].d+")":""));
+        if(!data.length) throw new Error("No rows found in this file — check it is the full report");
+        if(p.k==="vouchers"){
+          var parts=[]; for(var i=0;i<data.length;i+=2500) parts.push(data.slice(i,i+2500));
+          var c2=Promise.resolve(); parts.forEach(function(pt,j){ c2=c2.then(function(){ return api("ingest",{kind:"vouchers",data:pt,file:f.name}).then(function(r){ if(!r.ok) throw new Error(r.error||"upload failed"); if(parts.length>1) line("   …sent part "+(j+1)+" of "+parts.length); }); }); });
           return c2.then(function(){ line("   ✅ saved"); });
         }
-        var rows=k==="tb"?parseTB(x):k==="stock"?parseStock(x):parseBills(x);
-        line("   ✓ "+label+": "+rows.length+" rows");
-        return api("ingest",{kind:k,data:rows,asof:today(),file:f.name}).then(function(r){ line(r.ok?"   ✅ saved":"   ❌ "+(r.error||"failed")); });
+        return api("ingest",{kind:p.k,data:data,asof:today(),file:f.name}).then(function(r){ line(r.ok?"   ✅ saved":"   ❌ "+(r.error||"failed")); });
       }).catch(function(e){ line("   ❌ "+e.message); });
     }); });
     chain.then(function(){ line("Done."); if(OWNER) load(); });
@@ -156,7 +202,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
       var sm=s.filter(function(v){return v.d.slice(0,7)===mo;}).reduce(function(a,v){return a+v.a;},0);
       var last=m.vouchers?m.vouchers.upTo:null, sl=s.filter(function(v){return v.d===last;}).reduce(function(a,v){return a+v.a;},0);
       var rv=(D.recv&&D.recv.rows)||[], py=(D.pay&&D.pay.rows)||[];
-      var cashBank=((D.tb&&D.tb.rows)||[]).filter(function(r){return /cash|bank(?!\s*charge)/i.test(r.name)&&!/interest|loan|od\b/i.test(r.name);});
+      var cashBank=((D.tb&&D.tb.rows)||[]).filter(function(r){return /cash|bank/i.test(r.name)&&!/interest|loan|\bod\b|occ|overdraft|charge/i.test(r.name);});
       $("view").innerHTML='<div class="kpis">'+
         '<div class="kpi"><span>Sales on '+esc(last||"—")+'</span><b>'+inr(sl)+'</b></div>'+
         '<div class="kpi"><span>Sales this month</span><b>'+inr(sm)+'</b></div>'+
@@ -206,8 +252,8 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   }
   function drawUpload(){
     $("view").innerHTML='<div class="card"><h2>⬆ Upload Tally exports</h2>'+
-      '<div class="hint">In Tally: open each report → <b>Alt+E (Export)</b> → Format <b>XML</b>. Upload all five here:<br>Day Book (today) · Trial Balance · Outstandings → Receivables · Outstandings → Payables · Stock Summary.<br>Name the payables file with "payables" in it. Files are read on this computer — only the figures are sent.</div>'+
-      '<div class="drop" id="drop" style="margin-top:12px"><div style="font-size:28px">📂</div><b>Tap to choose files</b> or drag them here</div><input type="file" id="fin" multiple accept=".xml,.xls,.xlsx" hidden>'+
+      '<div class="hint">In Tally: open each report → <b>Alt+E (Export)</b>. Excel, PDF or XML all work. Upload the five reports:<br>Day Book (today) · Trial Balance · Outstandings → Receivables · Outstandings → Payables · Stock Summary.<br>Name the payables file with "payables" in it. Files are read on this computer — only the figures are sent.</div>'+
+      '<div class="drop" id="drop" style="margin-top:12px"><div style="font-size:28px">📂</div><b>Tap to choose files</b> or drag them here</div><input type="file" id="fin" multiple accept=".xml,.xls,.xlsx,.xlsm,.csv,.pdf" hidden>'+
       '<div class="log" id="uplog"></div></div>';
     var dz=$("drop"), fin=$("fin");
     dz.onclick=function(){ fin.click(); }; fin.onchange=function(){ handleFiles(fin.files); fin.value=""; };
@@ -231,7 +277,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   $("pinGo").onclick=function(){ pin=$("pin").value.trim(); if(pin) start(); };
   $("pin").addEventListener("keydown",function(e){ if(e.key==="Enter") $("pinGo").click(); });
   if(pin) start(); else lock("");
-  window.__tally={parseXml:parseXml,kindOf:kindOf,parseVouchers:parseVouchers,parseTB:parseTB,parseBills:parseBills,parseStock:parseStock};
+  window.__tally={dayBookRows:dayBookRows,tbRows:tbRows,billRows:billRows,stockRows:stockRows,classifyRows:classifyRows,parseXml:parseXml,kindOf:kindOf,parseVouchers:parseVouchers,parseTB:parseTB,parseBills:parseBills,parseStock:parseStock};
 })();
 </script>
 </body>
