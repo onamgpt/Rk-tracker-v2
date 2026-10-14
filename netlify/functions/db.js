@@ -115,6 +115,7 @@ function fromRow(r) {
   }, base);
 }
 
+exports.storageUpload = storageUpload;
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return OK({});
   if (!SUPABASE_URL || !SERVICE_KEY) {

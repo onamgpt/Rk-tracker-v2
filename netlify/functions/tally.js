@@ -51,6 +51,29 @@ async function ingest(kind, data, file, by, asof) {
 }
 exports.ingest = ingest;
 
+// ---- Vault: keep every original Tally file, with a preview of what was read ----
+const LABELS = { vouchers: "Day Book", tb: "Trial Balance", recv: "Receivables", pay: "Payables", stock: "Stock" };
+async function vaultAdd(entry) {
+  const v = (await kvGet("tally_vault")) || [];
+  v.unshift(Object.assign({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: new Date().toISOString() }, entry));
+  await kvSet("tally_vault", v.slice(0, 500));
+}
+// buf: Buffer of the original file; returns the stored link (or "")
+async function vaultSaveFile(name, type, buf, meta) {
+  let url = "", note = "";
+  try {
+    if (buf && buf.length <= 4.3 * 1024 * 1024) {
+      const r = await db.storageUpload("tally", { name, type: type || "application/octet-stream", data: buf.toString("base64") });
+      url = (r && r.url) || ""; if (!url) note = (r && (r.error || r.detail)) || "not stored";
+    } else note = "file too large to keep (over 4 MB)";
+  } catch (e) { note = String(e.message || e); }
+  const rows = (meta && meta.data) || [];
+  await vaultAdd({ name, kind: meta && meta.kind, label: LABELS[meta && meta.kind] || "Unrecognised", rows: (meta && meta.total != null) ? meta.total : rows.length, size: buf ? buf.length : 0,
+    by: (meta && meta.by) || "", source: (meta && meta.source) || "upload", from: (meta && meta.from) || "", url, note, preview: rows.slice(0, 40) });
+  return url;
+}
+exports.vaultSaveFile = vaultSaveFile;
+
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: H, body: "" };
   let b = {}; try { b = JSON.parse(event.body || "{}"); } catch (e) { return OK({ error: "bad request" }); }
@@ -62,6 +85,16 @@ exports.handler = async (event) => {
   const owner = user === "main";
   if (!owner && !(s.uploaders || []).includes(user)) return OK({ error: "not allowed" });
   try {
+    if (b.action === "vaultSave") {   // page upload: keep the original file + what was read
+      const f = b.file || {};
+      const buf = f.data ? Buffer.from(String(f.data).replace(/^data:[^,]+,/, ""), "base64") : null;
+      const url = await vaultSaveFile(String(f.name || "file"), f.type, buf, { kind: b.kind, data: b.preview || [], total: b.total, by: user, source: "upload" });
+      return OK({ ok: true, url });
+    }
+    if (b.action === "vault") {
+      if (!owner) return OK({ error: "owner only" });
+      return OK({ ok: true, vault: (await kvGet("tally_vault")) || [] });
+    }
     if (b.action === "ingest") {
       const r = await ingest(b.kind, b.data, b.file, user, b.asof);
       return OK(r);

@@ -157,6 +157,14 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
       var qs=String(r[q]==null?"":r[q]); out.push({item:name,qty:num(qs),unit:(qs.match(/[A-Za-z]+/)||[""])[0],rate:rt>=0?num(r[rt]):0,val:v>=0?Math.abs(num(r[v])):0}); }
     return out; }
 
+  function b64(buf){ var b=new Uint8Array(buf), out="", step=0x8000; for(var i=0;i<b.length;i+=step){ out+=String.fromCharCode.apply(null,b.subarray(i,i+step)); } return btoa(out); }
+  function vaultKeep(f,kind,data,line){
+    return f.arrayBuffer().then(function(buf){
+      var big=buf.byteLength>4.3*1024*1024;
+      return api("vaultSave",{kind:kind||null,total:(data||[]).length,preview:(data||[]).slice(0,40),file:{name:f.name,type:f.type||"",data:big?"":b64(buf)}})
+        .then(function(r){ if(line) line(r&&r.ok?(big?"   🗄 noted in Vault (file too large to keep a copy)":"   🗄 copy kept in Vault"):"   ⚠ Vault: "+((r&&r.error)||"not saved")); });
+    }).catch(function(){});
+  }
   function handleFiles(files){
     var out=$("uplog"); out.textContent="";
     var line=function(t){ out.textContent+=t+"\n"; };
@@ -173,20 +181,21 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
         if(p.x){ data = p.k==="vouchers"?parseVouchers(p.x): p.k==="tb"?parseTB(p.x): p.k==="stock"?parseStock(p.x): parseBills(p.x); }
         else p.sheets.forEach(function(s){ var rr=s.rows; data=data.concat(p.k==="vouchers"?dayBookRows(rr): p.k==="tb"?tbRows(rr): p.k==="stock"?stockRows(rr): billRows(rr)); });
         line("   ✓ "+label+": "+data.length+(p.k==="vouchers"?" vouchers":" rows")+(p.k==="vouchers"&&data.length?" ("+data[0].d+" → "+data[data.length-1].d+")":""));
-        if(!data.length) throw new Error("No rows found in this file — check it is the full report");
+        var kept=vaultKeep(f,p.k,data,line);
+        if(!data.length) return kept.then(function(){ throw new Error("No rows found in this file — check it is the full report"); });
         if(p.k==="vouchers"){
           var parts=[]; for(var i=0;i<data.length;i+=2500) parts.push(data.slice(i,i+2500));
           var c2=Promise.resolve(); parts.forEach(function(pt,j){ c2=c2.then(function(){ return api("ingest",{kind:"vouchers",data:pt,file:f.name}).then(function(r){ if(!r.ok) throw new Error(r.error||"upload failed"); if(parts.length>1) line("   …sent part "+(j+1)+" of "+parts.length); }); }); });
           return c2.then(function(){ line("   ✅ saved"); });
         }
         return api("ingest",{kind:p.k,data:data,asof:today(),file:f.name}).then(function(r){ line(r.ok?"   ✅ saved":"   ❌ "+(r.error||"failed")); });
-      }).catch(function(e){ line("   ❌ "+e.message); });
+      }).catch(function(e){ line("   ❌ "+e.message); if(/recognise/.test(e.message)) return vaultKeep(f,null,[],line); });
     }); });
-    chain.then(function(){ line("Done."); if(OWNER) load(); });
+    chain.then(function(){ line("Done."); VAULT=null; if(OWNER) load(); });
   }
 
   /* ===================== Views ===================== */
-  var TABS=OWNER?[["home","🏠 Summary"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"]];
+  var TABS=OWNER?[["home","🏠 Summary"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"]];
   function drawTabs(){ $("tabs").innerHTML=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(t[0]===tab?"on":"")+'">'+t[1]+'</button>';}).join("");
     Array.prototype.forEach.call($("tabs").children,function(b){ b.onclick=function(){ tab=b.dataset.t; draw(); }; }); }
   function sales(){ return (D.vouchers||[]).filter(function(v){return /sales/i.test(v.t)&&!/order|return|credit/i.test(v.t);}); }
@@ -195,6 +204,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     drawTabs();
     if(tab==="upload") return drawUpload();
     if(tab==="ask") return drawAsk();
+    if(tab==="vault") return drawVault();
     if(!D) { $("view").innerHTML='<div class="card">Loading…</div>'; return; }
     var m=D.meta||{};
     $("asof").textContent=m.vouchers?"· data up to "+m.vouchers.upTo:"· no data yet";
@@ -282,6 +292,30 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
       var lg=(D&&D.mailLog)||[]; if($("gmlog")) $("gmlog").innerHTML=lg.length?'<b>Recent email imports</b>\n'+lg.slice(0,5).map(function(e){ return esc(new Date(e.at).toLocaleString("en-IN"))+(e.manual?" (manual)":"")+(e.error?" — ⚠ "+esc(e.error):"")+"\n"+e.files.map(function(f){return "   • "+esc(f);}).join("\n"); }).join("\n"):"";
     });
   }
+  /* ===================== Vault ===================== */
+  var VAULT=null, vFilter="all";
+  function drawVault(){
+    if(VAULT===null){ $("view").innerHTML='<div class="card">Loading the vault…</div>'; return api("vault").then(function(r){ VAULT=(r&&r.vault)||[]; drawVault(); }); }
+    var kinds=[["all","All"],["vouchers","Day Book"],["tb","Trial Balance"],["recv","Receivables"],["pay","Payables"],["stock","Stock"],["none","Unrecognised"]];
+    var list=VAULT.filter(function(v){ return vFilter==="all"||(vFilter==="none"?!v.kind:v.kind===vFilter); });
+    $("view").innerHTML='<div class="card"><h2>🗄 Vault — every file received</h2><div class="hint">Each Tally file uploaded here or emailed by Maadhu is kept as the original, with a preview of what the tracker read from it, so you can check the figures yourself. Kept privately in your Supabase storage.</div>'+
+      '<div style="margin-top:10px">'+kinds.map(function(k){ return '<button class="btn" data-vf="'+k[0]+'" style="margin:3px 4px 0 0;padding:6px 10px;font-size:12.5px'+(vFilter===k[0]?';background:#14532d;color:#fff;border-color:#14532d':'')+'">'+k[1]+'</button>'; }).join("")+'<button class="btn" id="vRef" style="margin:3px 0 0;padding:6px 10px;font-size:12.5px">↻</button></div></div>'+
+      (list.length?list.map(function(v,i){
+        return '<div class="card"><div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:220px"><b>'+esc(v.name)+'</b><br>'+
+          '<span class="tag '+(v.kind?"g":"r")+'">'+esc(v.label||"Unrecognised")+'</span> <span class="hint">'+(v.kind?v.rows+(v.kind==="vouchers"?" vouchers":" rows"):"not read")+' · '+Math.round((v.size||0)/1024)+' KB · '+esc(new Date(v.at).toLocaleString("en-IN"))+' · '+(v.source==="email"?"📧 email"+(v.from?" ("+esc(v.from)+")":""):"⬆ upload by "+esc(v.by||""))+'</span>'+
+          (v.note?'<div class="hint" style="color:#8a4b00">'+esc(v.note)+'</div>':'')+'</div>'+
+          '<div style="display:flex;gap:6px">'+(v.url?'<a class="btn" href="'+esc(v.url)+'" target="_blank" rel="noopener" style="text-decoration:none">📄 Open original</a>':'')+(v.preview&&v.preview.length?'<button class="btn" data-pv="'+i+'">👁 What was read</button>':'')+'</div></div><div id="pv'+i+'"></div></div>'; }).join(""):'<div class="card hint">Nothing here yet. Files uploaded from now on — and Maadhu\'s emailed files — will appear here.</div>');
+    Array.prototype.forEach.call(document.querySelectorAll("[data-vf]"),function(b){ b.onclick=function(){ vFilter=b.dataset.vf; drawVault(); }; });
+    $("vRef").onclick=function(){ VAULT=null; drawVault(); };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-pv]"),function(b){ b.onclick=function(){
+      var v=list[+b.dataset.pv], box=$("pv"+b.dataset.pv); if(box.innerHTML){ box.innerHTML=""; return; }
+      var rows=v.preview||[], cols=Object.keys(rows[0]||{}).filter(function(c){ return c!=="i"&&c!=="r"; });
+      var head={d:"Date",t:"Type",n:"No.",p:"Party",a:"Amount",name:"Ledger",dr:"Debit",cr:"Credit",date:"Bill date",ref:"Bill",party:"Party",amt:"Amount",due:"Due",over:"Days",item:"Item",qty:"Qty",unit:"Unit",rate:"Rate",val:"Value"};
+      var money={a:1,dr:1,cr:1,amt:1,rate:1,val:1};
+      box.innerHTML='<div class="hint" style="margin:8px 0">First '+rows.length+' of '+v.rows+' rows, as the tracker read them. Compare with the original file.</div><div class="scroll"><table><tr>'+cols.map(function(c){ return '<th'+(money[c]?' class="n"':'')+'>'+esc(head[c]||c)+'</th>'; }).join("")+'</tr>'+
+        rows.map(function(r){ return '<tr>'+cols.map(function(c){ return money[c]?'<td class="n">'+inr(r[c])+'</td>':'<td>'+esc(r[c])+'</td>'; }).join("")+'</tr>'; }).join("")+'</table></div>'; }; });
+  }
+
   /* ===================== Ask AI ===================== */
   var CHAT=[], busy=false;
   var SUGGEST=["Who should I chase for payment this week?","Compare sales month by month and explain the trend","Which customers bought less this month than usual?","What looks wrong or unusual in the books?","Summarise the business for a bank meeting","How much cash do I need for the next 30 days of payables?"];
@@ -320,7 +354,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     }).catch(function(){ busy=false; CHAT.push({role:"a",t:"⚠ No internet"}); drawChat(); });
   }
 
-  function load(){ api("get").then(function(r){ if(r.ok){ D=r; draw(); } }); }
+  function load(){ api("get").then(function(r){ if(r.ok){ D=r; if(tab!=="upload") draw(); else if($("asof")&&D.meta&&D.meta.vouchers) $("asof").textContent="· data up to "+D.meta.vouchers.upTo; } }); }
 
   /* ===================== PIN ===================== */
   function lock(err){ $("app").hidden=true; $("pinBox").hidden=false; $("pinErr").textContent=err||""; }

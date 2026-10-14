@@ -24,6 +24,7 @@ exports.handler = async (event) => {
         try {
           const buf = await G.attachment(tok, m.id, a.id);
           const r = P.parseExcel(buf, a.name);
+          await T.vaultSaveFile(a.name, a.type, buf, { kind: r.kind, data: r.data || [], by: "email", source: "email", from: m.from });
           if (r.error || !r.data.length) { entry.files.push(a.name + " — not recognised"); continue; }
           const res = await T.ingest(r.kind, r.data, a.name, "email", P.todayIST());
           entry.files.push(a.name + " — " + LABEL[r.kind] + ": " + r.data.length + (res.ok ? " ✓" : " ✗ " + res.error));
