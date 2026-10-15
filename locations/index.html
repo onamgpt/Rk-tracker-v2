@@ -104,18 +104,24 @@ select{font:inherit;padding:8px;border:1px solid #c9d2dc;border-radius:9px;backg
     Array.prototype.forEach.call(document.querySelectorAll("[data-del]"),function(b){ b.onclick=function(){ var x=b.dataset.del.split("|"); if(!confirm("Delete this location from "+x[0]+"'s file?")) return;
       api("deleteVisit",{person:x[0],id:x[1]}).then(function(){ D.files[x[0]]=D.files[x[0]].filter(function(v){return v.id!==x[1];}); draw(); }); }; });
   }
+  var PCOL=["#e6194b","#3cb44b","#4363d8","#f58231","#911eb4","#008080","#9a6324","#f032e6","#000075","#808000"];
   function drawMap(){
-    $("view").innerHTML='<div class="card"><div id="map"></div><div class="hint" style="margin-top:8px">🏠 = HQ · pins coloured: <span style="color:'+COL.HQ+'">● HQ</span> <span style="color:'+COL["Ex-HQ"]+'">● Ex-HQ</span> <span style="color:'+COL.Outstation+'">● Outstation</span>. Tap a pin for details. Map © OpenStreetMap.</div></div>';
+    var ps=people();
+    $("view").innerHTML='<div class="card"><div id="map"></div><div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;font-size:13px">'+
+      ps.map(function(p){ var i=D.people.indexOf(p), n=visits(p.name).filter(inMonth).length; return '<span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+PCOL[i%PCOL.length]+';vertical-align:middle"></span> '+esc(p.name)+' ('+n+')</span>'; }).join("")+
+      '</div><div class="hint" style="margin-top:6px">Each dot is a place visited'+(month?" in "+mname(month):"")+'. Tap a dot for the date, place and km. 🏠 = HQ. Map © OpenStreetMap.</div></div>';
     if(map){ map.remove(); map=null; }
     map=L.map("map"); L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:18,attribution:"© OpenStreetMap contributors"}).addTo(map);
     var pts=[];
-    people().forEach(function(p){
-      L.marker([p.hqLat,p.hqLng],{icon:L.divIcon({html:'<div style="font-size:22px">🏠</div>',className:"",iconSize:[24,24],iconAnchor:[12,12]})}).addTo(map).bindPopup("<b>"+esc(p.name)+"</b> — HQ "+esc(p.hq)); pts.push([p.hqLat,p.hqLng]);
+    ps.forEach(function(p){
+      var col=PCOL[D.people.indexOf(p)%PCOL.length];
+      L.marker([p.hqLat,p.hqLng],{icon:L.divIcon({html:'<div style="font-size:16px">🏠</div>',className:"",iconSize:[18,18],iconAnchor:[9,9]})}).addTo(map).bindPopup("<b>"+esc(p.name)+"</b> — HQ "+esc(p.hq));
       visits(p.name).filter(inMonth).forEach(function(v){
-        L.circleMarker([v.lat,v.lng],{radius:7,color:"#fff",weight:2,fillColor:COL[v.band],fillOpacity:.9}).addTo(map)
-          .bindPopup("<b>"+esc(p.name)+"</b> · "+esc(v.date)+"<br>"+esc(v.place||"")+"<br>"+Math.round(v.km)+" km "+(v.exact?"by road":"(est.)")+" · "+esc(v.band));
-        if(person!=="all") L.polyline([[p.hqLat,p.hqLng],[v.lat,v.lng]],{color:COL[v.band],weight:1,opacity:.35}).addTo(map);
-        pts.push([v.lat,v.lng]); }); });
+        L.circleMarker([v.lat,v.lng],{radius:7,color:"#fff",weight:2,fillColor:col,fillOpacity:.95}).addTo(map)
+          .bindPopup("<b>"+esc(p.name)+"</b> · "+esc(v.date)+(v.time?" "+esc(v.time):"")+"<br>"+esc(v.place||"")+"<br>"+Math.round(v.km)+" km "+(v.exact?"by road":"(est.)")+" · "+esc(v.band));
+        pts.push([v.lat,v.lng]); });
+      if(!pts.length) pts.push([p.hqLat,p.hqLng]);
+    });
     if(pts.length) map.fitBounds(pts,{padding:[30,30],maxZoom:12}); else map.setView([10.5,76.5],7);
   }
   function drawTools(){
