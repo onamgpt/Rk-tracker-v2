@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Team Locations · Onam</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f3f5f8;color:#1b2430;font:15px/1.45 -apple-system,"Segoe UI",Roboto,sans-serif}
+header{background:#1e3a5f;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:1000}
+header h1{margin:0;font-size:18px;flex:1}
+header a{color:#dbe7ff;font-size:13px;text-decoration:none;border:1px solid #3b5c94;border-radius:8px;padding:5px 9px}
+.wrap{max-width:1000px;margin:0 auto;padding:12px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.tabs button{padding:9px 13px;border-radius:9px;border:1px solid #c9d2dc;background:#fff;font-weight:700;font-size:14px;cursor:pointer}
+.tabs button.on{background:#1e3a5f;color:#fff;border-color:#1e3a5f}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.card h2{font-size:14px;margin:0 0 10px;color:#1e3a5f;text-transform:uppercase;letter-spacing:.3px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+td,th{padding:6px;border-bottom:1px solid #edf0f3;text-align:left;vertical-align:top}
+th{font-size:12px;color:#5a6676}
+td.n,th.n{text-align:right;white-space:nowrap}
+tr.tot td{font-weight:800;border-top:2px solid #c9d2dc}
+.btn{padding:9px 13px;border-radius:9px;border:1px solid #c9d2dc;background:#fff;font-weight:700;cursor:pointer;font-size:14px;text-decoration:none;color:inherit;display:inline-block}
+.pri{background:#1e3a5f;color:#fff;border-color:#1e3a5f}.bad{background:#fbecee;color:#8a2434;border-color:#f0c3ca}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+select{font:inherit;padding:8px;border:1px solid #c9d2dc;border-radius:9px;background:#fff}
+.hint{font-size:13px;color:#6b7686}
+.tag{font-size:12px;font-weight:700;padding:2px 8px;border-radius:9px;color:#fff}
+.scroll{overflow-x:auto}
+#map{height:520px;border-radius:12px}
+.pin{max-width:320px;margin:15vh auto;text-align:center}
+.pin input{font-size:26px;text-align:center;letter-spacing:8px;margin:12px 0;width:100%;padding:10px;border:1px solid #c9d2dc;border-radius:9px}
+.log{white-space:pre-wrap;font-size:13px}
+</style>
+</head>
+<body>
+<div id="pinBox" class="pin" hidden>
+  <div style="font-size:34px">📍</div><h2 style="margin:6px 0">Team Locations</h2>
+  <div class="hint">Enter your tracker PIN</div>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off">
+  <button class="btn pri" id="pinGo" style="width:100%">Open</button>
+  <div id="pinErr" style="color:#b42318;margin-top:10px"></div>
+</div>
+<div id="app" hidden>
+<header><h1>📍 Team Locations</h1><a href="/">Tracker</a></header>
+<div class="wrap">
+  <div class="tabs" id="tabs"></div>
+  <div class="card row" id="filters"></div>
+  <div id="view"></div>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function(){
+  var $=function(i){return document.getElementById(i);};
+  var pin=sessionStorage.getItem("loc_pin")||"", D=null, tab="month", person="all", month="", map=null;
+  var COL={"HQ":"#2a8a4a","Ex-HQ":"#2a6a8a","Outstation":"#8a2a2a"}, RANK={"HQ":1,"Ex-HQ":2,"Outstation":3};
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function inr(n){return "₹"+Math.round(Number(n)||0).toLocaleString("en-IN");}
+  function api(a,x){ return fetch("/.netlify/functions/locations",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action:a,pin:pin},x||{}))}).then(function(r){return r.json();}); }
+  function mname(m){ var d=new Date(m+"-01T00:00:00"); return d.toLocaleDateString("en-IN",{month:"long",year:"numeric"}); }
+  function visits(name){ return (D.files[name]||[]); }
+  function inMonth(v){ return !month||String(v.date).slice(0,7)===month; }
+  function people(){ return D.people.filter(function(p){ return person==="all"||p.name===person; }); }
+  // once-per-day allowance: highest band that day
+  function monthStats(p){
+    var days={}; visits(p.name).filter(inMonth).forEach(function(v){ var d=days[v.date]||(days[v.date]={band:"HQ",km:0,n:0}); d.n++; if(RANK[v.band]>RANK[d.band]) d.band=v.band; if(v.km>d.km) d.km=v.km; });
+    var s={days:0,visits:0,km:0,HQ:0,"Ex-HQ":0,Outstation:0,amt:0,est:0};
+    Object.keys(days).forEach(function(k){ var d=days[k]; s.days++; s.visits+=d.n; s.km+=d.km; s[d.band]++; s.amt+=(p.allowance&&p.allowance[d.band])||0; });
+    s.est=visits(p.name).filter(inMonth).filter(function(v){return !v.exact;}).length;
+    return s;
+  }
+  function months(){ var set={}; D.people.forEach(function(p){ visits(p.name).forEach(function(v){ set[String(v.date).slice(0,7)]=1; }); }); var cur=new Date(Date.now()+5.5*3600e3).toISOString().slice(0,7); set[cur]=1; return Object.keys(set).sort().reverse(); }
+  function drawFilters(){
+    var ms=months(); if(!month) month=ms[0];
+    $("filters").innerHTML='<b>Show:</b><select id="fp"><option value="all">All people</option>'+D.people.map(function(p){return '<option'+(person===p.name?" selected":"")+'>'+esc(p.name)+'</option>';}).join("")+'</select>'+
+      '<select id="fm"><option value="">All months</option>'+ms.map(function(m){return '<option value="'+m+'"'+(month===m?" selected":"")+'>'+mname(m)+'</option>';}).join("")+'</select>'+
+      '<button class="btn" id="xl">⬇ Excel</button>';
+    $("fp").onchange=function(){ person=this.value; draw(); }; $("fm").onchange=function(){ month=this.value; draw(); }; $("xl").onclick=exportXL;
+  }
+  function draw(){
+    $("tabs").innerHTML=[["month","💰 Monthly expense"],["files","🗂 Location files"],["map","🗺 Map"],["tools","⚙ Import & tools"]].map(function(t){return '<button data-t="'+t[0]+'" class="'+(tab===t[0]?"on":"")+'">'+t[1]+'</button>';}).join("");
+    Array.prototype.forEach.call($("tabs").children,function(b){ b.onclick=function(){ tab=b.dataset.t; draw(); }; });
+    drawFilters(); $("filters").style.display=tab==="tools"?"none":"";
+    if(tab==="month") drawMonth(); else if(tab==="files") drawFiles(); else if(tab==="map") drawMap(); else drawTools();
+  }
+  function drawMonth(){
+    var T={days:0,visits:0,km:0,HQ:0,"Ex-HQ":0,Outstation:0,amt:0}, rows=people().map(function(p){ var s=monthStats(p); Object.keys(T).forEach(function(k){T[k]+=s[k];}); return [p,s]; });
+    $("view").innerHTML='<div class="card scroll"><h2>'+(month?mname(month):"All months")+' — allowance, counted once per day</h2><table><tr><th>Person</th><th>HQ</th><th class="n">Days</th><th class="n">Visits</th><th class="n">HQ</th><th class="n">Ex-HQ</th><th class="n">Outstation</th><th class="n">Road km*</th><th class="n">Allowance</th></tr>'+
+      rows.map(function(r){ var p=r[0],s=r[1]; return '<tr><td><b>'+esc(p.name)+'</b>'+(s.est?' <span class="hint">('+s.est+' est.)</span>':'')+'</td><td>'+esc(p.hq)+'</td><td class="n">'+s.days+'</td><td class="n">'+s.visits+'</td><td class="n">'+s.HQ+'</td><td class="n">'+s["Ex-HQ"]+'</td><td class="n">'+s.Outstation+'</td><td class="n">'+Math.round(s.km).toLocaleString("en-IN")+'</td><td class="n"><b>'+inr(s.amt)+'</b></td></tr>'; }).join("")+
+      (rows.length>1?'<tr class="tot"><td>Team total</td><td></td><td class="n">'+T.days+'</td><td class="n">'+T.visits+'</td><td class="n">'+T.HQ+'</td><td class="n">'+T["Ex-HQ"]+'</td><td class="n">'+T.Outstation+'</td><td class="n">'+Math.round(T.km).toLocaleString("en-IN")+'</td><td class="n">'+inr(T.amt)+'</td></tr>':'')+
+      '</table><div class="hint" style="margin-top:8px">Each day pays one allowance at the highest band reached that day. *Road km = farthest point from HQ each day, by road (Google). "est." = Google could not answer, so straight-line × 1.2 was used.</div></div>'+
+      '<div class="card scroll"><h2>Daily rates</h2><table><tr><th>Person</th><th class="n">HQ</th><th class="n">Ex-HQ</th><th class="n">Outstation</th></tr>'+people().map(function(p){ return '<tr><td>'+esc(p.name)+'</td><td class="n">'+inr(p.allowance.HQ)+'</td><td class="n">'+inr(p.allowance["Ex-HQ"])+'</td><td class="n">'+inr(p.allowance.Outstation)+'</td></tr>'; }).join("")+'</table><div class="hint">Bands: HQ up to 100 km, Ex-HQ up to 300 km, Outstation beyond.</div></div>';
+  }
+  function drawFiles(){
+    $("view").innerHTML=people().map(function(p){ var list=visits(p.name).filter(inMonth).slice().reverse();
+      return '<div class="card scroll"><h2>🗂 '+esc(p.name)+' · HQ '+esc(p.hq)+' · '+list.length+' location(s)</h2>'+(list.length?'<table><tr><th>Date</th><th>Place</th><th class="n">Road km</th><th>Band</th><th></th></tr>'+
+        list.map(function(v){ return '<tr><td>'+esc(v.date)+(v.time?' <span class="hint">'+esc(v.time)+'</span>':'')+'</td><td>'+esc(v.place||(v.lat.toFixed(4)+", "+v.lng.toFixed(4)))+'<br><a class="hint" target="_blank" rel="noopener" href="https://www.google.com/maps?q='+v.lat+','+v.lng+'">open map</a></td>'+
+          '<td class="n">'+Math.round(v.km)+(v.exact?(v.min?' <span class="hint">· '+v.min+' min</span>':''):' <span class="hint">est.</span>')+'</td><td><span class="tag" style="background:'+COL[v.band]+'">'+esc(v.band)+'</span></td>'+
+          '<td><button class="btn bad" style="padding:3px 8px;font-size:12px" data-del="'+esc(p.name)+'|'+v.id+'">✕</button></td></tr>'; }).join("")+'</table>':'<div class="hint">Nothing for this period.</div>')+'</div>'; }).join("");
+    Array.prototype.forEach.call(document.querySelectorAll("[data-del]"),function(b){ b.onclick=function(){ var x=b.dataset.del.split("|"); if(!confirm("Delete this location from "+x[0]+"'s file?")) return;
+      api("deleteVisit",{person:x[0],id:x[1]}).then(function(){ D.files[x[0]]=D.files[x[0]].filter(function(v){return v.id!==x[1];}); draw(); }); }; });
+  }
+  function drawMap(){
+    $("view").innerHTML='<div class="card"><div id="map"></div><div class="hint" style="margin-top:8px">🏠 = HQ · pins coloured: <span style="color:'+COL.HQ+'">● HQ</span> <span style="color:'+COL["Ex-HQ"]+'">● Ex-HQ</span> <span style="color:'+COL.Outstation+'">● Outstation</span>. Tap a pin for details. Map © OpenStreetMap.</div></div>';
+    if(map){ map.remove(); map=null; }
+    map=L.map("map"); L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:18,attribution:"© OpenStreetMap contributors"}).addTo(map);
+    var pts=[];
+    people().forEach(function(p){
+      L.marker([p.hqLat,p.hqLng],{icon:L.divIcon({html:'<div style="font-size:22px">🏠</div>',className:"",iconSize:[24,24],iconAnchor:[12,12]})}).addTo(map).bindPopup("<b>"+esc(p.name)+"</b> — HQ "+esc(p.hq)); pts.push([p.hqLat,p.hqLng]);
+      visits(p.name).filter(inMonth).forEach(function(v){
+        L.circleMarker([v.lat,v.lng],{radius:7,color:"#fff",weight:2,fillColor:COL[v.band],fillOpacity:.9}).addTo(map)
+          .bindPopup("<b>"+esc(p.name)+"</b> · "+esc(v.date)+"<br>"+esc(v.place||"")+"<br>"+Math.round(v.km)+" km "+(v.exact?"by road":"(est.)")+" · "+esc(v.band));
+        if(person!=="all") L.polyline([[p.hqLat,p.hqLng],[v.lat,v.lng]],{color:COL[v.band],weight:1,opacity:.35}).addTo(map);
+        pts.push([v.lat,v.lng]); }); });
+    if(pts.length) map.fitBounds(pts,{padding:[30,30],maxZoom:12}); else map.setView([10.5,76.5],7);
+  }
+  function drawTools(){
+    var m=D.migration;
+    $("view").innerHTML='<div class="card"><h2>📧 Import from Gmail</h2><div class="hint">'+(D.gmail?"✅ Gmail connected. ":"⚠ Gmail is not connected — connect it on the Tally page (⬆ Upload). ")+'Every morning at 9:15 the tracker reads location emails from the team (any email from their address with a Google Maps link, or with #location in the subject) and adds them to each person\'s file — not to the main tracker. #Trackerv23 emails are imported into the tracker at the same time.</div>'+
+      '<div class="row" style="margin-top:10px"><button class="btn pri" id="chk">📥 Check location emails now</button><button class="btn" id="morn">Run full 9:15 import now</button><span id="chkMsg" class="hint"></span></div></div>'+
+      '<div class="card"><h2>🗃 Old location entries in the main tracker</h2>'+
+      (!m?'<div class="hint">Step 1: copy the location entries already in the tracker into these files.</div><button class="btn pri" id="mig" style="margin-top:8px">Copy old entries into Team Locations</button>':
+        '<div class="hint">Copied '+m.copied+' of '+m.found+' old entries ('+esc(new Date(m.at).toLocaleString("en-IN"))+'). '+(m.removed?"✅ Removed "+m.removedCount+" from the main tracker.":"Check the files and monthly totals, then:")+'</div>'+
+        (m.removed?'':'<div class="row" style="margin-top:8px"><button class="btn bad" id="rem">Remove those '+m.pending+' entries from the main tracker</button><button class="btn" id="mig">Copy again</button></div>'))+'<div id="migMsg" class="hint" style="margin-top:6px"></div></div>'+
+      '<div class="card"><h2>🧾 Activity</h2><div class="log">'+((D.log||[]).map(function(e){ return esc(new Date(e.at).toLocaleString("en-IN"))+" · "+esc(e.job)+(e.error?" — ⚠ "+esc(e.error):"")+"\n"+(e.lines||[]).map(function(x){return "   "+esc(x);}).join("\n")+((e.added||[]).length?"\n"+e.added.map(function(x){return "     + "+esc(x);}).join("\n"):"")+((e.skipped||[]).length?"\n"+e.skipped.map(function(x){return "     – "+esc(x);}).join("\n"):""); }).join("\n\n")||"Nothing yet.")+'</div></div>';
+    var later=function(msg,el){ $(el).textContent=msg; setTimeout(function(){ load(); },45000); };
+    $("chk").onclick=function(){ api("locations").then(function(){ later("Checking… results appear below in about a minute.","chkMsg"); }); };
+    $("morn").onclick=function(){ if(confirm("Run the full 9:15 import now (#Trackerv23 emails + locations)?")) api("morning").then(function(){ later("Running… about a minute.","chkMsg"); }); };
+    if($("mig")) $("mig").onclick=function(){ api("migrate").then(function(){ later("Copying… this takes a minute or two (road distances are recalculated).","migMsg"); }); };
+    if($("rem")) $("rem").onclick=function(){ if(!confirm("Remove "+m.pending+" old location entries from the MAIN tracker?\nThey are already copied into Team Locations.")) return; if(!confirm("Final check — remove them now?")) return; api("remove").then(function(){ later("Removing…","migMsg"); }); };
+  }
+  function exportXL(){
+    var go=function(){
+      var wb=XLSX.utils.book_new();
+      var sum=[["Person","HQ","Days","Visits","HQ days","Ex-HQ days","Outstation days","Road km","Allowance (₹)"]];
+      people().forEach(function(p){ var s=monthStats(p); sum.push([p.name,p.hq,s.days,s.visits,s.HQ,s["Ex-HQ"],s.Outstation,Math.round(s.km),s.amt]); });
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(sum),"Summary");
+      people().forEach(function(p){ var rows=[["Date","Time","Place","Latitude","Longitude","Road km","Drive min","By road?","Band","Map"]];
+        visits(p.name).filter(inMonth).forEach(function(v){ rows.push([v.date,v.time||"",v.place||"",v.lat,v.lng,v.km,v.min||"",v.exact?"Yes":"Estimate",v.band,"https://www.google.com/maps?q="+v.lat+","+v.lng]); });
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),p.name.slice(0,30)); });
+      XLSX.writeFile(wb,"Team_Locations_"+(month||"all")+(person!=="all"?"_"+person:"")+".xlsx");
+    };
+    if(window.XLSX) return go();
+    var s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"; s.onload=go; document.head.appendChild(s);
+  }
+  function load(){ return api("get").then(function(r){ if(r.ok){ D=r; draw(); } else if(r.error==="pin") lock("Wrong PIN"); }); }
+  function lock(err){ $("app").hidden=true; $("pinBox").hidden=false; $("pinErr").textContent=err||""; }
+  function start(){ api("get").then(function(r){
+      if(r.error==="pin") return lock(pin?"Wrong PIN":""); if(r.error==="nopin") return lock("Set a PIN first: Tracker → Menu → 🔒 PIN Access.");
+      sessionStorage.setItem("loc_pin",pin); $("pinBox").hidden=true; $("app").hidden=false; D=r; draw();
+    }).catch(function(){ lock("No internet — try again"); }); }
+  $("pinGo").onclick=function(){ pin=$("pin").value.trim(); if(pin) start(); };
+  $("pin").addEventListener("keydown",function(e){ if(e.key==="Enter") $("pinGo").click(); });
+  if(pin) start(); else lock("");
+  window.__loc={monthStats:function(p){return monthStats(p);},set:function(d,m,pp){D=d;month=m;person=pp||"all";}};
+})();
+</script>
+</body>
+</html>

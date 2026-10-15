@@ -2941,6 +2941,10 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
 
   // Scan Gmail for #location emails
   const scanLocationEmails = async () => {
+    // Location emails now go to their own per-person files (Team Locations),
+    // not into the main tracker — so normal tracker filtering stays clean.
+    if (confirm("Team location emails are now read automatically every morning at 9:15 and kept in each person's own file in 📍 Team Locations — not in the main tracker.\n\nOpen Team Locations now?")) window.location.href = "/locations/";
+    return;
     setScanning(true);
     setStatusMsg("📡 Scanning Gmail for location emails…");
     setEmails([]);
@@ -2996,6 +3000,7 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
   };
 
   const importAll = async () => {
+    window.location.href = "/locations/"; return;
     setImporting(true);
     let count = 0;
     for (const email of emails) {
@@ -18286,6 +18291,7 @@ function App(){
                 {l:"🏷️ GS1 DataKart",fn:()=>{window.location.href="/gs1/";}, ownerOnly:true},
                 {l:"📝 Forms & Pay",fn:()=>{window.location.href="/forms/";}, ownerOnly:true},
                 {l:"📒 Tally",fn:()=>{window.location.href="/tally/";}, ownerOnly:true},
+                {l:"📍 Team Locations",fn:()=>{window.location.href="/locations/";}, ownerOnly:true},
                 {l:"🏭 Orders & Dispatch",fn:()=>{window.location.href="/lr/?user=main";}, ownerOnly:true},
                 {l:"📦 Orders",fn:()=>setShowOrders(true), ordersOnly:true},
                 {l:"📈 RK Trading",fn:()=>setShowAIM(true), ownerOnly:true},

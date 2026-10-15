@@ -39,6 +39,8 @@ exports.summary = summary;
 // Scheduled 9:15 IST: read Maadhu's backup email first (background), which then sends the summary.
 exports.handler = async () => {
   const base = process.env.URL || "https://rk-tracker-v2.netlify.app";
+  // #Trackerv23 emails → tracker, and team location emails → Team Locations
+  try { await fetch(base + "/.netlify/functions/gmail-daily-background", { method: "POST", headers: { "Content-Type": "application/json", "x-run-key": T.runKey() }, body: JSON.stringify({ job: "morning" }) }); } catch (e) {}
   try {
     const r = await fetch(base + "/.netlify/functions/tally-mail-background", { method: "POST", headers: { "Content-Type": "application/json", "x-run-key": T.runKey() }, body: JSON.stringify({ notify: true }) });
     if (r.status >= 400) await summary();

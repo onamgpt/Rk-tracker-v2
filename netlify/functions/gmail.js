@@ -23,14 +23,26 @@ async function gget(path, tok) {
 }
 function parts(p, out) { out = out || []; if (!p) return out; if (p.filename && p.body && p.body.attachmentId) out.push({ name: p.filename, type: p.mimeType, id: p.body.attachmentId, size: p.body.size }); (p.parts || []).forEach((x) => parts(x, out)); return out; }
 const header = (m, n) => ((m.payload && m.payload.headers) || []).find((h) => h.name.toLowerCase() === n.toLowerCase())?.value || "";
-// Search mail; returns [{id, subject, from, date, attachments:[{name,type,id,size}]}]
+function b64url(x) { return Buffer.from(String(x || "").replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"); }
+// Plain text of a message (falls back to HTML with tags stripped)
+function bodyText(p) {
+  let plain = "", html = "";
+  (function walk(x) { if (!x) return;
+    if (x.mimeType === "text/plain" && x.body && x.body.data) plain += b64url(x.body.data) + "\n";
+    else if (x.mimeType === "text/html" && x.body && x.body.data) html += b64url(x.body.data) + "\n";
+    (x.parts || []).forEach(walk); })(p);
+  if (plain.trim()) return plain;
+  return html.replace(/<a [^>]*href="([^"]+)"[^>]*>/gi, " $1 ").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
+}
+// Search mail; returns [{id, subject, from, date, internalDate, body, attachments:[{name,type,id,size}]}]
 async function search(q, max) {
   const tok = await accessToken();
   const list = await gget("messages?maxResults=" + (max || 10) + "&q=" + encodeURIComponent(q), tok);
   const out = [];
   for (const m of list.messages || []) {
     const full = await gget("messages/" + m.id + "?format=full", tok);
-    out.push({ id: m.id, subject: header(full, "Subject"), from: header(full, "From"), date: header(full, "Date"), attachments: parts(full.payload) });
+    out.push({ id: m.id, subject: header(full, "Subject"), from: header(full, "From"), date: header(full, "Date"), internalDate: Number(full.internalDate || 0),
+      body: bodyText(full.payload).slice(0, 20000), attachments: parts(full.payload) });
   }
   return { tok, messages: out };
 }
