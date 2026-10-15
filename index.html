@@ -2893,6 +2893,18 @@ function roadDistanceKm(lat1, lng1, lat2, lng2) {
   return haversineKm(lat1, lng1, lat2, lng2) * 1.20;
 }
 
+// Real road distance from Google (Routes API, cached on the server).
+// Falls back to the straight-line estimate only if Google can't answer.
+async function googleRoadKm(lat1, lng1, lat2, lng2) {
+  try {
+    const r = await fetch("/.netlify/functions/distance", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ origin: lat1 + "," + lng1, destination: lat2 + "," + lng2 }) });
+    const j = await r.json();
+    if (j && j.ok && typeof j.km === "number") return { km: j.km, minutes: j.durationMin, exact: true };
+  } catch (e) {}
+  return { km: roadDistanceKm(lat1, lng1, lat2, lng2), minutes: null, exact: false };
+}
+
 function classifyDistance(km) {
   for (var i = 0; i < SALES_CONFIG.bands.length; i++) {
     if (km <= SALES_CONFIG.bands[i].maxKm) return SALES_CONFIG.bands[i];
@@ -2960,13 +2972,14 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
             }
           } catch(e) {}
         }
-        let distKm = null, band = null, allowance = 0;
+        let distKm = null, band = null, allowance = 0, distExact = false, driveMin = null;
         if (coords && salesperson && salesperson.hqLat) {
-          distKm = roadDistanceKm(salesperson.hqLat, salesperson.hqLng, coords.lat, coords.lng);
+          const rd = await googleRoadKm(salesperson.hqLat, salesperson.hqLng, coords.lat, coords.lng);
+          distKm = rd.km; distExact = rd.exact; driveMin = rd.minutes;
           band = classifyDistance(distKm);
           allowance = (salesperson.allowance && salesperson.allowance[band.label]) || 0;
         }
-        return { ...email, fromEmail, salesperson, coords, distKm, band, allowance, mapLink };
+        return { ...email, fromEmail, salesperson, coords, distKm, distExact, driveMin, band, allowance, mapLink };
       }));
 
       // Filter out already imported
@@ -3004,7 +3017,7 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
         tags: ["Travel", email.band.label],
         notes: "Location: " + (email.coords ? email.coords.lat + "," + email.coords.lng : "?") +
                " | HQ: " + (email.salesperson.hq) +
-               " | Distance: " + (email.distKm ? Math.round(email.distKm) + " km (road est.)" : "?") +
+               " | Distance: " + (email.distKm ? Math.round(email.distKm) + (email.distExact ? " km by road (Google)" : " km (road est.)") : "?") +
                " | Category: " + (email.band ? email.band.label : "?") +
                " | Allowance: ₹" + (email.allowance || "TBD") +
                " [gmailId:" + email.gmailId + "]",
@@ -3136,6 +3149,7 @@ function LocationTracker({ onClose, onSaveEntry, entries }) {
                     </div>
                     {email.distKm && <div style={{ textAlign:"right" }}>
                       <div style={{ fontSize:14, fontWeight:700, color:band?.color }}>{Math.round(email.distKm)} km</div>
+                      <div style={{ fontSize:10, color:"#6a8aaa" }}>{email.distExact ? ("by road" + (email.driveMin ? " · " + email.driveMin + " min" : "")) : "estimate"}</div>
                       <div style={{ fontSize:10, color:"#888" }}>from {sp?.hq}</div>
                     </div>}
                   </div>
