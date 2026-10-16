@@ -35,6 +35,34 @@ exports.handler = async () => {
       }
       if (x.followUp && x.followUp <= today && !x.followUpDone) lines.fu.push("• " + name + (x.followUpNote ? " — " + L.esc(x.followUpNote) : ""));
     });
+    // ---- Production delays → Virupaksha (production in-charge), so Prakash can plan dispatch ----
+    try {
+      if (s.productionReminders !== false) {
+        const prod = [];
+        (data.shipments || []).forEach(x => {
+          if (x.cancelled || x.dispatchedOn || !x.expectedDispatch) return;
+          const st = x.production || "Not started";
+          if (st === "Ready") return;
+          if (x.expectedDispatch > soon) return;
+          const late = x.expectedDispatch < today ? days(x.expectedDispatch, today) : 0;
+          const pend = (x.materials || []).filter(m => !m.received).map(m => m.name);
+          prod.push({ late, due: x.expectedDispatch, line: (late ? "🔴 " : x.expectedDispatch === today ? "🟠 " : "🟡 ") + L.esc(x.customer || "—") + (x.orderNo ? " (PO " + L.esc(x.orderNo) + ")" : "") +
+            " — dispatch " + (late ? "was due " + x.expectedDispatch + " (" + late + " day" + (late > 1 ? "s" : "") + " late)" : x.expectedDispatch === today ? "due TODAY" : "due " + x.expectedDispatch) +
+            " · production: " + L.esc(st) + (pend.length ? " · waiting for: " + L.esc(pend.join(", ")) : "") });
+        });
+        if (prod.length) {
+          prod.sort((a, b) => b.late - a.late || (a.due < b.due ? -1 : 1));
+          const txt = "🏭 <b>Production reminder — " + today + "</b>\nThese orders are not ready for dispatch yet. Please update Prakash on when they will be ready.\n\n" + prod.map(p => p.line).join("\n");
+          if (s.viruEmail) {
+            const html = "<div style='font-family:Arial,sans-serif;font-size:15px;line-height:1.6'>" + txt.replace(/\n/g, "<br>") + "</div>";
+            try { await require("./mail.js").handler({ httpMethod: "POST", body: JSON.stringify({ to: s.viruEmail, subject: "Production reminder — " + prod.length + " order(s) due for dispatch (" + today + ")", html }) }); } catch (e) {}
+          }
+          if (s.viruChat) await L.tgSend([s.viruChat], txt);
+          // Ravi and Prakash see the same list, so dispatch can be planned
+          await L.tgSend([OWNER_CHAT].concat(s.prakashChat ? [s.prakashChat] : []), txt + "\n\n" + (s.viruChat ? "Sent to Virupaksha on Telegram" : "Virupaksha's Telegram not linked yet") + (s.viruEmail ? " and by email." : "."));
+        }
+      }
+    } catch (e) {}
     const sec = (t, a) => a.length ? "\n\n<b>" + t + " (" + a.length + ")</b>\n" + a.slice(0, 15).join("\n") + (a.length > 15 ? "\n…and " + (a.length - 15) + " more" : "") : "";
     const body = sec("📅 Orders due for dispatch", lines.ord) + sec("🧪 Materials still pending", lines.mat) + sec("📞 Follow up today", lines.fu) + sec("🚚 Not delivered yet", lines.del) + sec("💰 Payment pending", lines.pay) + sec("📎 Documents missing", lines.doc);
     if (!body) return { statusCode: 200, body: "nothing due" };

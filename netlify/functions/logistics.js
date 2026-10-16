@@ -13,16 +13,17 @@ const OWNER_CHAT = "8632288596";
 const KEY = "logistics_v2";
 
 const DEFAULTS = { users: ["main", "prakash"], deliveryDays: 7, paymentDays: 30, docDays: 1, extra1: "Vehicle number", extra2: "Driver phone",
-  prakashChat: "", groupChat: "", dispatchToGroup: false, digestToGroup: true, digestToOwner: true,
+  prakashChat: "", groupChat: "", viruEmail: "onamviru@gmail.com", viruChat: "", productionReminders: true, dispatchToGroup: false, digestToGroup: true, digestToOwner: true,
   prakashEmail: "", emailToPrakash: true, telegramToPrakash: true };
 
 async function settings() {
   const s = Object.assign({}, DEFAULTS, (await kvGet("logistics_settings")) || {});
   if (!s.prakashEmail) s.prakashEmail = "prakashonam@gmail.com";   // given by Ravi, Oct 2026
   // Find Prakash and the team group in the bot's contact list if not set by hand.
-  if (!s.prakashChat || !s.groupChat) {
+  if (!s.prakashChat || !s.groupChat || !s.viruChat) {
     const contacts = (await kvGet("tg_contacts")) || [];
     if (!s.prakashChat) { const p = contacts.find(c => /prakash/i.test((c.label || "") + " " + (c.name || ""))); if (p) s.prakashChat = String(p.chatId); }
+    if (!s.viruChat) { const v = contacts.find(c => /viru|virupaksha/i.test((c.label || "") + " " + (c.name || ""))); if (v) s.viruChat = String(v.chatId); }
     if (!s.groupChat) { const g = contacts.filter(c => String(c.chatId).indexOf("-") === 0); const pick = g.find(c => /sales|order|onam|team|staff|despatch|dispatch|logist|office/i.test((c.label || "") + " " + (c.name || ""))) || (g.length === 1 ? g[0] : null); if (pick) s.groupChat = String(pick.chatId); }
   }
   return s;
