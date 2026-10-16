@@ -39,8 +39,9 @@ async function viaMatrix(key, origin, destination) {
 
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: H, body: "" };
-  const key = process.env.google_maps_key || process.env.GOOGLE_MAPS_KEY || process.env.GOOGLE_PLACES_KEY;
-  if (!key) return OK({ ok: false, reason: "google_maps_key not set" });
+  // Try every Google key the site has, in order, until one is allowed.
+  const keys = [process.env.google_maps_key, process.env.GOOGLE_MAPS_KEY, process.env.GOOGLE_PLACES_KEY].filter((k, i, a) => k && a.indexOf(k) === i);
+  if (!keys.length) return OK({ ok: false, reason: "google_maps_key not set" });
   let b = {}; try { b = JSON.parse(event.body || "{}"); } catch (e) {}
   const { origin, destination } = b;
   if (!origin || !destination) return { statusCode: 400, headers: H, body: JSON.stringify({ ok: false, error: "origin and destination required" }) };
@@ -49,11 +50,17 @@ exports.handler = async (event) => {
   let cache = null;
   try { cache = (await kvGet("dist_cache")) || {}; if (cache[ck]) return OK(Object.assign({ ok: true, cached: true }, cache[ck])); } catch (e) { cache = null; }
 
-  let res = await viaRoutes(key, origin, destination);
-  let routesErr = res.ok ? null : res.status;
-  if (!res.ok) res = await viaMatrix(key, origin, destination);
+  let res = { ok: false }, routesErr = null, usedKey = "";
+  for (const key of keys) {
+    res = await viaRoutes(key, origin, destination);
+    if (res.ok) { usedKey = key.slice(-4); break; }
+    routesErr = res.status;
+    res = await viaMatrix(key, origin, destination);
+    if (res.ok) { usedKey = key.slice(-4); break; }
+  }
+  if (res.ok) res.key = usedKey;
   if (!res.ok) {
-    try { await kvSet("dist_last_error", { at: new Date().toISOString(), routes: routesErr, matrix: res.status, detail: res.detail || null }); } catch (e) {}
+    try { await kvSet("dist_last_error", { at: new Date().toISOString(), keysTried: keys.map((k) => k.slice(-4)), routes: routesErr, matrix: res.status, detail: res.detail || null }); } catch (e) {}
     return OK({ ok: false, status: res.status, routes: routesErr, detail: res.detail || null });
   }
 
