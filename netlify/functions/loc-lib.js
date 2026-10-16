@@ -41,8 +41,17 @@ async function roadKm(p, c) {
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(p.hqLat * Math.PI / 180) * Math.cos(c.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
   return { km: Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 1.2 * 10) / 10, min: null, exact: false };
 }
-let lastOSM = 0;
+let lastOSM = 0, GEO = null;
 async function placeName(c) {
+  const gk = c.lat.toFixed(3) + "," + c.lng.toFixed(3);
+  if (!GEO) GEO = (await kvGet("geo_cache")) || {};
+  if (GEO[gk]) return GEO[gk];
+  const name = await placeNameOSM(c);
+  if (name) { GEO[gk] = name; GEO.__dirty = 1; }
+  return name;
+}
+async function saveGeo() { if (GEO && GEO.__dirty) { delete GEO.__dirty; await kvSet("geo_cache", GEO); } }
+async function placeNameOSM(c) {
   try {
     const wait = 1100 - (Date.now() - lastOSM); if (wait > 0) await new Promise((r) => setTimeout(r, wait)); lastOSM = Date.now();
     const r = await fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=14&lat=" + c.lat + "&lon=" + c.lng, { headers: { "User-Agent": "RK-Tracker/1.0 (onamagarbathi@gmail.com)", "Accept-Language": "en" } });
@@ -87,28 +96,43 @@ async function importLocationEmails(days) {
     if (!f.some((x) => x.gmailId === m.id)) { f.push(v); added.push(p.name + " · " + v.date + " · " + (v.place || (c.lat + "," + c.lng)) + " · " + Math.round(v.km) + " km " + (v.exact ? "by road" : "(est.)")); }
   }
   for (const n in files) await saveFile(n, files[n]);
+  await saveGeo();
   await kvSet("loc_mail_seen", seen.slice(-1500));
   return { added, skipped };
 }
 
-// Copy old location entries out of the main tracker into the files
-async function migrateFromTracker() {
+// Copy old location entries out of the main tracker into the files.
+// Done in batches (a background run lasts at most 15 minutes); each batch
+// saves its progress and the next one picks up where it stopped.
+const isLoc = (e) => /Location:\s*-?\d/.test(e.notes || "") && /\[gmailId:/.test(e.notes || "");
+async function migrateFromTracker(batch) {
+  batch = batch || 90;
   const r = await call({ action: "getAll", user: "main" });
-  const old = (r.entries || []).filter((e) => /Location:\s*-?\d/.test(e.notes || "") && /\[gmailId:/.test(e.notes || "") && /travel/i.test((e.tags || []).join(" ") + " " + (e.category || "")));
-  const files = {}, copied = [], ids = [];
-  for (const e of old) {
-    const p = byName(e.person); const mm = e.notes.match(/Location:\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/); const c = mm ? { lat: +mm[1], lng: +mm[2] } : null;
-    const gid = (e.notes.match(/gmailId:([^\]\s]+)/) || [])[1] || "";
-    if (!p || !c) continue;
+  const all = (r.entries || []).filter(isLoc);
+  let m = (await kvGet("loc_migration")) || null;
+  if (!m || m.status !== "running") m = { status: "running", at: new Date().toISOString(), found: all.length, copied: 0, skipped: 0, trackerIds: [], doneIds: [], removed: false };
+  const done = new Set(m.doneIds || []);
+  const todo = all.filter((e) => !done.has(e.id)).slice(0, batch);
+  const files = {};
+  for (const e of todo) {
+    done.add(e.id);
+    const p = byName(e.person);
+    const mm = (e.notes || "").match(/Location:\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/); const c = mm ? { lat: +mm[1], lng: +mm[2] } : null;
+    const gid = ((e.notes || "").match(/gmailId:([^\]\s]+)/) || [])[1] || "";
+    if (!p || !c) { m.skipped++; continue; }
     const f = files[p.name] || (files[p.name] = await loadFile(p.name));
-    ids.push(e.id);
+    m.trackerIds.push(e.id);
     if (f.some((x) => (gid && x.gmailId === gid) || x.trackerId === e.id)) continue;
     f.push(await makeVisit(p, c, { date: String(e.date || "").slice(0, 10), time: "", mapLink: "", gmailId: gid, subject: e.title || "", source: "tracker", trackerId: e.id }));
-    copied.push(p.name + " · " + e.date);
+    m.copied++;
   }
   for (const n in files) await saveFile(n, files[n]);
-  await kvSet("loc_migration", { at: new Date().toISOString(), found: old.length, copied: copied.length, trackerIds: ids, removed: false });
-  return { found: old.length, copied: copied.length };
+  await saveGeo();
+  m.doneIds = Array.from(done); m.found = all.length + (m.doneIds.length - all.filter((e) => done.has(e.id)).length);
+  const left = all.filter((e) => !done.has(e.id)).length;
+  m.status = left ? "running" : "done"; m.left = left; m.updated = new Date().toISOString();
+  await kvSet("loc_migration", m);
+  return { copied: m.copied, found: m.found, left, batch: todo.length };
 }
 
 // After Ravi has checked: remove those old entries from the main tracker

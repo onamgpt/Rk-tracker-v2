@@ -20,7 +20,7 @@ exports.handler = async (event) => {
       const people = Object.values(L.PEOPLE);
       const files = {}; for (const p of people) files[p.name] = await L.loadFile(p.name);
       const [log, mig, gm] = await Promise.all([L.kvGet("loc_log"), L.kvGet("loc_migration"), L.kvGet("gmail_oauth")]);
-      return OK({ ok: true, people, bands: L.BANDS, files, log: (log || []).slice(0, 15), migration: mig ? { at: mig.at, found: mig.found, copied: mig.copied, removed: mig.removed, removedCount: mig.removedCount || 0, pending: (mig.trackerIds || []).length } : null, gmail: !!(gm && gm.refresh) });
+      return OK({ ok: true, people, bands: L.BANDS, files, log: (log || []).slice(0, 15), migration: mig ? { at: mig.at, updated: mig.updated, status: mig.status || "done", left: mig.left, skipped: mig.skipped || 0, found: mig.found, copied: mig.copied, removed: mig.removed, removedCount: mig.removedCount || 0, pending: (mig.trackerIds || []).length } : null, gmail: !!(gm && gm.refresh) });
     }
     if (["locations", "migrate", "remove", "morning"].includes(b.action)) { await run(b.action); return OK({ ok: true, started: true }); }
     if (b.action === "deleteVisit") {

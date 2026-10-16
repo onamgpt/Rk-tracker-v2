@@ -25,7 +25,7 @@ async function viaRoutes(key, origin, destination) {
   });
   const j = await r.json().catch(() => ({}));
   const rt = j && j.routes && j.routes[0];
-  if (!r.ok || !rt || rt.distanceMeters == null) return { ok: false, status: (j.error && (j.error.status || j.error.message)) || ("ROUTES_" + r.status) };
+  if (!r.ok || !rt || rt.distanceMeters == null) return { ok: false, status: (j.error && ((j.error.status || "") + ": " + (j.error.message || "")).slice(0, 300)) || ("ROUTES_" + r.status) };
   return { ok: true, km: Math.round(rt.distanceMeters / 100) / 10, durationMin: Math.round(parseInt(String(rt.duration || "0").replace("s", ""), 10) / 60), source: "google-routes" };
 }
 async function viaMatrix(key, origin, destination) {
@@ -52,7 +52,10 @@ exports.handler = async (event) => {
   let res = await viaRoutes(key, origin, destination);
   let routesErr = res.ok ? null : res.status;
   if (!res.ok) res = await viaMatrix(key, origin, destination);
-  if (!res.ok) return OK({ ok: false, status: res.status, routes: routesErr, detail: res.detail || null });
+  if (!res.ok) {
+    try { await kvSet("dist_last_error", { at: new Date().toISOString(), routes: routesErr, matrix: res.status, detail: res.detail || null }); } catch (e) {}
+    return OK({ ok: false, status: res.status, routes: routesErr, detail: res.detail || null });
+  }
 
   if (cache) {
     try {

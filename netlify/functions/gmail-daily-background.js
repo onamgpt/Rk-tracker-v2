@@ -24,7 +24,14 @@ exports.handler = async (event) => {
       entry.added = r.added; entry.skipped = r.skipped.slice(0, 20);
       if (r.added.length && job === "morning") await T.tg("📍 <b>Team locations received</b>\n" + r.added.map((x) => "• " + x).join("\n"));
     }
-    if (job === "migrate") { const r = await L.migrateFromTracker(); entry.lines.push("Copied " + r.copied + " of " + r.found + " old location entries from the tracker"); }
+    if (job === "migrate") {
+      const r = await L.migrateFromTracker(90);
+      entry.lines.push("Old entries: " + r.copied + " copied so far, " + r.left + " of " + r.found + " still to go");
+      if (r.left && r.batch) {   // next batch in a fresh run
+        const base = process.env.URL || "https://rk-tracker-v2.netlify.app";
+        await fetch(base + "/.netlify/functions/gmail-daily-background", { method: "POST", headers: { "Content-Type": "application/json", "x-run-key": T.runKey() }, body: JSON.stringify({ job: "migrate" }) }).catch(() => {});
+      }
+    }
     if (job === "remove") { const r = await L.removeMigrated(); entry.lines.push("Removed " + r.removed + " old location entries from the main tracker"); }
   } catch (e) { entry.error = e.message; }
   log.unshift(entry); await L.kvSet("loc_log", log.slice(0, 60));
