@@ -57,7 +57,16 @@ exports.handler = async () => {
             const html = "<div style='font-family:Arial,sans-serif;font-size:15px;line-height:1.6'>" + txt.replace(/\n/g, "<br>") + "</div>";
             try { await require("./mail.js").handler({ httpMethod: "POST", body: JSON.stringify({ to: s.viruEmail, subject: "Production reminder — " + prod.length + " order(s) due for dispatch (" + today + ")", html }) }); } catch (e) {}
           }
-          if (s.viruChat) await L.tgSend([s.viruChat], txt);
+          if (s.viruChat) {
+            await L.tgSend([s.viruChat], txt);
+            // spoken reminder (Telegram voice note): "N orders are due for dispatch…"
+            try {
+              const n = prod.length, clip = n >= 1 && n <= 9 ? String(n) : "many";
+              const site = (process.env.URL || "https://rk-tracker-v2.netlify.app").replace(/\/$/, "");
+              await fetch("https://api.telegram.org/bot" + process.env.TELEGRAM_BOT_TOKEN + "/sendVoice", { method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chat_id: s.viruChat, voice: site + "/audio/prod-reminder-" + clip + ".ogg", caption: "🔊 Production reminder — " + n + " order(s) not ready for dispatch" }) });
+            } catch (e) {}
+          }
           // Ravi and Prakash see the same list, so dispatch can be planned
           await L.tgSend([OWNER_CHAT].concat(s.prakashChat ? [s.prakashChat] : []), txt + "\n\n" + (s.viruChat ? "Sent to Virupaksha on Telegram" : "Virupaksha's Telegram not linked yet") + (s.viruEmail ? " and by email." : "."));
         }
