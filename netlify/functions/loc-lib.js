@@ -105,16 +105,34 @@ async function importLocationEmails(days) {
 // Done in batches (a background run lasts at most 15 minutes); each batch
 // saves its progress and the next one picks up where it stopped.
 const isLoc = (e) => /Location:\s*-?\d/.test(e.notes || "") && /\[gmailId:/.test(e.notes || "");
+// Read every old location entry straight from Supabase (the app's "getAll"
+// only returns the most recent rows, which is why only some were found).
+async function oldLocationEntries() {
+  const SB = (process.env.SUPABASE_URL || "").replace(/\/$/, ""), KEY = process.env.SUPABASE_SERVICE_KEY || "";
+  const out = [];
+  for (let from = 0; from < 20000; from += 1000) {
+    const r = await fetch(SB + "/rest/v1/entries?owner=eq.main&notes=like." + encodeURIComponent("*gmailId:*") + "&select=id,title,date,person,notes&order=date.asc",
+      { headers: { apikey: KEY, Authorization: "Bearer " + KEY, Range: from + "-" + (from + 999), "Range-Unit": "items" } });
+    const rows = await r.json().catch(() => []);
+    if (!Array.isArray(rows) || !rows.length) break;
+    rows.forEach((x) => out.push(x));
+    if (rows.length < 1000) break;
+  }
+  return out.filter(isLoc);
+}
 async function migrateFromTracker(batch) {
-  batch = batch || 90;
-  const r = await call({ action: "getAll", user: "main" });
-  const all = (r.entries || []).filter(isLoc);
+  batch = batch || 700;
+  const started = Date.now();
+  const all = await oldLocationEntries();
   let m = (await kvGet("loc_migration")) || null;
   if (!m || m.status !== "running") m = { status: "running", at: new Date().toISOString(), found: all.length, copied: 0, skipped: 0, trackerIds: [], doneIds: [], removed: false };
   const done = new Set(m.doneIds || []);
   const todo = all.filter((e) => !done.has(e.id)).slice(0, batch);
   const files = {};
+  let n = 0;
   for (const e of todo) {
+    if (Date.now() - started > 11 * 60 * 1000) break;          // stay inside the 15-minute limit
+    if (++n % 60 === 0) { for (const k in files) await saveFile(k, files[k]); await saveGeo(); m.doneIds = Array.from(done); await kvSet("loc_migration", m); }
     done.add(e.id);
     const p = byName(e.person);
     const mm = (e.notes || "").match(/Location:\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/); const c = mm ? { lat: +mm[1], lng: +mm[2] } : null;
@@ -128,7 +146,7 @@ async function migrateFromTracker(batch) {
   }
   for (const n in files) await saveFile(n, files[n]);
   await saveGeo();
-  m.doneIds = Array.from(done); m.found = all.length + (m.doneIds.length - all.filter((e) => done.has(e.id)).length);
+  m.doneIds = Array.from(done); m.found = all.length;
   const left = all.filter((e) => !done.has(e.id)).length;
   m.status = left ? "running" : "done"; m.left = left; m.updated = new Date().toISOString();
   await kvSet("loc_migration", m);

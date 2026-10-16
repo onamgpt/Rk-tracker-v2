@@ -24,8 +24,9 @@ exports.handler = async (event) => {
       entry.added = r.added; entry.skipped = r.skipped.slice(0, 20);
       if (r.added.length && job === "morning") await T.tg("📍 <b>Team locations received</b>\n" + r.added.map((x) => "• " + x).join("\n"));
     }
+    if (job === "morning") { const mg = await L.kvGet("loc_migration"); if (mg && mg.status === "running") { const r = await L.migrateFromTracker(700); entry.lines.push("Old entries: " + r.copied + " copied, " + r.left + " to go"); } }
     if (job === "migrate") {
-      const r = await L.migrateFromTracker(90);
+      const r = await L.migrateFromTracker(700);
       entry.lines.push("Old entries: " + r.copied + " copied so far, " + r.left + " of " + r.found + " still to go");
       if (r.left && r.batch) {   // next batch in a fresh run
         const base = process.env.URL || "https://rk-tracker-v2.netlify.app";
