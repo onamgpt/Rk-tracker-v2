@@ -61,3 +61,11 @@
 # Tally morning summary + stale-upload reminder — 09:15 IST (03:45 UTC)
 [functions."tally-daily"]
   schedule = "45 3 * * *"
+
+# Spread Lab screener — every 3 minutes, Mon–Fri, 09:00–16:00 IST (checks 9:15–15:30 inside)
+[functions."spreads-screen"]
+  schedule = "*/3 3-10 * * 1-5"
+
+# Spread scanner — every 5 minutes, Mon–Fri (the function itself checks NSE hours, IST)
+[functions."spread-cron"]
+  schedule = "*/5 3-10 * * 1-5"

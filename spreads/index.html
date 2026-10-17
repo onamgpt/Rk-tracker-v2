@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Spread Scanner</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0d1520;color:#e3ebf5;font:14px/1.45 -apple-system,"Segoe UI",Roboto,sans-serif}
+header{background:#111d2c;border-bottom:1px solid #22344a;padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+header h1{margin:0;font-size:18px;flex:1;color:#e6c068}
+header a{color:#9fb3cc;font-size:13px;text-decoration:none;border:1px solid #2c4562;border-radius:8px;padding:5px 9px}
+.wrap{max-width:1150px;margin:0 auto;padding:12px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.tabs button{padding:9px 13px;border-radius:9px;border:1px solid #2c4562;background:#14243a;color:#cfe0f5;font-weight:700;font-size:14px;cursor:pointer}
+.tabs button.on{background:#e6c068;color:#141b24;border-color:#e6c068}
+.card{background:#14243a;border:1px solid #22344a;border-radius:12px;padding:14px;margin-bottom:12px}
+.card h2{font-size:13px;margin:0 0 10px;color:#e6c068;text-transform:uppercase;letter-spacing:.4px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{padding:6px;border-bottom:1px solid #22344a;text-align:left;white-space:nowrap}
+th{font-size:11.5px;color:#8ea3bd;position:sticky;top:0;background:#14243a;cursor:pointer}
+td.n,th.n{text-align:right}
+.scroll{overflow:auto;max-height:70vh}
+.hint{font-size:12.5px;color:#8ea3bd}
+.ok{color:#5ad18a}.bad{color:#ff7b72}.warn{color:#f0b85a}
+.btn{padding:9px 13px;border-radius:9px;border:1px solid #2c4562;background:#1b2f49;color:#e3ebf5;font-weight:700;cursor:pointer}
+.pri{background:#e6c068;color:#141b24;border-color:#e6c068}
+input,select,textarea{font:inherit;padding:8px;border:1px solid #2c4562;border-radius:8px;background:#0f1b2b;color:#e3ebf5}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.row label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#8ea3bd}
+.pill{display:inline-block;padding:2px 8px;border-radius:9px;font-size:11.5px;font-weight:700}
+.pin{max-width:320px;margin:15vh auto;text-align:center}
+.pin input{font-size:26px;text-align:center;letter-spacing:8px;margin:12px 0;width:100%}
+</style>
+</head>
+<body>
+<div id="pinBox" class="pin" hidden><div style="font-size:34px">📊</div><h2>Spread Scanner</h2><div class="hint">Enter your tracker PIN</div>
+<input id="pin" type="password" inputmode="numeric"><button class="btn pri" id="pinGo" style="width:100%">Open</button><div id="pinErr" class="bad" style="margin-top:10px"></div></div>
+<div id="app" hidden>
+<header><h1>📊 Spread Scanner</h1><span id="sess" class="hint"></span><a href="/">Tracker</a></header>
+<div class="wrap"><div class="tabs" id="tabs"></div><div id="view"></div></div>
+</div>
+<script>
+(function(){
+  var $=function(i){return document.getElementById(i);};
+  var pin=sessionStorage.getItem("spr_pin")||"", D=null, tab="live", sortKey=null, sortDir=-1;
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function api(a,x){ return fetch("/.netlify/functions/spreads",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action:a,pin:pin},x||{}))}).then(function(r){return r.json();}); }
+  function t(iso){ return iso?new Date(iso).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",second:"2-digit"}):"—"; }
+  function secs(s){ s=Number(s)||0; return s>=60?Math.floor(s/60)+"m "+(s%60)+"s":s+"s"; }
+  function sortRows(rows,def){ var k=sortKey||def; return rows.slice().sort(function(a,b){ var x=a[k],y=b[k]; if(x&&typeof x==="object") x=x.pct; if(y&&typeof y==="object") y=y.pct; return ((x>y)?1:(x<y)?-1:0)*sortDir; }); }
+  function draw(){
+    $("tabs").innerHTML=[["live","⚡ Live — how long gates last"],["screen","🔎 Screener (all NSE)"],["day","📅 Today so far"],["set","⚙ Settings"]].map(function(x){return '<button data-t="'+x[0]+'" class="'+(tab===x[0]?"on":"")+'">'+x[1]+'</button>';}).join("");
+    Array.prototype.forEach.call($("tabs").children,function(b){ b.onclick=function(){ tab=b.dataset.t; sortKey=null; sortDir=-1; draw(); }; });
+    $("sess").innerHTML=D.session?'<span class="ok">● Zerodha connected</span>':'<span class="bad">● Zerodha not logged in today</span>';
+    var head='<div class="card hint">Read-only — no orders are placed. Round-trip cost at '+"₹"+Number(D.settings.tradeValue).toLocaleString("en-IN")+' a side ≈ <b>'+D.cost.toFixed(3)+'%</b>. A gate counts as <b>wide</b> when it is ≥ '+D.settings.wideMultiple+'× that = <b>'+(D.cost*D.settings.wideMultiple).toFixed(3)+'%</b>. Runs automatically every 5 minutes (screener) and in 13-minute live sessions, 9:15–3:30 on market days.'+
+      (D.session?'':' <span class="bad">Log in to Zerodha once today in the AIM app (or tap “Use this browser’s Zerodha login”).</span>')+'</div>';
+    if(tab==="live") return drawLive(head); if(tab==="screen") return drawScreen(head); if(tab==="day") return drawDay(head); drawSet(head);
+  }
+  function th(k,label,n){ return '<th data-k="'+k+'"'+(n?' class="n"':'')+'>'+label+(sortKey===k?(sortDir<0?" ▼":" ▲"):"")+'</th>'; }
+  function wireSort(){ Array.prototype.forEach.call(document.querySelectorAll("th[data-k]"),function(h){ h.onclick=function(){ if(sortKey===h.dataset.k) sortDir=-sortDir; else { sortKey=h.dataset.k; sortDir=-1; } draw(); }; }); }
+  function drawLive(head){
+    var L=D.live; if(!L){ $("view").innerHTML=head+'<div class="card hint">No live session yet. It starts automatically in market hours, or tap “Run now” in Settings.</div>'; return; }
+    var rows=sortRows(L.stats||[],"widePctTime");
+    $("view").innerHTML=head+'<div class="card"><h2>Live session · started '+t(L.started)+' · updated '+t(L.updated)+(L.final?" · finished":" · running")+' · '+(L.watching||0)+' stocks</h2>'+(L.error?'<div class="bad">'+esc(L.error)+'</div>':'')+
+      '<div class="hint" style="margin-bottom:8px"><b>% time wide</b> = share of the session the gate was ≥ the wide threshold. <b>Wide lasts</b> = typical (median), 90th-percentile and longest stretch, in seconds. <b>Best bid / offer lasts</b> = how long the top price stays unchanged — the time you would sit at the top of the queue. <b>Trades/min</b> = how often a trade prints.</div>'+
+      '<div class="scroll"><table><tr>'+th("s","Stock")+th("last","Gate now",1)+th("widePctTime","% time wide",1)+th("episodes","Wide spells",1)+th("medWideSec","Wide lasts (median)",1)+th("p90WideSec","90%",1)+th("maxWideSec","Longest",1)+th("medBidLifeSec","Best bid lasts",1)+th("medAskLifeSec","Best offer lasts",1)+th("tradesPerMin","Trades/min",1)+'</tr>'+
+      rows.map(function(r){ var l=r.last||{}; return '<tr><td><b>'+esc(r.s)+'</b>'+(r.wideNow?' <span class="pill" style="background:#2a4d33;color:#7be0a0">wide now</span>':'')+'</td><td class="n">'+(l.bid?l.bid+" / "+l.ask+' <span class="hint">('+l.pct+'%, '+l.ticks+'t)</span>':"—")+'</td><td class="n">'+r.widePctTime+'%</td><td class="n">'+r.episodes+'</td><td class="n">'+secs(r.medWideSec)+'</td><td class="n">'+secs(r.p90WideSec)+'</td><td class="n">'+secs(r.maxWideSec)+'</td><td class="n">'+secs(r.medBidLifeSec)+'</td><td class="n">'+secs(r.medAskLifeSec)+'</td><td class="n">'+r.tradesPerMin+'</td></tr>'; }).join("")+'</table></div></div>';
+    wireSort();
+  }
+  function drawScreen(head){
+    var S=D.screen; if(!S){ $("view").innerHTML=head+'<div class="card hint">No screener run yet.</div>'; return; }
+    var rows=sortRows(S.rows||[],"edge");
+    $("view").innerHTML=head+'<div class="card"><h2>Screener · '+t(S.at)+' · '+(S.universe||0)+' NSE stocks checked · showing the widest gates</h2>'+(S.error?'<div class="bad">'+esc(S.error)+'</div>':'')+
+      '<div class="hint" style="margin-bottom:8px"><b>× cost</b> = gate ÷ round-trip cost. Above 1 the gate pays for the costs; the live tab watches the top 100.</div>'+
+      '<div class="scroll"><table><tr>'+th("s","Stock")+th("ltp","Price",1)+th("bid","Bid",1)+th("ask","Offer",1)+th("spread","Gate ₹",1)+th("pct","Gate %",1)+th("ticks","Ticks",1)+th("edge","× cost",1)+th("bidQty","Bid qty",1)+th("askQty","Offer qty",1)+th("vol","Volume",1)+'</tr>'+
+      rows.map(function(r){ return '<tr><td><b>'+esc(r.s)+'</b><div class="hint">'+esc(r.n)+'</div></td><td class="n">'+r.ltp+'</td><td class="n">'+r.bid+'</td><td class="n">'+r.ask+'</td><td class="n">'+r.spread+'</td><td class="n">'+r.pct+'%</td><td class="n">'+r.ticks+'</td><td class="n '+(r.edge>=D.settings.wideMultiple?"ok":r.edge>=1?"warn":"")+'">'+r.edge+'×</td><td class="n">'+Number(r.bidQty||0).toLocaleString("en-IN")+'</td><td class="n">'+Number(r.askQty||0).toLocaleString("en-IN")+'</td><td class="n">'+Number(r.vol||0).toLocaleString("en-IN")+'</td></tr>'; }).join("")+'</table></div></div>';
+    wireSort();
+  }
+  function drawDay(head){
+    var d=D.day, h=D.hist;
+    var rows=d?Object.keys(d.byStock).map(function(s){ var y=d.byStock[s], m=y.medWideSec.slice().sort(function(a,b){return a-b;}); return {s:s,sessions:y.sessions,wideMin:Math.round(y.wideSecTotal/60),episodes:y.episodes,medWideSec:m[Math.floor(m.length/2)]||0,trades:y.trades,screens:(h&&h.seen[s]?h.seen[s].n:0)}; }):[];
+    rows=sortRows(rows,"wideMin");
+    $("view").innerHTML=head+'<div class="card"><h2>Today · '+(d?d.sessions:0)+' live sessions · '+(h?h.runs:0)+' screener runs</h2><div class="hint" style="margin-bottom:8px">Totals for the day: minutes the gate stayed wide, number of wide spells, typical spell length, trades seen, and in how many screener runs the stock showed a wide gate.</div>'+
+      (rows.length?'<div class="scroll"><table><tr>'+th("s","Stock")+th("wideMin","Minutes wide",1)+th("episodes","Wide spells",1)+th("medWideSec","Typical spell",1)+th("trades","Trades seen",1)+th("screens","Wide in screener runs",1)+th("sessions","Sessions",1)+'</tr>'+
+      rows.map(function(r){ return '<tr><td><b>'+esc(r.s)+'</b></td><td class="n">'+r.wideMin+'</td><td class="n">'+r.episodes+'</td><td class="n">'+secs(r.medWideSec)+'</td><td class="n">'+r.trades+'</td><td class="n">'+r.screens+'</td><td class="n">'+r.sessions+'</td></tr>'; }).join("")+'</table></div>':'<div class="hint">Nothing yet today.</div>')+'</div>';
+    wireSort();
+  }
+  function drawSet(head){
+    var s=D.settings;
+    $("view").innerHTML=head+'<div class="card"><h2>Settings</h2><div class="row">'+
+      '<label>Trade size per side (₹)<input id="tv" type="number" value="'+s.tradeValue+'"></label>'+
+      '<label>Wide = gate ≥ … × cost<input id="wm" type="number" step="0.5" value="'+s.wideMultiple+'"></label>'+
+      '<label>Min price (₹)<input id="mp" type="number" value="'+s.minPrice+'"></label>'+
+      '<label>Min day volume<input id="mv" type="number" value="'+s.minVolume+'"></label>'+
+      '<label>Watch list<select id="wmode"><option value="auto"'+(s.watchMode!=="custom"?" selected":"")+'>Top 100 from screener</option><option value="custom"'+(s.watchMode==="custom"?" selected":"")+'>My own 100</option></select></label></div>'+
+      '<label class="hint" style="display:block;margin-top:10px">My own list (NSE symbols, up to 100 — e.g. utilities: NTPC POWERGRID NHPC SJVN TATAPOWER CESC TORNTPOWER NLCINDIA JSWENERGY IEX)</label><textarea id="cl" rows="4" style="width:100%">'+esc((s.custom||[]).join(" "))+'</textarea>'+
+      '<div class="row" style="margin-top:10px"><button class="btn pri" id="sv">Save</button><button class="btn" id="run">Run screener now</button><button class="btn" id="runw">Run screener + live session now</button><button class="btn" id="usebr">Use this browser’s Zerodha login</button><span id="msg" class="hint"></span></div></div>';
+    $("sv").onclick=function(){ api("saveSettings",{settings:{tradeValue:$("tv").value,wideMultiple:$("wm").value,minPrice:$("mp").value,minVolume:$("mv").value,watchMode:$("wmode").value,custom:$("cl").value}}).then(function(r){ $("msg").textContent=r.ok?"✓ Saved":"⚠ "+(r.error||""); load(); }); };
+    $("run").onclick=function(){ api("runNow").then(function(){ $("msg").textContent="Screener started — results in about a minute."; setTimeout(load,60000); }); };
+    $("runw").onclick=function(){ api("runNow",{watch:true}).then(function(){ $("msg").textContent="Started — screener in ~1 min, live figures update every minute for 13 minutes."; setTimeout(load,60000); }); };
+    $("usebr").onclick=function(){ var tok=""; try{ tok=localStorage.getItem("aim_kite_token")||""; }catch(e){} if(!tok){ $("msg").textContent="No Zerodha login found in this browser — log in from the AIM app first."; return; }
+      api("session",{token:tok}).then(function(r){ $("msg").textContent=r.ok?"✓ Shared with the scanner":"⚠ "+(r.error||""); load(); }); };
+  }
+  function load(){ return api("get").then(function(r){ if(r.ok){ D=r; draw(); } else if(r.error==="pin") lock("Wrong PIN"); }); }
+  function lock(e){ $("app").hidden=true; $("pinBox").hidden=false; $("pinErr").textContent=e||""; }
+  function start(){ api("get").then(function(r){ if(r.error==="pin") return lock(pin?"Wrong PIN":""); if(r.error==="nopin") return lock("Set a PIN in the tracker first.");
+      sessionStorage.setItem("spr_pin",pin); $("pinBox").hidden=true; $("app").hidden=false; D=r; draw();
+      // share this browser's Zerodha login automatically if the server has none today
+      try{ var tok=localStorage.getItem("aim_kite_token"); if(tok&&!r.session) api("session",{token:tok}).then(load); }catch(e){}
+      setInterval(function(){ if(!document.hidden) load(); },30000);
+    }).catch(function(){ lock("No internet — try again"); }); }
+  $("pinGo").onclick=function(){ pin=$("pin").value.trim(); if(pin) start(); };
+  $("pin").addEventListener("keydown",function(e){ if(e.key==="Enter") $("pinGo").click(); });
+  if(pin) start(); else lock("");
+})();
+</script>
+</body>
+</html>

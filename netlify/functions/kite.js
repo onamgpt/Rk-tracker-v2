@@ -91,6 +91,10 @@ exports.handler = async (event) => {
         d.message = "Invalid checksum — the KITE_API_SECRET in Netlify does not match the API key's app. " +
           "Copy the API secret again from developers.kite.trade (same app as key ending ..." + API_KEY.slice(-4) + ") into Netlify, then redeploy.";
       }
+      if (d && d.data && d.data.access_token) {
+        try { await require("./db.js").handler({ httpMethod: "POST", body: JSON.stringify({ action: "savePortfolio", user: "main", key: "kite_session",
+          data: { token: d.data.access_token, at: new Date().toISOString(), user: d.data.user_id || "" } }) }); } catch (e) {}
+      }
       return {statusCode:200, headers:h, body:JSON.stringify(d)};
     }
 

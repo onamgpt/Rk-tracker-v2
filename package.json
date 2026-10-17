@@ -4,7 +4,8 @@
   "description": "RK Life Tracker v2",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
-    "xlsx": "0.18.5"
+    "xlsx": "0.18.5",
+    "ws": "8.18.0"
   },
   "devDependencies": {
     "@babel/standalone": "7.23.2"
