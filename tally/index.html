@@ -422,6 +422,10 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     var mx=Math.max.apply(null,(h.months||[]).map(function(m){ return Math.max(m.netSales,m.netPurchases); }).concat([1]));
     html+='<div class="card"><h2>📈 Month by month</h2><div class="scroll"><table><tr><th>Month</th><th class="n">Sales</th><th class="n">Purchases</th><th class="n">Collected</th><th class="n">Paid out</th><th style="min-width:120px"></th></tr>'+
       (h.months||[]).map(function(m){ return '<tr><td>'+esc(m.m)+'</td><td class="n">'+inr(m.netSales)+'</td><td class="n">'+inr(m.netPurchases)+'</td><td class="n">'+inr(m.receipts)+'</td><td class="n">'+inr(m.payments)+'</td><td><div style="height:7px;background:#1f9d55;width:'+Math.round(m.netSales/mx*100)+'%;border-radius:3px"></div><div style="height:7px;background:#d97706;width:'+Math.round(m.netPurchases/mx*100)+'%;border-radius:3px;margin-top:2px"></div></td></tr>'; }).join("")+'</table></div><div class="hint">Green = sales, orange = purchases.</div></div>';
+    var ib=(HL.inbox&&HL.inbox.items)||[], ibOpen=ib.filter(function(x){ return x.status!=="done"; });
+    var impCol={high:"#c0392b",medium:"#d97706",low:"#98a2b3"};
+    html+='<div class="card"><h2>📧 From your inbox (last 7 days)</h2><div class="hint">Read each morning from onamagarbathi@gmail.com (read-only). Only business emails are summarised; personal and promotional mail is skipped and nothing is stored but a one-line summary.'+(HL.inbox&&HL.inbox.at?' Last read '+esc(new Date(HL.inbox.at).toLocaleString("en-IN"))+'.':' Not read yet — tap “Ask the advisor now”.')+(HL.inbox&&HL.inbox.error?' ⚠ '+esc(HL.inbox.error):'')+'</div>'+
+      (ibOpen.length?'<div class="scroll" style="margin-top:8px"><table>'+ibOpen.slice(0,40).map(function(x){ return '<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+impCol[x.imp]+'"></span></td><td><b>'+esc(x.label)+'</b><div class="hint">'+esc(new Date(x.at).toLocaleDateString("en-IN"))+' · '+esc(x.from)+'</div></td><td>'+esc(x.summary)+(x.action?'<div class="hint">→ '+esc(x.action)+'</div>':'')+'</td><td class="n">'+(x.amount?inr(x.amount):'')+(x.due?'<div class="hint">due '+esc(x.due)+'</div>':'')+'</td><td><a href="https://mail.google.com/mail/u/0/#all/'+esc(x.id)+'" target="_blank" rel="noopener">open</a> <button class="btn" data-md="'+esc(x.id)+'" style="padding:3px 7px;font-size:12px">✓</button></td></tr>'; }).join("")+'</table></div>':'<div class="hint" style="margin-top:8px">Nothing needing attention.</div>')+'</div>';
     var ad=h.admin, da=ad.dataAge, ag=function(x){ return x==null?"never":x===0?"today":x+" d ago"; };
     html+='<div class="card"><h2>👥 Admin monitoring</h2><div class="scroll"><table>'+
       '<tr><td>Data from Maadhu</td><td>Day Book '+ag(da.dayBook)+' · TB '+ag(da.trialBalance)+' · Receivables '+ag(da.receivables)+' · Payables '+ag(da.payables)+' · Stock '+ag(da.stock)+'</td></tr>'+
@@ -440,6 +444,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     $("view").innerHTML=html;
     var go=function(deep){ api("advise",{deep:deep}).then(function(){ $("advNow").textContent="⏳ Writing… (about a minute)"; setTimeout(function(){ HL=null; drawHealth(); },60000); }); };
     $("advNow").onclick=function(){ go(false); }; $("advDeep").onclick=function(){ go(true); };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-md]"),function(b){ b.onclick=function(){ api("mailDone",{id:b.dataset.md}).then(function(){ HL=null; drawHealth(); }); }; });
     $("hsSave").onclick=function(){ api("healthSettings",{settings:{odLimit:$("hsOd").value,openingStock:$("hsOs").value}}).then(function(){ HL=null; drawHealth(); }); };
   }
 

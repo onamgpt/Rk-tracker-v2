@@ -3,6 +3,7 @@
 // the 9:15 import; a deeper review on Mondays (or when asked).
 const T = require("./tally.js");
 const H = require("./tally-health.js");
+const MI = require("./mail-intel.js");
 const db = require("./db.js");
 const call = async (b) => JSON.parse((await db.handler({ httpMethod: "POST", body: JSON.stringify(b) })).body || "{}");
 const kvGet = async (k) => { const r = await call({ action: "getPortfolio", user: "main", key: k }); return r && r.data != null ? r.data : null; };
@@ -17,6 +18,7 @@ You receive FACTS computed from Tally, bank statements, dispatch, production, co
 - Include genuine wins (be warm but not flattering). Include what is being missed or slipping (people, deadlines, data).
 - Cash is tight: when suggesting supplier payments, protect critical raw-material suppliers (raw bathi, perfumery compounds, packaging) and statutory dues first, and keep payments fair across suppliers.
 - You are not a CA; flag tax/legal points as "check with the CA" rather than ruling on them.
+- "inbox" holds summaries of the last 3 days of business email (customer payments/orders, supplier invoices and payment chasers, CA bills, bank alerts, tax/government notices, export documents). Bring urgent ones into the decisions, and use "suppliersChasingPayment30d" when advising on fair supplier payments.
 - If profitYTD.reliable is false or a ratio is null, do NOT draw conclusions from it — say what data is needed instead (dataNote / profitYTD.note explain).
 Return ONLY JSON: {"headline":"one line","mood":"good|watch|act","wins":["…"],"warnings":["…"],"decisions":[{"do":"…","why":"…"}],"profit":"2-3 sentences on whether the business is making profit and where","people":["admin/people points"],"ask_ca":["questions to raise with the CA"],"think":"one thought-provoking question for Ravi"}`;
 
@@ -72,9 +74,12 @@ exports.handler = async (event) => {
   let b = {}; try { b = JSON.parse(event.body || "{}"); } catch (e) {}
   const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
   const deep = !!b.deep || new Date(today + "T00:00:00Z").getUTCDay() === 1;
+  try { await MI.scan({ days: 2 }); } catch (e) {}          // read new business email first
   const d = await H.load(kvGet);
   const h = H.compute(d, today, d.settings);
-  const a = await claude(factsFor(h, deep), deep);
+  const facts = factsFor(h, deep);
+  try { facts.inbox = MI.factsFor(await kvGet("mail_intel")); } catch (e) {}
+  const a = await claude(facts, deep);
   const rec = { at: new Date().toISOString(), deep, health: h, advice: a, error: a ? "" : "The AI could not write the brief this time — figures are still up to date." };
   await kvSet("tally_advice", rec);
   const hist = (await kvGet("tally_advice_hist")) || [];

@@ -221,8 +221,15 @@ exports.handler = async (event) => {
       const H = require("./tally-health.js");
       const td = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
       const d = await H.load(kvGet);
-      const [adv, hist] = await Promise.all([kvGet("tally_advice"), kvGet("tally_advice_hist")]);
-      return OK({ ok: true, health: H.compute(d, td, d.settings), settings: d.settings || {}, advice: adv ? { at: adv.at, deep: adv.deep, advice: adv.advice, error: adv.error } : null, hist: (hist || []).slice(0, 30) });
+      const [adv, hist, mi] = await Promise.all([kvGet("tally_advice"), kvGet("tally_advice_hist"), kvGet("mail_intel")]);
+      const MI = require("./mail-intel.js");
+      return OK({ ok: true, health: H.compute(d, td, d.settings), settings: d.settings || {}, advice: adv ? { at: adv.at, deep: adv.deep, advice: adv.advice, error: adv.error } : null, hist: (hist || []).slice(0, 30),
+        inbox: { at: mi && mi.at, error: mi && mi.error, items: MI.recent(mi, 7).map((x) => Object.assign({}, x, { label: MI.LABEL[x.cat] || x.cat })) } });
+    }
+    if (b.action === "mailDone") {
+      const mi = (await kvGet("mail_intel")) || { items: [] };
+      (mi.items || []).forEach((x) => { if (x.id === b.id) x.status = b.status === "open" ? "open" : "done"; });
+      await kvSet("mail_intel", mi); return OK({ ok: true });
     }
     if (b.action === "advise") {
       const base = process.env.URL || "https://rk-tracker-v2.netlify.app";
