@@ -87,21 +87,28 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     if(x.getElementsByTagName("DSPACCNAME").length) return "tb";
     return null; }
   function parseVouchers(x){
+    // same rules as the server reader (tally-parse.js voucherFromEl)
     var anyEW=x.getElementsByTagName("EWAYBILLDETAILS.LIST").length>0;
-    return Array.prototype.map.call(x.getElementsByTagName("VOUCHER"),function(v){
-      var party=txt(v,"PARTYLEDGERNAME")||txt(v,"PARTYNAME"), amt=0, best=0;
-      var les=v.querySelectorAll("ALLLEDGERENTRIES\\.LIST, LEDGERENTRIES\\.LIST");
-      Array.prototype.forEach.call(les,function(le){ var a=Math.abs(num(txt(le,"AMOUNT"))); if(party&&txt(le,"LEDGERNAME")===party) amt=a; if(a>best) best=a; });
-      var items=Array.prototype.slice.call(v.querySelectorAll("ALLINVENTORYENTRIES\\.LIST, INVENTORYENTRIES\\.LIST"),0,30).map(function(ie){ return {i:txt(ie,"STOCKITEMNAME"),q:num(txt(ie,"BILLEDQTY")||txt(ie,"ACTUALQTY")),a:Math.abs(num(txt(ie,"AMOUNT")))}; }).filter(function(o){return o.i;});
-      var ewEl=anyEW?v.querySelector("EWAYBILLDETAILS\\.LIST BILLNUMBER"):null;
-      var o={d:tdate(txt(v,"DATE")),t:v.getAttribute("VCHTYPE")||txt(v,"VOUCHERTYPENAME"),n:txt(v,"VOUCHERNUMBER"),p:party,a:amt||best,r:txt(v,"NARRATION").slice(0,120),i:items.length?items:undefined,_xml:1};
-      if(/^yes$/i.test(txt(v,"ISCANCELLED"))||/^yes$/i.test(txt(v,"ISDELETED"))) o.c=1;
-      if(/^yes$/i.test(txt(v,"ISOPTIONAL"))) o.o=1;
-      if(anyEW) o.ew=ewEl?ewEl.textContent.trim():"";
+    var all=function(el,tag){ return Array.prototype.slice.call(el.getElementsByTagName(tag)); };
+    var own=function(el,tag){ for(var i=0;i<el.children.length;i++) if(el.children[i].tagName===tag) return el.children[i].textContent.trim(); return ""; };
+    return all(x,"VOUCHER").map(function(v){
+      var party=txt(v,"PARTYLEDGERNAME")||txt(v,"PARTYNAME"), amt=0, best=0, le=[];
+      all(v,"ALLLEDGERENTRIES.LIST").concat(all(v,"LEDGERENTRIES.LIST")).forEach(function(l){ var name=own(l,"LEDGERNAME"), raw=num(own(l,"AMOUNT")), a=Math.abs(raw);
+        if(party&&name===party) amt=a; if(a>best) best=a; if(name&&le.length<10) le.push({l:name.slice(0,50),a:Math.round(raw*100)/100}); });
+      var items=all(v,"ALLINVENTORYENTRIES.LIST").concat(all(v,"INVENTORYENTRIES.LIST")).slice(0,30).map(function(ie){ return {i:txt(ie,"STOCKITEMNAME"),q:num(txt(ie,"BILLEDQTY")||txt(ie,"ACTUALQTY")),a:Math.abs(num(txt(ie,"AMOUNT")))}; });
+      var o={d:tdate(own(v,"DATE")||txt(v,"DATE")),t:v.getAttribute("VCHTYPE")||txt(v,"VOUCHERTYPENAME"),n:own(v,"VOUCHERNUMBER")||txt(v,"VOUCHERNUMBER"),p:party,a:amt||best,r:txt(v,"NARRATION").slice(0,160),_xml:1};
+      if(items.length) o.i=items; if(le.length) o.le=le;
+      var mid=own(v,"MASTERID"), alt=own(v,"ALTERID"); if(mid) o.m=mid; if(alt) o.al=alt;
+      if(/^yes$/i.test(own(v,"ISCANCELLED"))||/^yes$/i.test(own(v,"ISDELETED"))) o.c=1;
+      if(/^yes$/i.test(own(v,"ISOPTIONAL"))) o.o=1;
+      var bank=all(v,"BANKALLOCATIONS.LIST"), ch=bank.map(function(b){ return txt(b,"INSTRUMENTNUMBER"); }).filter(Boolean);
+      if(ch.length){ o.ch=ch.join(","); o.chd=tdate(txt(bank[0],"INSTRUMENTDATE")); o.tt=txt(bank[0],"TRANSACTIONTYPE"); }
+      if(anyEW) o.ew=all(v,"EWAYBILLDETAILS.LIST").map(function(e){ return txt(e,"BILLNUMBER"); }).filter(Boolean).join(",");
       var irn=txt(v,"IRNACKNO")||txt(v,"IRN"); if(irn) o.irn=irn;
       return o;
     }).filter(function(v){return v.d&&/^\d{4}-\d{2}-\d{2}$/.test(v.d);});
   }
+
   function walk(x,fn){ var root=x.documentElement, kids=root.children; for(var i=0;i<kids.length;i++) fn(kids[i]); }
   function parseTB(x){ var rows=[],cur=null;
     walk(x,function(el){ if(el.tagName==="DSPACCNAME"){ cur={name:txt(el,"DSPDISPNAME")||el.textContent.trim(),dr:0,cr:0}; rows.push(cur); }
@@ -271,7 +278,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   }
 
   /* ===================== Views ===================== */
-  var TABS=OWNER?[["home","🏠 Summary"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"]];
+  var TABS=OWNER?[["home","🏠 Summary"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["comp","📅 Compliance"],["lic","📜 Licences"],["assets","🏭 Assets"],["recon","🏦 Bank recon"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"],["comp","📅 Compliance"]];
   function drawTabs(){ $("tabs").innerHTML=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(t[0]===tab?"on":"")+'">'+t[1]+'</button>';}).join("");
     Array.prototype.forEach.call($("tabs").children,function(b){ b.onclick=function(){ tab=b.dataset.t; draw(); }; }); }
   function sales(){ return (D.vouchers||[]).filter(function(v){return /sales/i.test(v.t)&&!/order|return|credit/i.test(v.t);}); }
@@ -282,6 +289,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     if(tab==="ask") return drawAsk();
     if(tab==="vault") return drawVault();
     if(tab==="audit") return drawAudit();
+    if(tab==="comp"||tab==="lic"||tab==="assets"||tab==="recon") return drawCompliance();
     if(!D) { $("view").innerHTML='<div class="card">Loading…</div>'; return; }
     var m=D.meta||{};
     $("asof").textContent=m.vouchers?"· data up to "+m.vouchers.upTo:"· no data yet";
@@ -376,6 +384,127 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
       var lg=(D&&D.mailLog)||[]; if($("gmlog")) $("gmlog").innerHTML=lg.length?'<b>Recent email imports</b>\n'+lg.slice(0,5).map(function(e){ return esc(new Date(e.at).toLocaleString("en-IN"))+(e.manual?" (manual)":"")+(e.error?" — ⚠ "+esc(e.error):"")+"\n"+e.files.map(function(f){return "   • "+esc(f);}).join("\n"); }).join("\n"):"";
     });
   }
+  /* ===================== Compliance · Licences · Assets · Bank recon ===================== */
+  var COMP=null;
+  function fileObj(input){ var f=input&&input.files&&input.files[0]; if(!f) return Promise.resolve(null);
+    if(f.size>4.3*1024*1024) return Promise.reject(new Error("File too large (max 4 MB)"));
+    return f.arrayBuffer().then(function(buf){ return {name:f.name,type:f.type||"",data:b64(buf)}; }); }
+  function fd(d){ if(!d) return "—"; var x=new Date(d+"T00:00:00"); return isNaN(x)?d:x.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}); }
+  function leftTag(l){ var c=l<0?"#b42318":l<=2?"#b54708":l<=7?"#a16207":"#2a6a4a"; return '<span class="tag" style="background:'+c+'">'+(l<0?"overdue "+(-l)+"d":l===0?"today":l+" days")+'</span>'; }
+  function daysTo(d){ return Math.round((new Date(d+"T00:00:00")-new Date(today()+"T00:00:00"))/864e5); }
+  function drawCompliance(){
+    if(COMP===null){ $("view").innerHTML='<div class="card">Loading…</div>'; return api("comp").then(function(r){ COMP=r&&r.ok?r:{error:(r&&r.error)||"error"}; drawCompliance(); }); }
+    if(COMP.error){ $("view").innerHTML='<div class="card">⚠ '+esc(COMP.error)+'</div>'; return; }
+    if(tab==="comp") return drawDue(); if(tab==="lic") return drawLic(); if(tab==="assets") return drawAssets(); return drawRecon();
+  }
+  function doneForm(key){ return '<div id="df_'+esc(key)+'" style="margin-top:6px;display:none"><input placeholder="Note (e.g. ARN / challan no.)" style="padding:6px;border:1px solid #ccd5df;border-radius:7px;min-width:200px" data-dn="'+esc(key)+'"> <input type="file" data-dfile="'+esc(key)+'"> <button class="btn" data-dsave="'+esc(key)+'" style="padding:5px 9px;font-size:12.5px">Save</button></div>'; }
+  function wireDone(){
+    Array.prototype.forEach.call(document.querySelectorAll("[data-dopen]"),function(b){ b.onclick=function(){ var el=document.getElementById("df_"+b.dataset.dopen); el.style.display=el.style.display==="none"?"block":"none"; }; });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-dsave]"),function(b){ b.onclick=function(){ var k=b.dataset.dsave; b.disabled=true; b.textContent="Saving…";
+      var note=document.querySelector('[data-dn="'+k+'"]').value, fin=document.querySelector('[data-dfile="'+k+'"]');
+      fileObj(fin).then(function(f){ return api("compDone",{key:k,note:note,file:f}); }).then(function(r){ if(!r.ok) throw new Error(r.error||"not saved"); COMP=null; drawCompliance(); }).catch(function(e){ b.disabled=false; b.textContent="Save"; alert(e.message); }); }; });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-undo]"),function(b){ b.onclick=function(){ if(!confirm("Mark as NOT done?")) return; api("compUndo",{key:b.dataset.undo}).then(function(){ COMP=null; drawCompliance(); }); }; });
+  }
+  function drawDue(){
+    var occ=COMP.occ||[], open=occ.filter(function(o){ return !o.done&&o.left<=30; }), later=occ.filter(function(o){ return !o.done&&o.left>30; }), done=occ.filter(function(o){ return o.done; }).reverse().slice(0,25);
+    var row=function(o){ return '<tr><td>'+leftTag(o.left)+'</td><td><b>'+esc(o.name)+'</b><div class="hint">'+esc(o.cat)+' · '+esc(o.period)+'</div>'+doneForm(o.key)+'</td><td>'+fd(o.due)+'</td><td><button class="btn" data-dopen="'+esc(o.key)+'" style="padding:5px 9px;font-size:12.5px">✓ Mark done</button></td></tr>'; };
+    var h='<div class="card"><h2>📅 Due now and overdue</h2><div class="hint">Reminders go to Maadhu and you 7 and 2 days before, on the day, and every 3 days if overdue — until marked done (with the challan / acknowledgement uploaded). Standard Indian due dates — please have your CA confirm which apply.</div>'+
+      (open.length?'<div class="scroll"><table>'+open.map(row).join("")+'</table></div>':'<div class="hint" style="margin-top:8px">Nothing due in the next 30 days. 🎉</div>')+'</div>';
+    if(OWNER){
+      h+='<div class="card"><h2>✅ Recently done</h2>'+(done.length?'<div class="scroll"><table>'+done.map(function(o){ var d=o.done; return '<tr><td><b>'+esc(o.name)+'</b><div class="hint">'+esc(o.period)+' · due '+fd(o.due)+'</div></td><td class="hint">by '+esc(d.by)+' · '+esc(new Date(d.at).toLocaleDateString("en-IN"))+(d.note?' · '+esc(d.note):'')+'</td><td>'+(d.file?'<a href="'+esc(d.file)+'" target="_blank" rel="noopener">📄 proof</a>':'<span class="hint">no proof</span>')+'</td><td><button class="btn" data-undo="'+esc(o.key)+'" style="padding:4px 8px;font-size:12px">↺</button></td></tr>'; }).join("")+'</table></div>':'<div class="hint">Nothing marked yet.</div>')+'</div>';
+      h+='<div class="card"><h2>📆 Later (next 75 days)</h2>'+(later.length?'<div class="scroll"><table>'+later.map(function(o){ return '<tr><td>'+fd(o.due)+'</td><td>'+esc(o.name)+' <span class="hint">· '+esc(o.period)+'</span></td></tr>'; }).join("")+'</table></div>':'<div class="hint">—</div>')+'</div>';
+      var md=COMP.msmeDues||[];
+      h+='<div class="card"><h2>🏭 MSME suppliers — 45-day rule (section 43B(h))</h2><div class="hint">Bills from MSME-registered suppliers must be paid within 45 days, or the expense can\'t be claimed for tax until paid. List the MSME suppliers (exact Tally ledger names, one per line). Bills past 45 days are emailed to you each morning.</div>'+
+        '<textarea id="msme" rows="4" style="width:100%;margin-top:8px;padding:8px;border:1px solid #ccd5df;border-radius:9px;font:inherit" placeholder="One supplier per line">'+esc((COMP.msme||[]).join("\n"))+'</textarea>'+
+        '<div class="hint">Payables parties: '+esc((COMP.payParties||[]).slice(0,40).join(", "))+((COMP.payParties||[]).length>40?" …":"")+'</div><button class="btn" id="msmeSave" style="margin-top:8px">Save MSME list</button>'+
+        (md.length?'<div class="scroll" style="margin-top:10px"><table><tr><th>Supplier</th><th>Bill</th><th>Bill date</th><th class="n">Amount</th><th>Pay by</th><th class="n">Age</th></tr>'+md.map(function(x){ return '<tr><td>'+esc(x.party)+'</td><td>'+esc(x.ref||"")+'</td><td>'+fd(x.date)+'</td><td class="n">'+inr(x.amt)+'</td><td>'+fd(x.payBy)+'</td><td class="n"><b style="color:'+(x.age>45?"#b42318":x.age>35?"#b54708":"#2a6a4a")+'">'+x.age+'d</b></td></tr>'; }).join("")+'</table></div>':'')+'</div>';
+      h+='<div class="card"><h2>⚙ Which due dates apply</h2><div class="hint">Untick what doesn’t apply to Onam (e.g. ESI if not registered). Monthly day can be changed.</div><div class="scroll"><table>'+(COMP.items||[]).map(function(it,i){ return '<tr><td><input type="checkbox" data-ion="'+i+'"'+(it.on!==false?" checked":"")+'></td><td>'+esc(it.name)+' <span class="hint">· '+esc(it.cat)+'</span></td><td>'+(it.kind==="monthly"?'day <input type="number" min="1" max="28" value="'+it.day+'" data-iday="'+i+'" style="width:58px;padding:4px"> of next month':'<span class="hint">'+(it.dates||[]).map(function(d){ return d[0].split("-").reverse().join("/"); }).join(", ")+'</span>')+'</td></tr>'; }).join("")+'</table></div><button class="btn" id="itSave" style="margin-top:8px">Save</button></div>';
+    }
+    $("view").innerHTML=h; wireDone();
+    if(OWNER){
+      $("msmeSave").onclick=function(){ api("msmeSave",{names:$("msme").value}).then(function(){ COMP=null; drawCompliance(); }); };
+      $("itSave").onclick=function(){ var items=(COMP.items||[]).map(function(it,i){ var x=Object.assign({},it); x.on=document.querySelector('[data-ion="'+i+'"]').checked; var d=document.querySelector('[data-iday="'+i+'"]'); if(d) x.day=Math.max(1,Math.min(28,+d.value||x.day)); return x; });
+        api("compItems",{items:items}).then(function(){ COMP=null; drawCompliance(); }); };
+    }
+  }
+  function regForm(kind, it){
+    it=it||{}; var lic=kind==="lic";
+    var cats=Object.keys(COMP.itRates||{});
+    return '<div class="card" id="regForm"><h2>'+(it.id?"Edit":"Add")+' '+(lic?"licence / certificate / policy":"asset")+'</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px">'+
+      (lic?'<label class="hint">Name<input id="f_name" list="licSug" value="'+esc(it.name||"")+'" style="width:100%;padding:8px"></label><datalist id="licSug">'+(COMP.suggestions||[]).map(function(x){ return '<option value="'+esc(x)+'">'; }).join("")+'</datalist>'+
+        '<label class="hint">Number<input id="f_number" value="'+esc(it.number||"")+'" style="width:100%;padding:8px"></label><label class="hint">Issued by<input id="f_authority" value="'+esc(it.authority||"")+'" style="width:100%;padding:8px"></label>'+
+        '<label class="hint">Valid from<input id="f_issued" type="date" value="'+esc(it.issued||"")+'" style="width:100%;padding:8px"></label><label class="hint">Expiry / renewal date<input id="f_expiry" type="date" value="'+esc(it.expiry||"")+'" style="width:100%;padding:8px"></label>'+
+        '<label class="hint">Premium / fee (₹)<input id="f_fee" type="number" value="'+esc(it.fee||"")+'" style="width:100%;padding:8px"></label>'
+      :'<label class="hint">Asset name<input id="f_name" value="'+esc(it.name||"")+'" style="width:100%;padding:8px"></label><label class="hint">Category<select id="f_cat" style="width:100%;padding:8px">'+cats.map(function(c){ return '<option'+(it.cat===c?" selected":"")+'>'+esc(c)+'</option>'; }).join("")+'</select></label>'+
+        '<label class="hint">Purchase / put-to-use date<input id="f_date" type="date" value="'+esc(it.date||"")+'" style="width:100%;padding:8px"></label><label class="hint">Cost (₹, excl. GST credit)<input id="f_cost" type="number" value="'+esc(it.cost||"")+'" style="width:100%;padding:8px"></label>'+
+        '<label class="hint">Insurance expiry<input id="f_insuranceExpiry" type="date" value="'+esc(it.insuranceExpiry||"")+'" style="width:100%;padding:8px"></label><label class="hint">AMC expiry<input id="f_amcExpiry" type="date" value="'+esc(it.amcExpiry||"")+'" style="width:100%;padding:8px"></label>'+
+        '<label class="hint">Location / serial no.<input id="f_number" value="'+esc(it.number||"")+'" style="width:100%;padding:8px"></label>')+
+      '<label class="hint">Notes<input id="f_notes" value="'+esc(it.notes||"")+'" style="width:100%;padding:8px"></label><label class="hint">Document (PDF / photo)<input id="f_file" type="file"></label></div>'+
+      '<div style="margin-top:10px"><button class="btn" id="f_save">Save</button> <button class="btn" id="f_cancel">Cancel</button> <span id="f_msg" class="hint"></span></div></div>';
+  }
+  function wireReg(kind, it){
+    $("f_cancel").onclick=function(){ drawCompliance(); };
+    $("f_save").onclick=function(){
+      var g=function(id){ var e=$("f_"+id); return e?e.value:""; };
+      var item=kind==="lic"?{id:it&&it.id,name:g("name"),number:g("number"),authority:g("authority"),issued:g("issued"),expiry:g("expiry"),fee:g("fee"),notes:g("notes")}
+        :{id:it&&it.id,name:g("name"),cat:g("cat"),date:g("date"),cost:+g("cost")||0,insuranceExpiry:g("insuranceExpiry"),amcExpiry:g("amcExpiry"),number:g("number"),notes:g("notes")};
+      if(!item.name){ $("f_msg").textContent="Name needed"; return; }
+      $("f_msg").textContent="Saving…";
+      fileObj($("f_file")).then(function(f){ return api(kind==="lic"?"licSave":"assetSave",{item:item,file:f}); }).then(function(r){ if(!r.ok) throw new Error(r.error||"not saved"); COMP=null; drawCompliance(); }).catch(function(e){ $("f_msg").textContent="⚠ "+e.message; });
+    };
+  }
+  function drawLic(){
+    var L=(COMP.licences||[]).slice().sort(function(a,b){ return (a.expiry||"9999")<(b.expiry||"9999")?-1:1; });
+    var have=L.map(function(x){ return (x.name||"").toLowerCase(); }), missing=(COMP.suggestions||[]).filter(function(s2){ return have.indexOf(s2.toLowerCase())<0; });
+    $("view").innerHTML='<div class="card"><h2>📜 Licences, certificates & insurance</h2><div class="hint">Reminders to you 60, 30, 7 and 1 day before expiry, then weekly until renewed (update the expiry date after renewing).</div>'+
+      (L.length?'<div class="scroll"><table><tr><th>Name</th><th>Number</th><th>Issued by</th><th>Expiry</th><th></th><th></th></tr>'+L.map(function(x,i){ return '<tr><td><b>'+esc(x.name)+'</b>'+(x.notes?'<div class="hint">'+esc(x.notes)+'</div>':'')+'</td><td>'+esc(x.number||"")+'</td><td>'+esc(x.authority||"")+'</td><td>'+(x.expiry?fd(x.expiry)+' '+leftTag(daysTo(x.expiry)):'<span class="hint">no expiry</span>')+'</td><td>'+(x.file?'<a href="'+esc(x.file)+'" target="_blank" rel="noopener">📄</a>':'')+'</td><td><button class="btn" data-le="'+i+'" style="padding:4px 8px;font-size:12px">Edit</button> <button class="btn" data-ld="'+esc(x.id)+'" style="padding:4px 8px;font-size:12px">✕</button></td></tr>'; }).join("")+'</table></div>':'<div class="hint" style="margin-top:8px">Nothing added yet.</div>')+
+      '<button class="btn" id="addLic" style="margin-top:10px">+ Add</button>'+(missing.length?'<div class="hint" style="margin-top:8px">Not added yet: '+esc(missing.join(", "))+'</div>':'')+'</div><div id="formBox"></div>';
+    $("addLic").onclick=function(){ $("formBox").innerHTML=regForm("lic"); wireReg("lic"); if($("formBox").scrollIntoView) $("formBox").scrollIntoView(); };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-le]"),function(b){ b.onclick=function(){ var it=L[+b.dataset.le]; $("formBox").innerHTML=regForm("lic",it); wireReg("lic",it); if($("formBox").scrollIntoView) $("formBox").scrollIntoView(); }; });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ld]"),function(b){ b.onclick=function(){ if(confirm("Delete this entry?")) api("licDel",{id:b.dataset.ld}).then(function(){ COMP=null; drawCompliance(); }); }; });
+  }
+  // Depreciation: income-tax WDV (half rate in year of purchase if used < 180 days) and Companies Act straight line (5% residual)
+  function fyStartOf(d){ var y=+d.slice(0,4), m=+d.slice(5,7); return (m>=4?y:y-1); }
+  function depreciation(a){
+    if(!a.date||!a.cost) return null;
+    var rate=(COMP.itRates||{})[a.cat]||15, life=(COMP.coLife||{})[a.cat]||15, y0=fyStartOf(a.date), yNow=fyStartOf(today());
+    var wdv=a.cost, itThis=0, openIT=a.cost;
+    for(var y=y0;y<=yNow;y++){ var end=new Date((y+1)+"-03-31T00:00:00"), used=(end-new Date(a.date+"T00:00:00"))/864e5;
+      var dep=wdv*rate/100*(y===y0&&used<180?0.5:1); if(y===yNow){ openIT=wdv; itThis=dep; } wdv-=dep; }
+    var annual=a.cost*0.95/life, acc=0, coThis=0;
+    for(var y2=y0;y2<=yNow;y2++){ var s0=new Date(y2+"-04-01T00:00:00"), e0=new Date((y2+1)+"-03-31T00:00:00"), from=new Date(Math.max(s0,new Date(a.date+"T00:00:00")));
+      var frac=Math.max(0,(e0-from)/864e5+1)/((e0-s0)/864e5+1), d2=Math.min(annual*frac,a.cost*0.95-acc); if(y2===yNow) coThis=d2; acc+=d2; }
+    return {rate:rate,life:life,itOpen:openIT,itDep:itThis,itClose:wdv,coDep:coThis,coBook:a.cost-acc};
+  }
+  function drawAssets(){
+    var A=(COMP.assets||[]), tot={cost:0,itDep:0,itClose:0,coDep:0,coBook:0};
+    var rows=A.map(function(a,i){ var d=depreciation(a)||{}; if(d.rate){ tot.cost+=a.cost; tot.itDep+=d.itDep; tot.itClose+=d.itClose; tot.coDep+=d.coDep; tot.coBook+=d.coBook; }
+      return '<tr><td><b>'+esc(a.name)+'</b><div class="hint">'+esc(a.cat||"")+(a.number?' · '+esc(a.number):'')+'</div></td><td>'+fd(a.date)+'</td><td class="n">'+inr(a.cost)+'</td><td class="n">'+(d.rate?d.rate+'%':'')+'</td><td class="n">'+(d.rate?inr(d.itDep):'')+'</td><td class="n">'+(d.rate?inr(d.itClose):'')+'</td><td class="n">'+(d.rate?inr(d.coDep):'')+'</td><td class="n">'+(d.rate?inr(d.coBook):'')+'</td><td>'+(a.insuranceExpiry?'🛡 '+fd(a.insuranceExpiry)+' '+leftTag(daysTo(a.insuranceExpiry)):'')+(a.amcExpiry?'<br>🔧 '+fd(a.amcExpiry)+' '+leftTag(daysTo(a.amcExpiry)):'')+'</td><td>'+(a.file?'<a href="'+esc(a.file)+'" target="_blank" rel="noopener">📄</a> ':'')+'<button class="btn" data-ae="'+i+'" style="padding:4px 8px;font-size:12px">Edit</button> <button class="btn" data-ad="'+esc(a.id)+'" style="padding:4px 8px;font-size:12px">✕</button></td></tr>'; }).join("");
+    var fy=fyStartOf(today());
+    $("view").innerHTML='<div class="card"><h2>🏭 Fixed asset register — FY '+fy+'-'+String(fy+1).slice(2)+'</h2><div class="hint">Depreciation for this financial year: <b>Income-tax</b> written-down value (half rate if used under 180 days in the year bought) and <b>Companies Act</b> straight line over the Schedule II life, 5% residual. Indicative — your CA\'s figures prevail (block-wise IT working, additions, sales).</div>'+
+      (A.length?'<div class="scroll"><table><tr><th>Asset</th><th>Bought</th><th class="n">Cost</th><th class="n">IT rate</th><th class="n">IT dep. this FY</th><th class="n">IT WDV (31 Mar)</th><th class="n">Co. Act dep. this FY</th><th class="n">Book value</th><th>Insurance / AMC</th><th></th></tr>'+rows+
+        '<tr style="font-weight:800"><td>Total</td><td></td><td class="n">'+inr(tot.cost)+'</td><td></td><td class="n">'+inr(tot.itDep)+'</td><td class="n">'+inr(tot.itClose)+'</td><td class="n">'+inr(tot.coDep)+'</td><td class="n">'+inr(tot.coBook)+'</td><td></td><td></td></tr></table></div>':'<div class="hint" style="margin-top:8px">No assets added yet.</div>')+
+      '<button class="btn" id="addAsset" style="margin-top:10px">+ Add asset</button></div><div id="formBox"></div>';
+    $("addAsset").onclick=function(){ $("formBox").innerHTML=regForm("asset"); wireReg("asset"); if($("formBox").scrollIntoView) $("formBox").scrollIntoView(); };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ae]"),function(b){ b.onclick=function(){ var it=A[+b.dataset.ae]; $("formBox").innerHTML=regForm("asset",it); wireReg("asset",it); if($("formBox").scrollIntoView) $("formBox").scrollIntoView(); }; });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ad]"),function(b){ b.onclick=function(){ if(confirm("Delete this asset?")) api("assetDel",{id:b.dataset.ad}).then(function(){ COMP=null; drawCompliance(); }); }; });
+  }
+  function drawRecon(){
+    var accs=COMP.bankAccounts||[], led=COMP.bankLedgers||[], map=COMP.reconMap||{};
+    var h='<div class="card"><h2>🏦 Bank reconciliation</h2><div class="hint">Matches each bank statement with the Tally bank ledger: same amount, direction and date within a few days. Unmatched items older than a few days are emailed to you each morning.'+(COMP.hasLedgerDetail?'':' <b>Needs the Day Book as XML</b> (Excel has no ledger detail).')+'</div></div>';
+    if(!accs.length) h+='<div class="card hint">Upload a bank statement first (⬆ Upload → 🏦 Bank statements).</div>';
+    accs.forEach(function(a){
+      var r=(COMP.recon||{})[a];
+      h+='<div class="card"><h2>'+esc(a)+'</h2>Tally ledger: <select data-rm="'+esc(a)+'" style="padding:7px;border-radius:8px"><option value="">— choose —</option>'+led.map(function(l){ return '<option'+(map[a]===l?" selected":"")+'>'+esc(l)+'</option>'; }).join("")+'</select>'+
+        (r?'<div class="hint" style="margin:8px 0">Matched '+r.matched+' · bank '+r.bankCount+' entries (to '+esc(r.toBank||"")+') · Tally '+r.tallyCount+' entries (to '+esc(r.toTally||"")+')</div>'+
+          '<b>In the bank, not in Tally ('+r.notInTally.length+')</b>'+(r.notInTally.length?'<div class="scroll"><table><tr><th>Date</th><th>Narration</th><th class="n">In</th><th class="n">Out</th></tr>'+r.notInTally.slice(0,80).map(function(x){ return '<tr><td>'+esc(x.d)+'</td><td>'+esc(x.desc)+'</td><td class="n">'+(x.dir==="in"?inr(x.amt):"")+'</td><td class="n">'+(x.dir==="out"?inr(x.amt):"")+'</td></tr>'; }).join("")+'</table></div>':' ✓')+
+          '<div style="margin-top:10px"><b>In Tally, not in the bank after 7 days ('+r.notInBank.length+')</b></div>'+(r.notInBank.length?'<div class="scroll"><table><tr><th>Date</th><th>Voucher</th><th>Party</th><th>Cheque</th><th class="n">In</th><th class="n">Out</th></tr>'+r.notInBank.slice(0,80).map(function(x){ return '<tr><td>'+esc(x.d)+'</td><td>'+esc((x.t||"")+" "+(x.n||""))+'</td><td>'+esc(x.p||"")+'</td><td>'+esc(x.ch||"")+'</td><td class="n">'+(x.dir==="in"?inr(x.amt):"")+'</td><td class="n">'+(x.dir==="out"?inr(x.amt):"")+'</td></tr>'; }).join("")+'</table></div>':' ✓')
+        :'<div class="hint" style="margin-top:8px">Choose the matching Tally bank ledger to start.</div>')+'</div>';
+    });
+    $("view").innerHTML=h;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-rm]"),function(sel){ sel.onchange=function(){ api("reconMap",{account:sel.dataset.rm,ledger:sel.value}).then(function(){ COMP=null; drawCompliance(); }); }; });
+  }
+
   /* ===================== Audit ===================== */
   var AUD=null, aFilter="open";
   function drawAudit(){

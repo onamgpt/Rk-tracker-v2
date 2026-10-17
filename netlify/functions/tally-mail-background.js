@@ -20,10 +20,24 @@ exports.handler = async (event) => {
       entry.emails++;
       for (const a of m.attachments) {
         const ext = (a.name.split(".").pop() || "").toLowerCase();
-        if (["xlsx", "xls", "xlsm", "csv"].indexOf(ext) < 0) { entry.files.push(a.name + " — skipped (" + (ext === "xml" || ext === "pdf" ? "use the upload page for " + ext.toUpperCase() : "not a report") + ")"); continue; }
+        if (["xlsx", "xls", "xlsm", "csv", "xml", "zip"].indexOf(ext) < 0) { entry.files.push(a.name + " — skipped (" + (ext === "pdf" ? "use the upload page for PDF" : "not a report") + ")"); continue; }
         try {
-          const buf = await G.attachment(tok, m.id, a.id);
-          const r = P.parseExcel(buf, a.name);
+          let buf = await G.attachment(tok, m.id, a.id);
+          // XML (preferred: carries ledgers, cheques, cancellations); a .zip of XML/Excel files also works
+          if (ext === "zip") {
+            const AdmZip = require("adm-zip"); const z = new AdmZip(buf);
+            for (const e of z.getEntries()) {
+              const en = e.entryName.split("/").pop(), ex = (en.split(".").pop() || "").toLowerCase();
+              if (e.isDirectory || ["xml", "xlsx", "xls", "csv"].indexOf(ex) < 0) continue;
+              const b2 = e.getData(), r2 = ex === "xml" ? P.parseXmlBuffer(b2, en) : P.parseExcel(b2, en);
+              await T.vaultSaveFile(en, ex === "xml" ? "text/xml" : "", b2, { kind: r2.kind, data: r2.data || [], by: "email", source: "email", from: m.from });
+              if (r2.error || !r2.data.length) { entry.files.push(en + " — not recognised"); continue; }
+              const res2 = await T.ingest(r2.kind, r2.data, en, "email", P.todayIST());
+              entry.files.push(en + " — " + LABEL[r2.kind] + ": " + r2.data.length + (res2.ok ? " ✓" : " ✗ " + res2.error));
+            }
+            continue;
+          }
+          const r = ext === "xml" ? P.parseXmlBuffer(buf, a.name) : P.parseExcel(buf, a.name);
           await T.vaultSaveFile(a.name, a.type, buf, { kind: r.kind, data: r.data || [], by: "email", source: "email", from: m.from });
           if (r.error || !r.data.length) { entry.files.push(a.name + " — not recognised"); continue; }
           const res = await T.ingest(r.kind, r.data, a.name, "email", P.todayIST());

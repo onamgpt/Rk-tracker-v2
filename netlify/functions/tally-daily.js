@@ -65,8 +65,60 @@ async function summary() {
       "\nOpen: https://rk-tracker-v2.netlify.app/tally/";
     await T.tg(msg);
   } catch (e) {}
+  try { await compliance(); } catch (e) {}
 }
 exports.summary = summary;
+
+// Statutory due dates, licence / insurance / asset renewals, MSME 45-day rule, bank reconciliation
+async function compliance() {
+  const C = require("./tally-compliance.js");
+  const s = await T.settings();
+  const today = ist().toISOString().slice(0, 10);
+  const st = (await kvGet("tally_compliance")) || {};
+  if (!st.since) { st.since = today; await call({ action: "savePortfolio", user: "main", key: "tally_compliance", data: st }); }
+  const fmt = (d) => new Date(d + "T00:00:00Z").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  const when = (l) => l > 0 ? "in " + l + " day" + (l > 1 ? "s" : "") : l === 0 ? "TODAY" : "OVERDUE by " + -l + " day" + (l < -1 ? "s" : "");
+  // 1) statutory due dates → Maadhu and Ravi
+  const due = C.dueReminders(st, today);
+  if (due.length) {
+    const lines = due.map((d) => "• " + d.name + " — " + d.period + " — due " + fmt(d.due) + " (" + when(d.left) + ")");
+    await T.mail(s.accountantEmail, "Compliance due: " + due.map((d) => d.name.split(" (")[0]).join(", "),
+      "Good morning Maadhu,\n\nThese are due:\n\n" + lines.join("\n") + "\n\nWhen done, please mark each one as filed and upload the challan / acknowledgement at:\nhttps://rk-tracker-v2.netlify.app/tally/?user=maadhu  (📅 Compliance)\n\nThank you.");
+    await T.mail(s.ownerEmail, "Compliance due (" + due.length + ")", "Reminder sent to Maadhu:\n\n" + lines.join("\n") + "\n\nhttps://rk-tracker-v2.netlify.app/tally/");
+    await T.tg("📅 <b>Compliance due</b>\n" + lines.join("\n") + "\nReminder emailed to Maadhu.");
+    st.sent = st.sent || {}; due.forEach((d) => { st.sent[d.key] = today; });
+    const keep = {}; Object.keys(st.sent).forEach((k) => { if (C.days(st.sent[k], today) < 120) keep[k] = st.sent[k]; }); st.sent = keep;
+    await call({ action: "savePortfolio", user: "main", key: "tally_compliance", data: st });
+  }
+  // 2) licences, insurance, asset insurance / AMC → Ravi
+  const lic = ((await kvGet("tally_licences")) || {}).list || [], assets = ((await kvGet("tally_assets")) || {}).list || [];
+  st.expSent = st.expSent || {};
+  const exp = C.expiryReminders(lic, today, "Licence/insurance").concat(C.expiryReminders(assets, today, "Asset")).filter((x) => st.expSent[x.name + "|" + x.date] !== today);
+  if (exp.length) {
+    exp.forEach((x) => { st.expSent[x.name + "|" + x.date] = today; });
+    const keepE = {}; Object.keys(st.expSent).forEach((k) => { if (C.days(st.expSent[k], today) < 60) keepE[k] = st.expSent[k]; }); st.expSent = keepE;
+    await call({ action: "savePortfolio", user: "main", key: "tally_compliance", data: st });
+    const lines = exp.map((x) => "• " + x.name + (x.number ? " (" + x.number + ")" : "") + " — expires " + fmt(x.date) + " (" + when(x.left) + ")");
+    await T.mail(s.ownerEmail, "Renewals due: " + exp.map((x) => x.name).join(", ").slice(0, 120), "These need renewal:\n\n" + lines.join("\n") + "\n\nRegister: https://rk-tracker-v2.netlify.app/tally/ (📜 Licences, 🏭 Assets)");
+    await T.tg("📜 <b>Renewals due</b>\n" + lines.join("\n"));
+  }
+  // 3) MSME suppliers unpaid beyond 45 days (section 43B(h)) and 4) bank reconciliation → audit findings
+  const flags = [];
+  const pay = (await kvGet("tally_pay")) || { rows: [] };
+  C.msmeDues(pay.rows, st.msme || [], today).filter((x) => x.age > 45).forEach((x) => flags.push({ kind: "MSME unpaid > 45 days", sev: "high", d: x.date, t: "Bill", n: x.ref || "", p: x.party, a: Math.round(x.amt),
+    note: "MSME supplier bill is " + x.age + " days old (should have been paid by " + fmt(x.payBy) + ") — under section 43B(h) it can't be claimed as an expense until paid", key: "MSME|" + x.party + "|" + (x.ref || x.date) }));
+  const bank = (await kvGet("tally_bank")) || { accounts: {} }, vch = ((await kvGet("tally_vouchers")) || {}).list || [];
+  Object.keys(st.reconMap || {}).forEach((acc) => {
+    const A = bank.accounts[acc]; if (!A) return;
+    const r = C.reconcile(A.txns, vch, st.reconMap[acc]);
+    r.notInTally.filter((x) => C.days(x.d, today) > 3).forEach((x) => flags.push({ kind: "In bank, not in Tally", sev: "medium", d: x.d, t: acc, n: x.ref || "", p: x.desc, a: Math.round(x.amt),
+      note: (x.dir === "in" ? "Money received " : "Money paid ") + "in the bank but no matching entry in Tally ledger " + st.reconMap[acc], key: "RECB|" + acc + "|" + x.d + "|" + x.amt + "|" + x.dir }));
+    r.notInBank.forEach((x) => flags.push({ kind: "In Tally, not in bank", sev: "medium", d: x.d, t: x.t, n: x.n, p: x.p, a: Math.round(x.amt),
+      note: (x.dir === "in" ? "Receipt" : "Payment") + " entered in Tally (" + st.reconMap[acc] + ")" + (x.ch ? ", cheque " + x.ch : "") + " but not seen in the bank statement after 7 days — uncleared or wrong entry?", key: "RECT|" + acc + "|" + x.d + "|" + x.amt + "|" + (x.n || "") }));
+  });
+  if (flags.length) await T.reportFlags(flags, "Compliance & bank check");
+}
+exports.compliance = compliance;
 // Scheduled 9:15 IST: read Maadhu's backup email first (background), which then sends the summary.
 exports.handler = async () => {
   const base = process.env.URL || "https://rk-tracker-v2.netlify.app";

@@ -15,8 +15,14 @@ function series(n) {
 }
 
 // prev: vouchers held before this upload; incoming: this export
-function check(prev, incoming, prevUpTo, knownGone) {
-  knownGone = knownGone || new Set();
+const CASH = /^cash\b|cash[ -]in[ -]hand|petty cash/i;
+const monthOf = (d) => String(d || "").slice(0, 7);
+// opts: { knownGone:Set, filedMonths:Set("YYYY-MM"), today:"YYYY-MM-DD" }
+function check(prev, incoming, prevUpTo, opts) {
+  opts = opts instanceof Set ? { knownGone: opts } : (opts || {});
+  const knownGone = opts.knownGone || new Set(), filed = opts.filedMonths || new Set();
+  const today = opts.today || new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+  const fyNow = FY_START(today);
   const flags = [];
   const add = (kind, sev, v, note) => flags.push({ kind, sev, d: v.d, t: v.t, n: v.n, p: v.p, a: Math.round(v.a || 0),
     note, key: kind + "|" + tn(v) + "|" + v.d + "|" + note.slice(0, 60) });
@@ -24,6 +30,7 @@ function check(prev, incoming, prevUpTo, knownGone) {
   const lo = incoming.reduce((m, v) => (v.d < m ? v.d : m), incoming[0].d), hi = incoming.reduce((m, v) => (v.d > m ? v.d : m), incoming[0].d);
   const prevIn = prev.filter((v) => v.d >= lo && v.d <= hi);
   const byTN = new Map(incoming.map((v) => [tn(v), v]));
+  const byM = new Map(incoming.filter((v) => v.m).map((v) => [v.m, v]));
   const deletedNums = new Set();
   const prevTN = new Map(prev.map((v) => [tn(v), v]));
 
@@ -34,14 +41,20 @@ function check(prev, incoming, prevUpTo, knownGone) {
   });
   // 2. deleted or changed since an earlier export of the same dates
   prevIn.forEach((v) => {
-    if (!v.n) return;
-    const now = byTN.get(tn(v));
+    if (!v.n && !v.m) return;
+    const now = (v.m && byM.get(v.m)) || byTN.get(tn(v));
     if (!now) { deletedNums.add(tn(v)); add("Deleted / renumbered", isSales(v.t) ? "high" : "medium", v, "Was in an earlier export (" + inr(v.a) + (v.p ? ", " + v.p : "") + ") but is missing now"); }
     else if (!now.c) {
       const ch = [];
       if (Math.round(now.a || 0) !== Math.round(v.a || 0)) ch.push("amount " + inr(v.a) + " → " + inr(now.a));
       if ((now.p || "") !== (v.p || "") && v.p) ch.push("party " + v.p + " → " + (now.p || "—"));
       if (now.d !== v.d) ch.push("date " + v.d + " → " + now.d);
+      if ((now.n || "") !== (v.n || "")) ch.push("number " + v.n + " → " + now.n);
+      if ((now.ch || "") !== (v.ch || "") && (v.ch || now.ch)) ch.push("cheque/ref " + (v.ch || "—") + " → " + (now.ch || "—"));
+      if ((now.chd || "") !== (v.chd || "") && v.chd) ch.push("cheque date " + v.chd + " → " + (now.chd || "—"));
+      const ledg = (x) => (x.le || []).map((l) => l.l + ":" + Math.round(l.a)).sort().join("|");
+      if (v.le && now.le && ledg(v) !== ledg(now) && !ch.length) ch.push("ledger accounts / split changed");
+      if (!ch.length && v.al && now.al && v.al !== now.al) ch.push("edited in Tally (alteration " + v.al + " → " + now.al + "), no visible change in amount/party/date");
       if (ch.length) add("Changed after export", isSales(v.t) ? "high" : "medium", now, "Altered since the earlier export: " + ch.join("; "));
     }
   });
@@ -50,6 +63,33 @@ function check(prev, incoming, prevUpTo, knownGone) {
     const limit = new Date(new Date(prevUpTo + "T00:00:00Z").getTime() - 3 * 864e5).toISOString().slice(0, 10);
     incoming.forEach((v) => { if (v.d < limit && v.n && !prevTN.has(tn(v)) && !v.c) add("Back-dated entry", "medium", v, "New entry dated " + v.d + ", but data up to " + prevUpTo + " had already been received"); });
   }
+  // 3b. cheques returned / bounced
+  incoming.forEach((v) => {
+    if (v.c) return;
+    const text = (v.r || "") + " " + (v.le || []).map((l) => l.l).join(" ");
+    if (/bounce|dishono|cheque return|chq\.? ?ret|returned cheque|return of cheque|insufficient fund|unpaid cheque/i.test(text))
+      add("Cheque returned", "high", v, "Looks like a returned / bounced cheque" + (v.ch ? " (no. " + v.ch + ")" : "") + (v.r ? " — " + v.r : ""));
+  });
+  // 3c. suspense, round-figure journals, Sunday entries (new vouchers only)
+  incoming.forEach((v) => {
+    if (v.c) return;
+    const isNew = !(v.m && prev.some((p2) => p2.m === v.m)) && !prevTN.has(tn(v));
+    if ((v.le || []).some((l) => /suspense/i.test(l.l))) add("Suspense entry", "medium", v, "Posted to a Suspense account — needs to be cleared to the right ledger");
+    if (isNew && /journal/i.test(v.t || "") && (v.a || 0) >= 100000 && Math.round(v.a) % 10000 === 0) add("Large round-figure journal", "low", v, "Journal for a round " + inr(v.a) + " — keep the supporting document ready");
+    if (isNew && new Date(v.d + "T00:00:00Z").getUTCDay() === 0) add("Sunday entry", "low", v, "Dated on a Sunday");
+  });
+  // 3d. cash limits (needs ledger lines from the XML export): per party per day
+  const cashIn = {}, cashOut = {};
+  incoming.forEach((v) => {
+    if (v.c || /contra/i.test(v.t || "") || !(v.le || []).length) return;
+    const cl = v.le.filter((l) => CASH.test(l.l)); if (!cl.length) return;
+    if (v.le.some((l) => !CASH.test(l.l) && /bank|\bod\b|\bcc\b/i.test(l.l))) return;      // cash to/from bank
+    const party = v.p || (v.le.find((l) => !CASH.test(l.l)) || {}).l || "?";
+    cl.forEach((l) => { const k = v.d + "|" + party; if (l.a < 0) (cashIn[k] = cashIn[k] || { v, s: 0 }).s += -l.a; else (cashOut[k] = cashOut[k] || { v, s: 0 }).s += l.a; });
+  });
+  Object.keys(cashIn).forEach((k) => { const x = cashIn[k]; if (x.s >= 200000) add("Cash receipt over ₹2 lakh", "high", Object.assign({}, x.v, { a: x.s }), "Cash received " + inr(x.s) + " from " + k.split("|")[1] + " on one day — section 269ST limit is below ₹2,00,000"); });
+  Object.keys(cashOut).forEach((k) => { const x = cashOut[k]; if (x.s > 10000 && !/salary|wages|bank|tax|gst|tds/i.test(k)) add("Cash payment over ₹10,000", "medium", Object.assign({}, x.v, { a: x.s }), "Cash paid " + inr(x.s) + " to " + k.split("|")[1] + " on one day — section 40A(3) disallows cash expenses above ₹10,000 per day per party"); });
+
   // 4. sales invoices: duplicate numbers and gaps in numbering (whole financial year),
   //    on the books as they stand after this export (old versions replaced)
   const all = new Map(); prev.filter((v) => v.d < lo || v.d > hi).concat(incoming).forEach((v, i) => all.set(i, v));
@@ -90,6 +130,25 @@ function check(prev, incoming, prevUpTo, knownGone) {
   // 7. e-way bills (only when the export carries e-way bill details)
   const hasEW = incoming.some((v) => v.ew !== undefined);
   if (hasEW) incoming.forEach((v) => { if (isSales(v.t) && !v.c && (v.a || 0) >= 50000 && !v.ew && (v.i || []).length) add("E-way bill missing", "medium", v, "Goods invoice of " + inr(v.a) + " with no e-way bill number in Tally (₹50,000 rule — check if exempt)"); });
+  // Escalate anything touching a month whose GST return is already filed, or a previous financial year
+  const touchy = /Cancelled|Deleted|Changed|Back-dated|Missing invoice|Duplicate/;
+  flags.forEach((f) => {
+    if (!touchy.test(f.kind)) return;
+    if (filed.has(monthOf(f.d)) && /sales|purchase|credit note|debit note/i.test(f.t || "")) { f.sev = "high"; f.note += " · ⚠ GST return for " + monthOf(f.d) + " was already filed — may need amendment"; }
+    if (f.d && f.d < fyNow && !/Missing invoice/.test(f.kind)) { f.sev = "high"; f.note += " · ⚠ previous financial year"; }
+  });
+  return flags;
+}
+
+// Snapshot checks on Trial Balance / Stock Summary uploads
+function checkSnapshot(kind, rows, asof) {
+  const flags = [], mon = String(asof || "").slice(0, 7);
+  const add = (k, sev, name, a, note) => flags.push({ kind: k, sev, d: asof || "", t: kind === "tb" ? "Trial Balance" : "Stock", n: "", p: name, a: Math.round(a || 0), note, key: k + "|" + name + "|" + mon });
+  if (kind === "tb") (rows || []).forEach((r) => {
+    if (CASH.test(r.name) && (r.cr || 0) > (r.dr || 0)) add("Negative cash balance", "high", r.name, r.cr - r.dr, "Cash account shows a credit (negative) balance of " + inr(r.cr - r.dr) + " — cash can't go below zero; an entry is missing or wrong");
+    if (/suspense/i.test(r.name) && Math.abs((r.dr || 0) - (r.cr || 0)) > 1) add("Suspense balance", "medium", r.name, Math.abs(r.dr - r.cr), "Suspense account has a balance of " + inr(Math.abs(r.dr - r.cr)) + " — should be cleared");
+  });
+  if (kind === "stock") (rows || []).forEach((r) => { if ((r.qty || 0) < 0) add("Negative stock", "medium", r.item, r.val, "Closing stock is negative (" + r.qty + " " + (r.unit || "") + ") — a purchase or production entry is missing"); });
   return flags;
 }
 
@@ -102,4 +161,4 @@ function emailBody(fresh, upTo) {
     fresh.map((f) => "<tr style='border-top:1px solid #dde3ea'><td>" + icon[f.sev] + "</td><td><b>" + f.kind + "</b></td><td>" + f.d + "</td><td>" + (f.t || "") + " " + (f.n || "") + "</td><td>" + (f.p || "") + "</td><td align='right'>" + (f.a ? inr(f.a) : "") + "</td><td>" + f.note + "</td></tr>").join("") +
     "</table><p>Open the full list: <a href='https://rk-tracker-v2.netlify.app/tally/'>Tally → 🧾 Audit</a></p></div>";
 }
-module.exports = { check, emailBody };
+module.exports = { check, checkSnapshot, emailBody };

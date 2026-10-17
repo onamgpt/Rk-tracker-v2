@@ -51,6 +51,7 @@ async function ingest(kind, data, file, by, asof) {
     meta.vouchers = { at: now, by, count: list.length, upTo: list.length ? list[list.length - 1].d : null, file: file || "" };
   } else if (["tb", "recv", "pay", "stock"].includes(kind)) {
     await kvSet("tally_" + kind, { asof: asof || null, at: now, by, rows: data || [], file: file || "" });
+    if (kind === "tb" || kind === "stock") { try { await reportFlags(require("./tally-audit.js").checkSnapshot(kind, data || [], asof || now.slice(0, 10)), "Tally audit check"); } catch (e) {} }
     meta[kind] = { at: now, by, rows: (data || []).length, asof: asof || null, file: file || "" };
   } else return { error: "unknown kind" };
   meta.lastUpload = now; meta.lastBy = by;
@@ -60,30 +61,36 @@ async function ingest(kind, data, file, by, asof) {
 exports.ingest = ingest;
 
 // ---- Audit: flag what an auditor would ask about, email new findings once ----
-async function runAudit(prev, incoming, prevUpTo) {
+async function reportFlags(flags, title) {
   const A = require("./tally-audit.js");
   const st = (await kvGet("tally_audit")) || { open: [], reported: [] };
-  const gone = new Set((st.open || []).filter((f) => /Deleted/.test(f.kind)).map((f) => (f.t || "") + "#" + (f.n || "")));
-  const flags = A.check(prev || [], incoming || [], prevUpTo, gone);
   const known = new Set(st.reported || []);
-  const fresh = flags.filter((f) => !known.has(f.key));
-  if (!fresh.length) return null;
+  const fresh = (flags || []).filter((f) => !known.has(f.key));
+  if (!fresh.length) return 0;
   const at = new Date().toISOString();
   fresh.forEach((f) => { f.found = at; f.status = "open"; known.add(f.key); });
-  st.open = fresh.concat(st.open || []).slice(0, 2000);
-  st.reported = Array.from(known).slice(-6000);
+  st.open = fresh.concat(st.open || []).slice(0, 3000);
+  st.reported = Array.from(known).slice(-8000);
   st.at = at;
   await kvSet("tally_audit", st);
   const s = await settings();
-  const upTo = incoming.length ? incoming.reduce((m, v) => (v.d > m ? v.d : m), incoming[0].d) : "";
+  const high = fresh.filter((f) => f.sev === "high").length;
   try {
     const m = require("./mail.js");
-    await m.handler({ httpMethod: "POST", body: JSON.stringify({ to: s.ownerEmail, subject: "Tally audit check: " + fresh.length + " new item(s)" + (fresh.some((f) => f.sev === "high") ? " — includes important ones" : ""), html: A.emailBody(fresh.slice(), upTo) }) });
+    await m.handler({ httpMethod: "POST", body: JSON.stringify({ to: s.ownerEmail, subject: (title || "Tally audit check") + ": " + fresh.length + " new item(s)" + (high ? " — " + high + " important" : ""), html: A.emailBody(fresh.slice(), "") }) });
   } catch (e) {}
-  const high = fresh.filter((f) => f.sev === "high").length;
-  await tg("🧾 <b>Tally audit check</b> — " + fresh.length + " new item(s)" + (high ? ", " + high + " important" : "") + ":\n" +
-    fresh.slice(0, 8).map((f) => "• " + f.kind + ": " + (f.t || "") + " " + (f.n || "") + " " + f.d).join("\n") + (fresh.length > 8 ? "\n…" : "") + "\nDetails emailed · https://rk-tracker-v2.netlify.app/tally/");
+  await tg("🧾 <b>" + (title || "Tally audit check") + "</b> — " + fresh.length + " new item(s)" + (high ? ", " + high + " important" : "") + ":\n" +
+    fresh.slice(0, 8).map((f) => "• " + f.kind + ": " + ((f.t || "") + " " + (f.n || "")).trim() + (f.p ? " · " + f.p : "") + " " + (f.d || "")).join("\n") + (fresh.length > 8 ? "\n…" : "") + "\nDetails emailed · https://rk-tracker-v2.netlify.app/tally/");
   return fresh.length;
+}
+exports.reportFlags = reportFlags;
+async function runAudit(prev, incoming, prevUpTo) {
+  const A = require("./tally-audit.js"), C = require("./tally-compliance.js");
+  const st = (await kvGet("tally_audit")) || { open: [] };
+  const gone = new Set((st.open || []).filter((f) => /Deleted/.test(f.kind)).map((f) => (f.t || "") + "#" + (f.n || "")));
+  const comp = (await kvGet("tally_compliance")) || {};
+  const flags = A.check(prev || [], incoming || [], prevUpTo, { knownGone: gone, filedMonths: C.filedMonths(comp) });
+  return reportFlags(flags, "Tally audit check");
 }
 
 // ---- Vault: keep every original Tally file, with a preview of what was read ----
@@ -148,11 +155,67 @@ exports.handler = async (event) => {
       await fetch(base + "/.netlify/functions/tally-mail-background", { method: "POST", headers: { "Content-Type": "application/json", "x-run-key": runKey() }, body: JSON.stringify({ manual: true, notify: false }) }).catch(() => {});
       return OK({ ok: true, started: true });
     }
-    if (!owner) return OK({ error: "owner only" });
+    // Maadhu (uploader) may also: add bank statements, see what's due, and mark it done
+    if (!owner && !["comp", "compDone", "bankIngest"].includes(b.action)) return OK({ error: "owner only" });
     if (b.action === "get") {
       const [meta, tb, recv, pay, stock, vch, lr] = await Promise.all(["tally_meta", "tally_tb", "tally_recv", "tally_pay", "tally_stock", "tally_vouchers", "logistics_v2"].map(kvGet));
       const gm = await kvGet("gmail_oauth"), mlog = (await kvGet("tally_mail_log")) || [], bankAll = await kvGet("tally_bank");
       return OK({ ok: true, bank: bankSummary(bankAll), gmail: gm && gm.refresh ? { email: gm.email || "", at: gm.at } : null, mailLog: mlog.slice(0, 10), settings: s, meta: meta || {}, tb, recv, pay, stock, vouchers: (vch && vch.list) || [], dispatches: ((lr && lr.shipments) || []).filter(x => x.invoiceNo).map(x => ({ customer: x.customer, invoiceNo: x.invoiceNo, date: x.dispatchedOn || x.date, amount: x.invoiceAmount })) });
+    }
+    // ---------------- Compliance, licences, assets, MSME, bank reconciliation ----------------
+    if (b.action === "comp") {
+      const C = require("./tally-compliance.js");
+      const st = (await kvGet("tally_compliance")) || {};
+      const items = st.items || C.DEFAULT_ITEMS;
+      const td = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+      if (!st.since) { st.since = td; await kvSet("tally_compliance", st); }
+      const occ = C.occurrences(items, st.since > C.isoAdd(td, -120) ? st.since : C.isoAdd(td, -120), C.isoAdd(td, 75)).map((x) => Object.assign(x, { done: (st.done || {})[x.key] || null, left: C.days(td, x.due) }));
+      if (!owner) return OK({ ok: true, today: td, occ: occ.filter((x) => !x.done && x.left <= 30) });
+      const [lic, assets, pay, bank, vch] = await Promise.all([kvGet("tally_licences"), kvGet("tally_assets"), kvGet("tally_pay"), kvGet("tally_bank"), kvGet("tally_vouchers")]);
+      const recon = {};
+      const map = st.reconMap || {};
+      Object.keys(map).forEach((acc) => { const A = bank && bank.accounts && bank.accounts[acc]; if (A && map[acc]) recon[acc] = C.reconcile(A.txns, (vch && vch.list) || [], map[acc]); });
+      const ledgers = {}; ((vch && vch.list) || []).forEach((v) => (v.le || []).forEach((l) => { if (/bank|\bod\b|\bcc\b|a\/c|account/i.test(l.l) && !/charge|interest|loan/i.test(l.l)) ledgers[l.l] = 1; }));
+      return OK({ ok: true, today: td, items, occ, licences: (lic && lic.list) || [], assets: (assets && assets.list) || [], suggestions: C.LICENCE_SUGGESTIONS,
+        itRates: C.IT_RATES, coLife: C.CO_LIFE, msme: st.msme || [], msmeDues: C.msmeDues((pay && pay.rows) || [], st.msme || [], td),
+        payParties: Array.from(new Set(((pay && pay.rows) || []).map((r) => r.party).filter(Boolean))).sort(),
+        reconMap: map, recon, bankAccounts: Object.keys((bank && bank.accounts) || {}), bankLedgers: Object.keys(ledgers).sort(), hasLedgerDetail: ((vch && vch.list) || []).some((v) => v.le) });
+    }
+    const saveDoc = async (f) => {
+      if (!f || !f.data) return "";
+      const buf = Buffer.from(String(f.data).replace(/^data:[^,]+,/, ""), "base64");
+      if (buf.length > 4.3 * 1024 * 1024) throw new Error("File too large (max 4 MB)");
+      const r = await db.storageUpload("tally", { name: String(f.name || "document"), type: f.type || "application/octet-stream", data: buf.toString("base64") });
+      return (r && r.url) || "";
+    };
+    if (b.action === "compDone") {   // owner or Maadhu: mark filed / paid, optionally with the challan or acknowledgement
+      const st = (await kvGet("tally_compliance")) || {};
+      st.done = st.done || {};
+      const url = await saveDoc(b.file);
+      st.done[String(b.key)] = { at: new Date().toISOString(), by: user, note: String(b.note || "").slice(0, 200), file: url, fileName: b.file ? String(b.file.name || "") : "" };
+      await kvSet("tally_compliance", st);
+      if (url) { try { await vaultAdd({ name: (b.file && b.file.name) || "proof", kind: "compliance", label: "Compliance proof", rows: 0, size: 0, by: user, source: "upload", url, note: String(b.key), preview: [] }); } catch (e) {} }
+      if (user !== "main") await tg("✅ " + user + " marked done: " + String(b.key).replace("|", " due ") + (b.note ? " — " + b.note : "") + (url ? " (proof uploaded)" : ""));
+      return OK({ ok: true });
+    }
+    if (!owner && ["compUndo", "compItems", "licSave", "licDel", "assetSave", "assetDel", "msmeSave", "reconMap"].includes(b.action)) return OK({ error: "owner only" });
+    if (b.action === "compUndo") { const st = (await kvGet("tally_compliance")) || {}; if (st.done) delete st.done[String(b.key)]; await kvSet("tally_compliance", st); return OK({ ok: true }); }
+    if (b.action === "compItems") { const st = (await kvGet("tally_compliance")) || {}; st.items = Array.isArray(b.items) ? b.items.slice(0, 80) : st.items; await kvSet("tally_compliance", st); return OK({ ok: true }); }
+    if (b.action === "msmeSave") { const st = (await kvGet("tally_compliance")) || {}; st.msme = (Array.isArray(b.names) ? b.names : String(b.names || "").split("\n")).map((x) => String(x).trim()).filter(Boolean).slice(0, 300); await kvSet("tally_compliance", st); return OK({ ok: true, msme: st.msme }); }
+    if (b.action === "reconMap") { const st = (await kvGet("tally_compliance")) || {}; st.reconMap = st.reconMap || {}; if (b.ledger) st.reconMap[String(b.account)] = String(b.ledger); else delete st.reconMap[String(b.account)]; await kvSet("tally_compliance", st); return OK({ ok: true }); }
+    if (b.action === "licSave" || b.action === "assetSave") {
+      const key = b.action === "licSave" ? "tally_licences" : "tally_assets";
+      const cur = (await kvGet(key)) || { list: [] };
+      const it = Object.assign({}, b.item || {});
+      it.id = it.id || Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      const url = await saveDoc(b.file); if (url) { it.file = url; it.fileName = String(b.file.name || ""); }
+      const i = cur.list.findIndex((x) => x.id === it.id);
+      if (i >= 0) cur.list[i] = Object.assign({}, cur.list[i], it); else cur.list.push(it);
+      await kvSet(key, cur); return OK({ ok: true, list: cur.list });
+    }
+    if (b.action === "licDel" || b.action === "assetDel") {
+      const key = b.action === "licDel" ? "tally_licences" : "tally_assets";
+      const cur = (await kvGet(key)) || { list: [] }; cur.list = cur.list.filter((x) => x.id !== b.id); await kvSet(key, cur); return OK({ ok: true, list: cur.list });
     }
     if (b.action === "audit") {
       if (!owner) return OK({ error: "owner only" });
