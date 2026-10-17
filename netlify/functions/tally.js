@@ -52,7 +52,15 @@ async function ingest(kind, data, file, by, asof) {
 exports.ingest = ingest;
 
 // ---- Vault: keep every original Tally file, with a preview of what was read ----
-const LABELS = { vouchers: "Day Book", tb: "Trial Balance", recv: "Receivables", pay: "Payables", stock: "Stock" };
+const LABELS = { vouchers: "Day Book", tb: "Trial Balance", recv: "Receivables", pay: "Payables", stock: "Stock", bank: "Bank statement" };
+// Bank statements: one file of transactions per account, merged across uploads
+function bankSummary(bank) {
+  const A = (bank && bank.accounts) || {};
+  return Object.keys(A).map((name) => { const t = A[name].txns || [];
+    return { name, n: t.length, from: t.length ? t[0].d : "", to: t.length ? t[t.length - 1].d : "", closing: t.length ? t[t.length - 1].bal : null,
+      inTotal: Math.round(t.reduce((a, x) => a + (x.cr || 0), 0)), outTotal: Math.round(t.reduce((a, x) => a + (x.dr || 0), 0)), updated: A[name].updated }; });
+}
+exports.bankSummary = bankSummary;
 async function vaultAdd(entry) {
   const v = (await kvGet("tally_vault")) || [];
   v.unshift(Object.assign({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: new Date().toISOString() }, entry));
@@ -108,8 +116,27 @@ exports.handler = async (event) => {
     if (!owner) return OK({ error: "owner only" });
     if (b.action === "get") {
       const [meta, tb, recv, pay, stock, vch, lr] = await Promise.all(["tally_meta", "tally_tb", "tally_recv", "tally_pay", "tally_stock", "tally_vouchers", "logistics_v2"].map(kvGet));
-      const gm = await kvGet("gmail_oauth"), mlog = (await kvGet("tally_mail_log")) || [];
-      return OK({ ok: true, gmail: gm && gm.refresh ? { email: gm.email || "", at: gm.at } : null, mailLog: mlog.slice(0, 10), settings: s, meta: meta || {}, tb, recv, pay, stock, vouchers: (vch && vch.list) || [], dispatches: ((lr && lr.shipments) || []).filter(x => x.invoiceNo).map(x => ({ customer: x.customer, invoiceNo: x.invoiceNo, date: x.dispatchedOn || x.date, amount: x.invoiceAmount })) });
+      const gm = await kvGet("gmail_oauth"), mlog = (await kvGet("tally_mail_log")) || [], bankAll = await kvGet("tally_bank");
+      return OK({ ok: true, bank: bankSummary(bankAll), gmail: gm && gm.refresh ? { email: gm.email || "", at: gm.at } : null, mailLog: mlog.slice(0, 10), settings: s, meta: meta || {}, tb, recv, pay, stock, vouchers: (vch && vch.list) || [], dispatches: ((lr && lr.shipments) || []).filter(x => x.invoiceNo).map(x => ({ customer: x.customer, invoiceNo: x.invoiceNo, date: x.dispatchedOn || x.date, amount: x.invoiceAmount })) });
+    }
+    if (b.action === "bankIngest") {   // owner or uploader: add a statement's transactions to an account
+      const name = String(b.account || "").trim().slice(0, 60);
+      if (!name) return OK({ error: "Give the bank account a name (e.g. Canara OD 1234)" });
+      const rows = (Array.isArray(b.rows) ? b.rows : []).filter((r) => r && /^\d{4}-\d{2}-\d{2}$/.test(r.d) && ((+r.dr || 0) || (+r.cr || 0)));
+      if (!rows.length) return OK({ error: "No transactions found in that file" });
+      const bank = (await kvGet("tally_bank")) || { accounts: {} };
+      const acc = bank.accounts[name] || (bank.accounts[name] = { txns: [], files: [] });
+      const key = (x) => [x.d, Math.round((+x.dr || 0) * 100), Math.round((+x.cr || 0) * 100), x.bal == null ? "" : Math.round(+x.bal * 100), String(x.desc || "").slice(0, 40).toLowerCase()].join("|");
+      const have = new Set(acc.txns.map(key)); let added = 0;
+      rows.forEach((r, i) => { const x = { d: r.d, desc: String(r.desc || "").slice(0, 200), ref: String(r.ref || "").slice(0, 60), dr: Math.round((+r.dr || 0) * 100) / 100,
+        cr: Math.round((+r.cr || 0) * 100) / 100, bal: r.bal == null || r.bal === "" ? null : Math.round(+r.bal * 100) / 100, o: i };
+        const k = key(x); if (!have.has(k)) { have.add(k); acc.txns.push(x); added++; } });
+      acc.txns.sort((a, z) => (a.d < z.d ? -1 : a.d > z.d ? 1 : 0));
+      acc.txns = acc.txns.slice(-20000).map((x) => { delete x.o; return x; });
+      acc.updated = new Date().toISOString();
+      acc.files = [{ name: String(b.file || ""), at: acc.updated, rows: rows.length, added, by: user }].concat(acc.files || []).slice(0, 50);
+      await kvSet("tally_bank", bank);
+      return OK({ ok: true, added, duplicates: rows.length - added, total: acc.txns.length, summary: bankSummary(bank) });
     }
     if (b.action === "ask") {
       const q = String(b.q || "").trim().slice(0, 1000); if (!q) return OK({ error: "empty question" });

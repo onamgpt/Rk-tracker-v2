@@ -165,6 +165,73 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
         .then(function(r){ if(line) line(r&&r.ok?(big?"   🗄 noted in Vault (file too large to keep a copy)":"   🗄 copy kept in Vault"):"   ⚠ Vault: "+((r&&r.error)||"not saved")); });
     }).catch(function(){});
   }
+  /* ---------- bank statements (CSV / Excel) ---------- */
+  function bkNum(v){ if(v==null||v==="") return 0; if(typeof v==="number") return v; var t=String(v).replace(/[,\s₹]/g,"").replace(/^\((.*)\)$/,"-$1"); var m=t.match(/-?\d+(\.\d+)?/); return m?parseFloat(m[0]):0; }
+  function bkDate(v){
+    if(v==null||v==="") return "";
+    if(typeof v==="number"&&v>20000&&v<80000){ var d=new Date(Math.round((v-25569)*864e5)); return d.toISOString().slice(0,10); }
+    if(Object.prototype.toString.call(v)==="[object Date]"&&!isNaN(v)) return new Date(v.getTime()-v.getTimezoneOffset()*6e4).toISOString().slice(0,10);
+    var t=String(v).trim(), M={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12}, m;
+    if((m=t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return m[1]+"-"+("0"+m[2]).slice(-2)+"-"+("0"+m[3]).slice(-2);
+    if((m=t.match(/^(\d{1,2})[\/\-. ](\d{1,2})[\/\-. ](\d{2,4})/))){ var y=+m[3]; if(y<100) y+=2000; return y+"-"+("0"+m[2]).slice(-2)+"-"+("0"+m[1]).slice(-2); }
+    if((m=t.match(/^(\d{1,2})[\s\-\/]*([A-Za-z]{3})[A-Za-z]*[\s\-\/,]*(\d{2,4})/))&&M[m[2].toLowerCase()]){ var yy=+m[3]; if(yy<100) yy+=2000; return yy+"-"+("0"+M[m[2].toLowerCase()]).slice(-2)+"-"+("0"+m[1]).slice(-2); }
+    return "";
+  }
+  function bankParse(rows){
+    var hi=-1, col={};
+    for(var i=0;i<Math.min(rows.length,60)&&hi<0;i++){
+      var r=(rows[i]||[]).map(function(c){ return String(c==null?"":c).toLowerCase().replace(/\s+/g," ").trim(); }), c={};
+      r.forEach(function(h,j){
+        if(c.date==null&&/(txn|tran|transaction|post|value)?\s*date/.test(h)&&!/value date/.test(h)) c.date=j;
+        if(c.vdate==null&&/value date/.test(h)) c.vdate=j;
+        if(c.desc==null&&/narration|description|particular|details|remark/.test(h)) c.desc=j;
+        if(c.ref==null&&/ref|chq|cheque|utr|instrument/.test(h)&&!/date/.test(h)) c.ref=j;
+        var isType=/dr\s*\/\s*cr|cr\s*\/\s*dr|^type$|debit\s*\/\s*credit/.test(h);
+        if(!isType&&c.dr==null&&/withdraw|debit|\bdr\b|paid out|money out/.test(h)&&!/credit/.test(h)) c.dr=j;
+        if(!isType&&c.cr==null&&/deposit|credit|\bcr\b|paid in|money in/.test(h)&&!/debit/.test(h)) c.cr=j;
+        if(c.amt==null&&/^amount|transaction amount|txn amount/.test(h)) c.amt=j;
+        if(c.type==null&&/dr\s*\/\s*cr|cr\s*\/\s*dr|^type$|debit\s*\/\s*credit/.test(h)) c.type=j;
+        if(c.bal==null&&/balance/.test(h)) c.bal=j;
+      });
+      if(c.date==null&&c.vdate!=null) c.date=c.vdate;
+      if(c.date!=null&&(c.dr!=null||c.cr!=null||c.amt!=null)) { hi=i; col=c; }
+    }
+    if(hi<0) throw new Error("Could not find the transaction table (looked for Date, Narration, Withdrawal/Debit, Deposit/Credit, Balance columns)");
+    var out=[];
+    for(var k=hi+1;k<rows.length;k++){
+      var row=rows[k]||[], d=bkDate(row[col.date]); if(!d) continue;
+      var dr=col.dr!=null?Math.abs(bkNum(row[col.dr])):0, cr=col.cr!=null?Math.abs(bkNum(row[col.cr])):0;
+      if(col.dr==null&&col.cr==null&&col.amt!=null){ var a=bkNum(row[col.amt]), ty=String(row[col.type]||row[col.amt]||"").toLowerCase();
+        if(/dr|debit|withdraw/.test(ty)||a<0) dr=Math.abs(a); else cr=Math.abs(a); }
+      if(!dr&&!cr) continue;
+      out.push({d:d,desc:String(col.desc!=null?row[col.desc]:"").replace(/\s+/g," ").trim(),ref:String(col.ref!=null&&row[col.ref]!=null?row[col.ref]:"").trim(),dr:dr,cr:cr,bal:col.bal!=null&&row[col.bal]!==""&&row[col.bal]!=null?bkNum(row[col.bal]):null});
+    }
+    return out;
+  }
+  function bankFiles(files, account){
+    var out=$("bklog"); out.textContent=""; var line=function(t){ out.textContent+=t+"\n"; };
+    var chain=Promise.resolve();
+    Array.prototype.forEach.call(files,function(f){ chain=chain.then(function(){
+      line("📄 "+f.name+" ("+Math.round(f.size/1024)+" KB) — reading…");
+      if(/\.pdf$/i.test(f.name)){ line("   ❌ PDF statements can’t be read — download Excel or CSV from net banking."); return; }
+      return Promise.all([f.arrayBuffer(),xlsxLib()]).then(function(res){
+        var buf=res[0], X=res[1], csv=/\.csv$/i.test(f.name);
+        // CSV: keep text as-is so Indian dd/mm dates are not read as US mm/dd
+        var wb=csv?X.read(new TextDecoder().decode(buf),{type:"string",raw:true}):X.read(new Uint8Array(buf),{type:"array",cellDates:true}), rows=[];
+        wb.SheetNames.forEach(function(n){ rows=rows.concat(X.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:""})); });
+        var tx=bankParse(rows);
+        if(!tx.length) throw new Error("No transactions found");
+        line("   ✓ "+tx.length+" transactions ("+tx[0].d+" → "+tx[tx.length-1].d+")");
+        return api("bankIngest",{account:account,rows:tx,file:f.name}).then(function(r){
+          if(!r||!r.ok) throw new Error((r&&r.error)||"not saved");
+          line("   ✅ saved to “"+account+"”: "+r.added+" new"+(r.duplicates?", "+r.duplicates+" already there":"")+" · "+r.total+" in total");
+          if(D) D.bank=r.summary;
+          return vaultKeep(f,"bank",tx,line);
+        });
+      }).catch(function(e){ line("   ❌ "+e.message); });
+    }); });
+    chain.then(function(){ line("Done."); VAULT=null; });
+  }
   function handleFiles(files){
     var out=$("uplog"); out.textContent="";
     var line=function(t){ out.textContent+=t+"\n"; };
@@ -266,6 +333,11 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
       '<div class="hint">In Tally: open each report → <b>Alt+E (Export)</b>. Excel, PDF or XML all work. Upload the five reports:<br>Day Book (today) · Trial Balance · Outstandings → Receivables · Outstandings → Payables · Stock Summary.<br>Name the payables file with "payables" in it. Files are read on this computer — only the figures are sent.</div>'+
       '<div class="drop" id="drop" style="margin-top:12px"><div style="font-size:28px">📂</div><b>Tap to choose files</b> or drag them here</div><input type="file" id="fin" multiple accept=".xml,.xls,.xlsx,.xlsm,.csv,.pdf" hidden>'+
       '<div class="log" id="uplog"></div></div>'+
+      '<div class="card"><h2>🏦 Bank statements</h2><div class="hint">Download the statement from net banking as <b>Excel (.xls / .xlsx) or CSV</b> — password-protected PDFs can’t be read. Give each account a name and upload; repeated uploads only add new transactions. The originals are kept in 🗄 Vault and 🤖 Ask AI can read the transactions.</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center"><input id="bkName" list="bkList" placeholder="Account name, e.g. Canara OD 1234" style="flex:1;min-width:220px;padding:10px;border:1px solid #ccd5df;border-radius:9px;font:inherit">'+
+      '<datalist id="bkList">'+((D&&D.bank)||[]).map(function(a){ return '<option value="'+esc(a.name)+'">'; }).join("")+'</datalist>'+
+      '<button class="btn" id="bkGo">📂 Choose statement</button><input type="file" id="bkFile" multiple accept=".csv,.xls,.xlsx" hidden></div>'+
+      '<div class="log" id="bklog"></div></div>'+
       (OWNER?'<div class="card"><h2>📧 Import from email</h2><div id="gm" class="hint">Checking Gmail connection…</div>'+
         '<div class="hint" style="margin-top:6px">Each morning at 9:15 the tracker reads emails from <b>'+esc((D&&D.settings||{}).mailFrom||"onammadhu@gmail.com")+'</b> with <b>"'+esc((D&&D.settings||{}).mailSubject||"backup")+'"</b> in the subject and imports the attached Excel files. Read-only — it never sends, deletes or changes mail.</div>'+
         '<div class="log" id="gmlog"></div></div>':'');
@@ -273,6 +345,8 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     dz.onclick=function(){ fin.click(); }; fin.onchange=function(){ handleFiles(fin.files); fin.value=""; };
     dz.ondragover=function(e){ e.preventDefault(); dz.classList.add("on"); }; dz.ondragleave=function(){ dz.classList.remove("on"); };
     dz.ondrop=function(e){ e.preventDefault(); dz.classList.remove("on"); handleFiles(e.dataTransfer.files); };
+    $("bkGo").onclick=function(){ if(!$("bkName").value.trim()){ $("bkName").focus(); $("bklog").textContent="Type the account name first."; return; } $("bkFile").click(); };
+    $("bkFile").onchange=function(){ bankFiles($("bkFile").files, $("bkName").value.trim()); $("bkFile").value=""; };
     if(OWNER) drawGmail();
   }
   function gapi(a){ return fetch("/.netlify/functions/gmail-auth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:a,pin:pin})}).then(function(r){return r.json();}); }
@@ -296,9 +370,12 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   var VAULT=null, vFilter="all";
   function drawVault(){
     if(VAULT===null){ $("view").innerHTML='<div class="card">Loading the vault…</div>'; return api("vault").then(function(r){ VAULT=(r&&r.vault)||[]; drawVault(); }); }
-    var kinds=[["all","All"],["vouchers","Day Book"],["tb","Trial Balance"],["recv","Receivables"],["pay","Payables"],["stock","Stock"],["none","Unrecognised"]];
+    var kinds=[["all","All"],["vouchers","Day Book"],["tb","Trial Balance"],["recv","Receivables"],["pay","Payables"],["stock","Stock"],["bank","Bank statements"],["none","Unrecognised"]];
     var list=VAULT.filter(function(v){ return vFilter==="all"||(vFilter==="none"?!v.kind:v.kind===vFilter); });
-    $("view").innerHTML='<div class="card"><h2>🗄 Vault — every file received</h2><div class="hint">Each Tally file uploaded here or emailed by Maadhu is kept as the original, with a preview of what the tracker read from it, so you can check the figures yourself. Kept privately in your Supabase storage.</div>'+
+    var bk=(D&&D.bank)||[];
+    var bankCard=bk.length?'<div class="card"><h2>🏦 Bank accounts</h2><div class="scroll"><table><tr><th>Account</th><th>From</th><th>To</th><th class="n">Txns</th><th class="n">Money in</th><th class="n">Money out</th><th class="n">Last balance</th></tr>'+
+      bk.map(function(a){ return '<tr><td><b>'+esc(a.name)+'</b></td><td>'+esc(a.from)+'</td><td>'+esc(a.to)+'</td><td class="n">'+a.n+'</td><td class="n">'+inr(a.inTotal)+'</td><td class="n">'+inr(a.outTotal)+'</td><td class="n">'+(a.closing==null?"—":inr(a.closing))+'</td></tr>'; }).join("")+'</table></div><div class="hint">Upload more statements on ⬆ Upload → 🏦 Bank statements. Ask AI can read these transactions.</div></div>':'';
+    $("view").innerHTML=bankCard+'<div class="card"><h2>🗄 Vault — every file received</h2><div class="hint">Each Tally file uploaded here or emailed by Maadhu is kept as the original, with a preview of what the tracker read from it, so you can check the figures yourself. Kept privately in your Supabase storage.</div>'+
       '<div style="margin-top:10px">'+kinds.map(function(k){ return '<button class="btn" data-vf="'+k[0]+'" style="margin:3px 4px 0 0;padding:6px 10px;font-size:12.5px'+(vFilter===k[0]?';background:#14532d;color:#fff;border-color:#14532d':'')+'">'+k[1]+'</button>'; }).join("")+'<button class="btn" id="vRef" style="margin:3px 0 0;padding:6px 10px;font-size:12.5px">↻</button></div></div>'+
       (list.length?list.map(function(v,i){
         return '<div class="card"><div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:220px"><b>'+esc(v.name)+'</b><br>'+

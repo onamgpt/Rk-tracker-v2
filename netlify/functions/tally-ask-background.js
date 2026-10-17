@@ -48,6 +48,21 @@ async function context() {
   const nos = {}; V.forEach((v) => { nos[String(v.n).replace(/\s+/g, "").toLowerCase()] = 1; });
   const miss = ((lr && lr.shipments) || []).filter((x) => x.invoiceNo && !nos[String(x.invoiceNo).replace(/\s+/g, "").toLowerCase()]);
   out += "DISPATCHES WITH NO MATCHING TALLY INVOICE: " + (miss.length ? miss.slice(0, 40).map((x) => x.customer + " inv " + x.invoiceNo + " (" + (x.dispatchedOn || x.date || "") + ")").join("; ") : "none") + "\n";
+  // Bank statements (uploaded separately as CSV / Excel)
+  const bank = await kvGet("tally_bank"), A = (bank && bank.accounts) || {};
+  const accs = Object.keys(A);
+  if (!accs.length) out += "\nBANK STATEMENTS: none uploaded yet.\n";
+  accs.forEach((name) => {
+    const t = A[name].txns || []; if (!t.length) return;
+    const bm = {}; t.forEach((x) => { const m = x.d.slice(0, 7), y = bm[m] || (bm[m] = { inn: 0, out: 0, n: 0 }); y.inn += x.cr || 0; y.out += x.dr || 0; y.n++; });
+    const who = (x) => String(x.desc || "").replace(/\d{4,}/g, "").replace(/[^A-Za-z ]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 40) || "?";
+    const ins = {}, outs = {}; t.forEach((x) => { if (x.cr) ins[who(x)] = (ins[who(x)] || 0) + x.cr; if (x.dr) outs[who(x)] = (outs[who(x)] || 0) + x.dr; });
+    const top = (o2) => Object.keys(o2).sort((a, z) => o2[z] - o2[a]).slice(0, 25).map((k) => k + " " + r0(o2[k])).join("; ");
+    out += "\nBANK ACCOUNT \"" + name + "\" — " + t.length + " transactions " + t[0].d + " to " + t[t.length - 1].d + (t[t.length - 1].bal != null ? ", closing balance ₹" + r0(t[t.length - 1].bal) : "") +
+      "\nMonthly (month | money in | money out | count): " + Object.keys(bm).sort().map((m) => m + " " + r0(bm[m].inn) + "/" + r0(bm[m].out) + "/" + bm[m].n).join("; ") +
+      "\nBiggest sources of money in: " + top(ins) + "\nBiggest payments out: " + top(outs) +
+      "\nLast " + Math.min(200, t.length) + " transactions (date | narration | ref | out | in | balance):\n" + t.slice(-200).map((x) => x.d + " | " + x.desc + " | " + (x.ref || "") + " | " + (x.dr ? r0(x.dr) : "") + " | " + (x.cr ? r0(x.cr) : "") + " | " + (x.bal == null ? "" : r0(x.bal))).join("\n") + "\n";
+  });
   out += "\nLast uploads: " + JSON.stringify(meta || {}).slice(0, 600) + "\n";
   return out;
 }
