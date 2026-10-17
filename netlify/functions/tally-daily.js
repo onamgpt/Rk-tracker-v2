@@ -16,12 +16,29 @@ async function summary() {
     // Which documents haven't arrived (by email or upload) for 3+ days?
     const DOCS = [["vouchers", "Day Book"], ["tb", "Trial Balance"], ["recv", "Receivables (Outstandings)"], ["pay", "Payables (Outstandings)"], ["stock", "Stock Summary"]];
     const age = (iso) => iso ? Math.floor((now - ist(iso)) / 864e5) : null;
+    // the exact period to send: from the day after what we already have, up to today
+    const today = now.toISOString().slice(0, 10);
+    const fyStart = (now.getUTCMonth() >= 3 ? now.getUTCFullYear() : now.getUTCFullYear() - 1) + "-04-01";
+    const nextDay = (d) => new Date(new Date(d + "T00:00:00Z").getTime() + 864e5).toISOString().slice(0, 10);
+    const fmt = (d) => new Date(d + "T00:00:00Z").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+    const range = (from) => "from " + fmt(from) + " to " + fmt(today);
     const missing = [];
-    DOCS.forEach(([k, label]) => { const a2 = age(meta[k] && meta[k].at); if (a2 == null || a2 >= 3) missing.push(label + (a2 == null ? " — never received" : " — last received " + a2 + " days ago")); });
+    DOCS.forEach(([k, label]) => {
+      const a2 = age(meta[k] && meta[k].at); if (!(a2 == null || a2 >= 3)) return;
+      let need;
+      if (k === "vouchers") { const upTo = meta.vouchers && meta.vouchers.upTo; need = range(upTo && upTo < today ? nextDay(upTo) : fyStart); }
+      else if (k === "tb") need = "for " + fmt(fyStart) + " to " + fmt(today) + " (as on today)";
+      else need = "as on " + fmt(today);
+      missing.push(label + " — " + need + (a2 == null ? " (never received)" : " (last received " + a2 + " days ago)"));
+    });
     const bank = (await kvGet("tally_bank")) || { accounts: {} };
     const accs = Object.keys(bank.accounts || {});
-    if (!accs.length) missing.push("Bank statements (Excel/CSV, all accounts) — never received");
-    accs.forEach((n) => { const a2 = age(bank.accounts[n].updated); if (a2 == null || a2 >= 3) missing.push("Bank statement: " + n + " — last received " + a2 + " days ago"); });
+    if (!accs.length) missing.push("Bank statements (Excel/CSV), every account — " + range(fyStart) + " (never received)");
+    accs.forEach((n) => {
+      const a2 = age(bank.accounts[n].updated); if (!(a2 == null || a2 >= 3)) return;
+      const t = bank.accounts[n].txns || [], lastD = t.length ? t[t.length - 1].d : null;
+      missing.push("Bank statement: " + n + " — " + range(lastD && lastD < today ? nextDay(lastD) : fyStart) + " (last received " + a2 + " days ago)");
+    });
     // Remind at most once every 3 days, and only while something is missing
     const rem = (await kvGet("tally_reminder")) || {};
     const remAge = rem.at ? Math.floor((now - ist(rem.at)) / 864e5) : 99;
