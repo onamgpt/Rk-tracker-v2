@@ -42,7 +42,7 @@ async function claude(facts, deep) {
 function factsFor(h, deep) {
   const f = { date: h.today, healthScore: h.score, ratios: h.ratios, lights: h.lights, balances: h.balances, last90days: h.last90, profitYTD: h.pl, cashNext4Weeks: h.cash4w,
     alerts: h.alerts, overdueCustomers: h.overdueCustomers, overdueSuppliers: h.overdueSuppliers, paidMostLast90: h.paidTo, topCustomers90: h.topCustomers,
-    admin: h.admin, crossChecks: h.cross, bank: h.bankFlow, dataNote: h.dataNote };
+    admin: h.admin, crossChecks: h.cross, bank: h.bankFlow, exports: h.exports, dataNote: h.dataNote };
   f.months = deep ? h.months : h.months.slice(-3);
   if (!deep) delete f.topCustomers90;
   return f;

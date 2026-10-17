@@ -113,6 +113,21 @@ async function compliance() {
     await T.mail(s.ownerEmail, "Renewals due: " + exp.map((x) => x.name).join(", ").slice(0, 120), "These need renewal:\n\n" + lines.join("\n") + "\n\nRegister: https://rk-tracker-v2.netlify.app/tally/ (📜 Licences, 🏭 Assets)");
     await T.tg("📜 <b>Renewals due</b>\n" + lines.join("\n"));
   }
+  // 2b) export register: realisation deadlines, shipping bills, eBRC, LUT
+  try {
+    const X = require("./tally-exports.js");
+    const reg = (await kvGet("export_register")) || { list: [] };
+    reg.sent = reg.sent || {};
+    const ex = X.reminders(reg, today).filter((r) => !reg.sent[r.key]);
+    if (ex.length) {
+      const lines = ex.map((r) => (r.sev === "high" ? "🔴 " : "🟠 ") + r.text);
+      await T.mail(s.ownerEmail, "Export follow-up (" + ex.length + ")", lines.join("\n\n") + "\n\nExport register: https://rk-tracker-v2.netlify.app/tally/ (🌍 Exports)");
+      await T.tg("🌍 <b>Exports</b>\n" + lines.join("\n"));
+      ex.forEach((r) => { reg.sent[r.key] = today; });
+      const keepX = {}; Object.keys(reg.sent).forEach((k) => { if (C.days(reg.sent[k], today) < 400) keepX[k] = reg.sent[k]; }); reg.sent = keepX;
+      await call({ action: "savePortfolio", user: "main", key: "export_register", data: reg });
+    }
+  } catch (e) {}
   // 3) MSME suppliers unpaid beyond 45 days (section 43B(h)) and 4) bank reconciliation → audit findings
   const flags = [];
   const pay = (await kvGet("tally_pay")) || { rows: [] };

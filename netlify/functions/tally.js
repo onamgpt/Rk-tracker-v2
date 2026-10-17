@@ -156,11 +156,66 @@ exports.handler = async (event) => {
       return OK({ ok: true, started: true });
     }
     // Maadhu (uploader) may also: add bank statements, see what's due, and mark it done
-    if (!owner && !["comp", "compDone", "bankIngest"].includes(b.action)) return OK({ error: "owner only" });
+    if (!owner && !["comp", "compDone", "bankIngest", "exp", "expSave", "expRealise", "expUnrealise", "expAddFromTally"].includes(b.action)) return OK({ error: "owner only" });
     if (b.action === "get") {
       const [meta, tb, recv, pay, stock, vch, lr] = await Promise.all(["tally_meta", "tally_tb", "tally_recv", "tally_pay", "tally_stock", "tally_vouchers", "logistics_v2"].map(kvGet));
       const gm = await kvGet("gmail_oauth"), mlog = (await kvGet("tally_mail_log")) || [], bankAll = await kvGet("tally_bank");
       return OK({ ok: true, bank: bankSummary(bankAll), gmail: gm && gm.refresh ? { email: gm.email || "", at: gm.at } : null, mailLog: mlog.slice(0, 10), settings: s, meta: meta || {}, tb, recv, pay, stock, vouchers: (vch && vch.list) || [], dispatches: ((lr && lr.shipments) || []).filter(x => x.invoiceNo).map(x => ({ customer: x.customer, invoiceNo: x.invoiceNo, date: x.dispatchedOn || x.date, amount: x.invoiceAmount })) });
+    }
+    // ---------------- Export register (LUT) ----------------
+    if (b.action && b.action.indexOf("exp") === 0) {
+      const X = require("./tally-exports.js");
+      const td = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+      const reg = (await kvGet("export_register")) || { list: [], settings: {} };
+      reg.list = reg.list || [];
+      const save = async () => { await kvSet("export_register", reg); };
+      const find = (id) => reg.list.find((x) => x.id === id);
+      const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      const docUrl = async (f) => {
+        if (!f || !f.data) return "";
+        const buf = Buffer.from(String(f.data).replace(/^data:[^,]+,/, ""), "base64");
+        if (buf.length > 4.3 * 1024 * 1024) throw new Error("File too large (max 4 MB)");
+        const r = await db.storageUpload("tally", { name: String(f.name || "document"), type: f.type || "application/octet-stream", data: buf.toString("base64") });
+        return (r && r.url) || "";
+      };
+      if (b.action === "exp") {
+        const st = X.settingsOf(reg);
+        const [vch, bank, mi] = await Promise.all([kvGet("tally_vouchers"), kvGet("tally_bank"), kvGet("mail_intel")]);
+        const buyers = reg.list.map((x) => (x.buyer || "").toLowerCase().split(" ")[0]).filter((w) => w.length > 3);
+        const emails = ((mi && mi.items) || []).filter((m) => m.cat === "export_docs" || (m.cat === "customer_payment" && buyers.some((w) => (m.party + " " + m.summary).toLowerCase().includes(w)))).slice(0, 30);
+        return OK({ ok: true, today: td, settings: st, summary: X.summary(reg, td),
+          list: reg.list.map((x) => Object.assign({}, x, { s: X.status(x, td, st) })).sort((a, b) => (a.invDate < b.invDate ? 1 : -1)),
+          candidates: X.tallyCandidates((vch && vch.list) || [], reg), bank: X.bankSuggestions(bank, reg), emails });
+      }
+      if (b.action === "expSave") {
+        const it = Object.assign({}, b.item || {});
+        ["inrValue", "fcAmount"].forEach((k) => { if (it[k] !== undefined) it[k] = Number(it[k]) || 0; });
+        const url = await docUrl(b.file);
+        let x = it.id && find(it.id);
+        if (x) Object.assign(x, it); else { x = Object.assign({ id: newId(), realised: [], files: [], added: new Date().toISOString(), by: user }, it); reg.list.push(x); }
+        if (url) (x.files = x.files || []).push({ name: String(b.file.name || "document"), url, at: new Date().toISOString(), by: user });
+        await save(); return OK({ ok: true, id: x.id });
+      }
+      if (b.action === "expAddFromTally") {
+        (b.items || []).slice(0, 100).forEach((c) => { if (!reg.list.some((x) => x.invNo === c.invNo)) reg.list.push({ id: newId(), invNo: c.invNo, invDate: c.invDate, buyer: c.buyer, inrValue: Number(c.inrValue) || 0, currency: "", fcAmount: 0, realised: [], files: [], added: new Date().toISOString(), by: user, from: "tally" }); });
+        await save(); return OK({ ok: true });
+      }
+      if (b.action === "expRealise") {
+        const x = find(b.id); if (!x) return OK({ error: "not found" });
+        (x.realised = x.realised || []).push({ d: String(b.d || td).slice(0, 10), amt: Number(b.amt) || 0, ref: String(b.ref || "").slice(0, 120), key: b.key || "", source: b.key ? "bank" : "manual", by: user });
+        if (b.full) x.fullyRealised = true;
+        await save(); return OK({ ok: true });
+      }
+      if (b.action === "expUnrealise") { const x = find(b.id); if (x && x.realised) { x.realised.splice(Number(b.idx), 1); x.fullyRealised = false; } await save(); return OK({ ok: true }); }
+      if (!owner) return OK({ error: "owner only" });
+      if (b.action === "expDel") { reg.list = reg.list.filter((x) => x.id !== b.id); await save(); return OK({ ok: true }); }
+      if (b.action === "expSettings") {
+        const n = b.settings || {};
+        reg.settings = Object.assign(X.settingsOf(reg), { months: Math.max(1, Math.min(24, Number(n.months) || 9)), lutArn: String(n.lutArn || "").slice(0, 40), lutValidTo: /^\d{4}-\d{2}-\d{2}$/.test(n.lutValidTo || "") ? n.lutValidTo : "",
+          buyers: String(n.buyers || "").split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 100) });
+        await save(); return OK({ ok: true });
+      }
+      return OK({ error: "unknown action" });
     }
     // ---------------- Compliance, licences, assets, MSME, bank reconciliation ----------------
     if (b.action === "comp") {

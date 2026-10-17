@@ -164,7 +164,10 @@ function compute(d, today, settings) {
   let score = ls.length ? ls.reduce((a, x) => a + pts[x], 0) / ls.length * 10 : null;
   if (score != null) { score -= Math.min(20, alerts.filter((a) => a.sev === "red").length * 5 + admin.auditOpen.high * 2 + admin.compliance.overdue.length * 3); score = Math.max(0, r0(score)); }
 
-  return { today, fy, months, ratios, lights, pl, alerts, score, admin, cross, bankFlow,
+  let exportsSummary = null;
+  try { if (d.exports && (d.exports.list || []).length) exportsSummary = require("./tally-exports.js").summary(d.exports, today); } catch (e) {}
+  if (exportsSummary && exportsSummary.overdue) alerts.push({ sev: "red", text: exportsSummary.overdue + " export invoice(s) past the RBI realisation deadline — under LUT, IGST with interest may become payable" });
+  return { today, fy, months, ratios, lights, pl, alerts, score, admin, cross, bankFlow, exports: exportsSummary,
     balances: { debtors: r0(debtors), creditors: r0(creditors), cash: r0(cash), bank: r0(bankBal), od: r0(od), stock: r0(stockVal), duties: r0(duties), loans: r0(loans) },
     last90: { sales: r0(sales90), purchases: r0(purch90), receipts: r0(rec90), payments: r0(pay90) },
     cash4w: { expectedIn: r0(inflow), dueOut: r0(outflow) },
@@ -177,9 +180,9 @@ function compute(d, today, settings) {
 }
 
 async function load(kvGet) {
-  const keys = ["tally_vouchers", "tally_tb", "tally_recv", "tally_pay", "tally_stock", "tally_meta", "tally_bank", "tally_audit", "tally_compliance", "logistics_v2", "tally_health_settings"];
+  const keys = ["tally_vouchers", "tally_tb", "tally_recv", "tally_pay", "tally_stock", "tally_meta", "tally_bank", "tally_audit", "tally_compliance", "logistics_v2", "tally_health_settings", "export_register"];
   const v = await Promise.all(keys.map(kvGet));
-  const d = { vouchers: v[0], tb: v[1], recv: v[2], pay: v[3], stock: v[4], meta: v[5], bank: v[6], audit: v[7], comp: v[8], logistics: v[9], settings: v[10] || {} };
+  const d = { vouchers: v[0], tb: v[1], recv: v[2], pay: v[3], stock: v[4], meta: v[5], bank: v[6], audit: v[7], comp: v[8], logistics: v[9], settings: v[10] || {}, exports: v[11] };
   try { const L = require("./loc-lib.js"); d.locFiles = {}; for (const p of Object.values(L.PEOPLE)) d.locFiles[p.name] = await L.loadFile(p.name); } catch (e) {}
   return d;
 }

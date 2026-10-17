@@ -278,7 +278,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   }
 
   /* ===================== Views ===================== */
-  var TABS=OWNER?[["home","🏠 Summary"],["health","🩺 Health"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["comp","📅 Compliance"],["lic","📜 Licences"],["assets","🏭 Assets"],["recon","🏦 Bank recon"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"],["comp","📅 Compliance"]];
+  var TABS=OWNER?[["home","🏠 Summary"],["health","🩺 Health"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["comp","📅 Compliance"],["exports","🌍 Exports"],["lic","📜 Licences"],["assets","🏭 Assets"],["recon","🏦 Bank recon"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"],["comp","📅 Compliance"],["exports","🌍 Exports"]];
   function drawTabs(){ $("tabs").innerHTML=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(t[0]===tab?"on":"")+'">'+t[1]+'</button>';}).join("");
     Array.prototype.forEach.call($("tabs").children,function(b){ b.onclick=function(){ tab=b.dataset.t; draw(); }; }); }
   function sales(){ return (D.vouchers||[]).filter(function(v){return /sales/i.test(v.t)&&!/order|return|credit/i.test(v.t);}); }
@@ -290,6 +290,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     if(tab==="vault") return drawVault();
     if(tab==="audit") return drawAudit();
     if(tab==="health") return drawHealth();
+    if(tab==="exports") return drawExports();
     if(tab==="comp"||tab==="lic"||tab==="assets"||tab==="recon") return drawCompliance();
     if(!D) { $("view").innerHTML='<div class="card">Loading…</div>'; return; }
     var m=D.meta||{};
@@ -446,6 +447,64 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     $("advNow").onclick=function(){ go(false); }; $("advDeep").onclick=function(){ go(true); };
     Array.prototype.forEach.call(document.querySelectorAll("[data-md]"),function(b){ b.onclick=function(){ api("mailDone",{id:b.dataset.md}).then(function(){ HL=null; drawHealth(); }); }; });
     $("hsSave").onclick=function(){ api("healthSettings",{settings:{odLimit:$("hsOd").value,openingStock:$("hsOs").value}}).then(function(){ HL=null; drawHealth(); }); };
+  }
+
+  /* ===================== Export register (LUT) ===================== */
+  var EX=null, exEdit=null;
+  function drawExports(){
+    if(EX===null){ $("view").innerHTML='<div class="card">Loading exports…</div>'; return api("exp").then(function(r){ EX=r&&r.ok?r:{error:(r&&r.error)||"error"}; drawExports(); }); }
+    if(EX.error){ $("view").innerHTML='<div class="card">⚠ '+esc(EX.error)+'</div>'; return; }
+    var S=EX.summary, st=EX.settings, L=EX.list||[];
+    var open=L.filter(function(x){ return !x.s.full; });
+    var h='<div class="card"><h2>🌍 Export register (LUT)</h2><div class="hint">Each export invoice from Tally → shipping bill → money received (matched from bank statement credits) → eBRC. Reminders at 6 and 8 months, 15 days before the RBI realisation deadline ('+st.months+' months from the shipping bill date) and weekly if overdue — under LUT, IGST with interest can become payable if money isn\'t received in time. Confirm periods with your bank / CA.</div>'+
+      '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px">'+
+      [["Invoices",S.invoices],["Awaiting payment",S.open],["Unrealised",inr(S.unrealisedINR)],["Past deadline",S.overdue],["Due within 60 days",S.within60],["eBRC pending",S.ebrcPending]].map(function(k){ return '<div><div class="hint">'+k[0]+'</div><div style="font-size:18px;font-weight:800">'+k[1]+'</div></div>'; }).join("")+'</div>'+
+      (S.nearest?'<div class="hint" style="margin-top:8px">Nearest deadline: <b>'+esc(S.nearest.invNo)+'</b> · '+esc(S.nearest.buyer||"")+' · '+fd(S.nearest.deadline)+' '+leftTag(S.nearest.left)+'</div>':'')+
+      '<div class="hint" style="margin-top:4px">LUT: '+(S.lut?'valid to '+fd(S.lut.validTo)+' '+leftTag(S.lut.left):'<b>not entered</b> — add the LUT ARN and validity in settings below')+'</div></div>';
+    var C=EX.candidates||[];
+    if(C.length) h+='<div class="card"><h2>➕ Export sales found in Tally ('+C.length+')</h2><div class="hint">Tick and add to the register.</div><div class="scroll"><table>'+C.map(function(c,i){ return '<tr><td><input type="checkbox" data-xc="'+i+'" checked></td><td><b>'+esc(c.invNo)+'</b></td><td>'+fd(c.invDate)+'</td><td>'+esc(c.buyer)+'</td><td class="n">'+inr(c.inrValue)+'</td></tr>'; }).join("")+'</table></div><button class="btn" id="xAddT" style="margin-top:8px">Add selected</button></div>';
+    else h+='<div class="card hint">No new export sales found in the Day Book. '+((st.buyers||[]).length?'':'Add your export buyers’ names in the settings below so they’re picked up automatically, or ')+'add invoices by hand.</div>';
+    var B=EX.bank||[];
+    if(B.length) h+='<div class="card"><h2>🏦 Foreign remittances in the bank ('+B.length+')</h2><div class="hint">Credits that look like export proceeds. Pick the invoice and tap Match.</div><div class="scroll"><table>'+B.slice(0,30).map(function(b,i){
+        return '<tr><td>'+fd(b.d)+'<div class="hint">'+esc(b.account)+'</div></td><td>'+esc(b.desc)+(b.suggest?'<div class="hint">suggested: '+esc(b.suggest.invNo)+' ('+esc(b.suggest.why)+')</div>':'')+'</td><td class="n"><b>'+inr(b.amt)+'</b></td><td><select data-xbs="'+i+'" style="padding:5px;max-width:170px"><option value="">— invoice —</option>'+open.map(function(x){ return '<option value="'+esc(x.id)+'"'+(b.suggest&&b.suggest.id===x.id?" selected":"")+'>'+esc(x.invNo+" · "+(x.buyer||""))+'</option>'; }).join("")+'</select><label class="hint"><input type="checkbox" data-xbf="'+i+'"> fully paid</label> <button class="btn" data-xbm="'+i+'" style="padding:4px 8px;font-size:12px">Match</button></td></tr>'; }).join("")+'</table></div></div>';
+    h+='<div class="card"><h2>📋 Invoices</h2>'+(L.length?'<div class="scroll"><table><tr><th>Invoice</th><th>Buyer</th><th class="n">Value</th><th>Shipping bill</th><th>Received</th><th>RBI deadline</th><th>eBRC</th><th></th></tr>'+L.map(function(x){ var s2=x.s;
+        return '<tr><td><b>'+esc(x.invNo)+'</b><div class="hint">'+fd(x.invDate)+'</div></td><td>'+esc(x.buyer||"")+(x.country?'<div class="hint">'+esc(x.country)+'</div>':'')+'</td><td class="n">'+inr(x.inrValue)+(x.fcAmount?'<div class="hint">'+esc(x.currency||"")+' '+Number(x.fcAmount).toLocaleString("en-IN")+'</div>':'')+'</td>'+
+          '<td>'+(x.sbNo?esc(x.sbNo)+'<div class="hint">'+fd(x.sbDate)+(x.port?' · '+esc(x.port):'')+'</div>':(s2.sbMissing?'<span style="color:#c0392b">missing</span>':'—'))+'</td>'+
+          '<td>'+(s2.full?'✅ '+inr(s2.realisedINR):'<div style="background:#eef2f6;border-radius:4px;width:90px;height:7px"><div style="background:#1f9d55;height:7px;border-radius:4px;width:'+s2.pct+'%"></div></div><span class="hint">'+s2.pct+'% · '+inr(s2.realisedINR)+'</span>')+'</td>'+
+          '<td>'+(s2.full?'<span class="hint">done</span>':(s2.deadline?fd(s2.deadline)+' '+leftTag(s2.left):'—'))+'</td><td>'+(x.ebrcNo?esc(x.ebrcNo):(s2.ebrcDue?'<span style="color:#d97706">pending</span>':'—'))+'</td>'+
+          '<td>'+((x.files||[]).map(function(f){ return '<a href="'+esc(f.url)+'" target="_blank" rel="noopener" title="'+esc(f.name)+'">📄</a>'; }).join(" "))+' <button class="btn" data-xe="'+esc(x.id)+'" style="padding:4px 8px;font-size:12px">Edit</button></td></tr>'; }).join("")+'</table></div>':'<div class="hint">No export invoices yet.</div>')+
+      '<button class="btn" id="xNew" style="margin-top:8px">+ Add invoice by hand</button></div><div id="xForm"></div>';
+    var E=EX.emails||[];
+    if(E.length) h+='<div class="card"><h2>📧 Related emails</h2>'+E.map(function(m){ return '<div style="margin:5px 0">'+esc(new Date(m.at).toLocaleDateString("en-IN"))+' · <b>'+esc(m.party||m.from)+'</b> — '+esc(m.summary)+' <a href="https://mail.google.com/mail/u/0/#all/'+esc(m.id)+'" target="_blank" rel="noopener">open</a></div>'; }).join("")+'</div>';
+    if(OWNER) h+='<div class="card"><h2>⚙ Export settings</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px"><label class="hint">LUT ARN<input id="xsArn" value="'+esc(st.lutArn||"")+'" style="width:100%;padding:8px"></label><label class="hint">LUT valid to<input id="xsLut" type="date" value="'+esc(st.lutValidTo||"")+'" style="width:100%;padding:8px"></label><label class="hint">Realisation period (months)<input id="xsM" type="number" value="'+st.months+'" style="width:100%;padding:8px"></label></div>'+
+      '<label class="hint" style="display:block;margin-top:8px">Export buyers (as named in Tally, one per line)<textarea id="xsB" rows="3" style="width:100%;padding:8px;border:1px solid #ccd5df;border-radius:9px;font:inherit">'+esc((st.buyers||[]).join("\n"))+'</textarea></label><button class="btn" id="xsSave" style="margin-top:8px">Save settings</button></div>';
+    $("view").innerHTML=h;
+    var reload=function(){ EX=null; drawExports(); };
+    if($("xAddT")) $("xAddT").onclick=function(){ var items=C.filter(function(c,i){ return document.querySelector('[data-xc="'+i+'"]').checked; }); api("expAddFromTally",{items:items}).then(reload); };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-xbm]"),function(btn){ btn.onclick=function(){ var i=+btn.dataset.xbm, b=B[i], id=document.querySelector('[data-xbs="'+i+'"]').value; if(!id){ alert("Choose the invoice"); return; }
+      api("expRealise",{id:id,d:b.d,amt:b.amt,ref:(b.ref||b.desc||"").slice(0,120),key:b.key,full:document.querySelector('[data-xbf="'+i+'"]').checked}).then(reload); }; });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-xe]"),function(btn){ btn.onclick=function(){ exForm(L.find(function(x){ return x.id===btn.dataset.xe; })); }; });
+    $("xNew").onclick=function(){ exForm({}); };
+    if($("xsSave")) $("xsSave").onclick=function(){ api("expSettings",{settings:{lutArn:$("xsArn").value,lutValidTo:$("xsLut").value,months:$("xsM").value,buyers:$("xsB").value}}).then(reload); };
+  }
+  function exForm(x){
+    var f=function(id,label,type){ return '<label class="hint">'+label+'<input id="xf_'+id+'"'+(type?' type="'+type+'"':'')+' value="'+esc(x[id]==null?"":x[id])+'" style="width:100%;padding:8px"></label>'; };
+    $("xForm").innerHTML='<div class="card"><h2>'+(x.id?"Edit "+esc(x.invNo):"New export invoice")+'</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">'+
+      f("invNo","Invoice no.")+f("invDate","Invoice date","date")+f("buyer","Buyer")+f("country","Country")+f("currency","Currency (USD, AED…)")+f("fcAmount","Amount in that currency","number")+f("inrValue","Value in ₹ (Tally)","number")+
+      f("sbNo","Shipping bill no.")+f("sbDate","Shipping bill date","date")+f("port","Port")+f("ebrcNo","eBRC no.")+f("ebrcDate","eBRC date","date")+f("notes","Notes")+
+      '<label class="hint">Document (SB, BL, FIRC, eBRC…)<input id="xf_file" type="file"></label><label class="hint"><input type="checkbox" id="xf_full"'+(x.fullyRealised?" checked":"")+'> Money fully received</label></div>'+
+      (x.id?'<div style="margin-top:10px"><b>Money received</b>'+((x.realised||[]).length?(x.realised||[]).map(function(r,i){ return '<div class="hint">'+fd(r.d)+' · '+inr(r.amt)+' · '+esc(r.ref||"")+' · '+esc(r.source)+' <button class="btn" data-xu="'+i+'" style="padding:2px 6px;font-size:11px">✕</button></div>'; }).join(""):'<div class="hint">none yet</div>')+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><input id="xr_d" type="date" style="padding:6px"><input id="xr_a" type="number" placeholder="₹ received" style="padding:6px;width:130px"><input id="xr_r" placeholder="Ref / FIRC no." style="padding:6px"><button class="btn" id="xr_add" style="padding:5px 9px">Add</button></div></div>':'')+
+      '<div style="margin-top:10px"><button class="btn" id="xf_save">Save</button> <button class="btn" id="xf_cancel">Cancel</button>'+(x.id&&OWNER?' <button class="btn" id="xf_del">Delete</button>':'')+' <span id="xf_msg" class="hint"></span></div></div>';
+    if($("xForm").scrollIntoView) $("xForm").scrollIntoView();
+    var reload=function(){ EX=null; drawExports(); };
+    $("xf_cancel").onclick=function(){ $("xForm").innerHTML=""; };
+    $("xf_save").onclick=function(){ var it={id:x.id}; ["invNo","invDate","buyer","country","currency","fcAmount","inrValue","sbNo","sbDate","port","ebrcNo","ebrcDate","notes"].forEach(function(k){ it[k]=$("xf_"+k).value; }); it.fullyRealised=$("xf_full").checked;
+      if(!it.invNo){ $("xf_msg").textContent="Invoice no. needed"; return; } $("xf_msg").textContent="Saving…";
+      fileObj($("xf_file")).then(function(fl){ return api("expSave",{item:it,file:fl}); }).then(function(r){ if(!r.ok) throw new Error(r.error||"not saved"); reload(); }).catch(function(e){ $("xf_msg").textContent="⚠ "+e.message; }); };
+    if($("xf_del")) $("xf_del").onclick=function(){ if(confirm("Delete this export invoice from the register?")) api("expDel",{id:x.id}).then(reload); };
+    if($("xr_add")) $("xr_add").onclick=function(){ if(!$("xr_a").value) return; api("expRealise",{id:x.id,d:$("xr_d").value||today(),amt:$("xr_a").value,ref:$("xr_r").value}).then(reload); };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-xu]"),function(b){ b.onclick=function(){ api("expUnrealise",{id:x.id,idx:+b.dataset.xu}).then(reload); }; });
   }
 
   /* ===================== Compliance · Licences · Assets · Bank recon ===================== */
