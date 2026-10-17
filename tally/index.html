@@ -87,12 +87,19 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     if(x.getElementsByTagName("DSPACCNAME").length) return "tb";
     return null; }
   function parseVouchers(x){
+    var anyEW=x.getElementsByTagName("EWAYBILLDETAILS.LIST").length>0;
     return Array.prototype.map.call(x.getElementsByTagName("VOUCHER"),function(v){
       var party=txt(v,"PARTYLEDGERNAME")||txt(v,"PARTYNAME"), amt=0, best=0;
       var les=v.querySelectorAll("ALLLEDGERENTRIES\\.LIST, LEDGERENTRIES\\.LIST");
       Array.prototype.forEach.call(les,function(le){ var a=Math.abs(num(txt(le,"AMOUNT"))); if(party&&txt(le,"LEDGERNAME")===party) amt=a; if(a>best) best=a; });
       var items=Array.prototype.slice.call(v.querySelectorAll("ALLINVENTORYENTRIES\\.LIST, INVENTORYENTRIES\\.LIST"),0,30).map(function(ie){ return {i:txt(ie,"STOCKITEMNAME"),q:num(txt(ie,"BILLEDQTY")||txt(ie,"ACTUALQTY")),a:Math.abs(num(txt(ie,"AMOUNT")))}; }).filter(function(o){return o.i;});
-      return {d:tdate(txt(v,"DATE")),t:v.getAttribute("VCHTYPE")||txt(v,"VOUCHERTYPENAME"),n:txt(v,"VOUCHERNUMBER"),p:party,a:amt||best,r:txt(v,"NARRATION").slice(0,120),i:items.length?items:undefined};
+      var ewEl=anyEW?v.querySelector("EWAYBILLDETAILS\\.LIST BILLNUMBER"):null;
+      var o={d:tdate(txt(v,"DATE")),t:v.getAttribute("VCHTYPE")||txt(v,"VOUCHERTYPENAME"),n:txt(v,"VOUCHERNUMBER"),p:party,a:amt||best,r:txt(v,"NARRATION").slice(0,120),i:items.length?items:undefined,_xml:1};
+      if(/^yes$/i.test(txt(v,"ISCANCELLED"))||/^yes$/i.test(txt(v,"ISDELETED"))) o.c=1;
+      if(/^yes$/i.test(txt(v,"ISOPTIONAL"))) o.o=1;
+      if(anyEW) o.ew=ewEl?ewEl.textContent.trim():"";
+      var irn=txt(v,"IRNACKNO")||txt(v,"IRN"); if(irn) o.irn=irn;
+      return o;
     }).filter(function(v){return v.d&&/^\d{4}-\d{2}-\d{2}$/.test(v.d);});
   }
   function walk(x,fn){ var root=x.documentElement, kids=root.children; for(var i=0;i<kids.length;i++) fn(kids[i]); }
@@ -140,7 +147,9 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     if(!k){ var f=fname.toLowerCase(); if(/day.?book/.test(f)) k="vouchers"; else if(/trial/.test(f)) k="tb"; else if(/pay/.test(f)) k="pay"; else if(/recei|debtor/.test(f)) k="recv"; else if(/stock/.test(f)) k="stock"; }
     return k; }
   function dayBookRows(rows){ var out=[]; rows.forEach(function(r){ r=r||[]; var d=dateOf(r[0]); if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return; var t=String(r[2]==null?"":r[2]).trim(); if(!t) return;
-    out.push({d:d,t:t,n:String(r[3]==null?"":r[3]),p:String(r[1]==null?"":r[1]).trim(),a:Math.max(Math.abs(num(r[4])),Math.abs(num(r[5]))),r:""}); }); return out; }
+    var v={d:d,t:t,n:String(r[3]==null?"":r[3]),p:String(r[1]==null?"":r[1]).trim(),a:Math.max(Math.abs(num(r[4])),Math.abs(num(r[5]))),r:""};
+    if(r.some(function(c){ return /\bcancel+ed\b|\(cancel/i.test(String(c==null?"":c)); })) v.c=1;
+    out.push(v); }); return out; }
   function tbRows(rows){ var hi=-1; for(var i=0;i<rows.length;i++){ if((rows[i]||[]).some(function(c){ return /^debit$/i.test(String(c==null?"":c).trim()); })){ hi=i; break; } } if(hi<0) return [];
     var out=[]; for(var j=hi+1;j<rows.length;j++){ var r=rows[j]||[], name=String(r[0]==null?"":r[0]).trim(); if(!name) continue; if(/grand total/i.test(name)) break; out.push({name:name,dr:Math.abs(num(r[1])),cr:Math.abs(num(r[2]))}); } return out; }
   function billRows(rows){ var hi=-1; rows.some(function(r,i){ if((r||[]).some(function(c){ return /party/i.test(String(c==null?"":c)); })){ hi=i; return true; } return false; }); if(hi<0) return [];
@@ -262,7 +271,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   }
 
   /* ===================== Views ===================== */
-  var TABS=OWNER?[["home","🏠 Summary"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"]];
+  var TABS=OWNER?[["home","🏠 Summary"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"]];
   function drawTabs(){ $("tabs").innerHTML=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(t[0]===tab?"on":"")+'">'+t[1]+'</button>';}).join("");
     Array.prototype.forEach.call($("tabs").children,function(b){ b.onclick=function(){ tab=b.dataset.t; draw(); }; }); }
   function sales(){ return (D.vouchers||[]).filter(function(v){return /sales/i.test(v.t)&&!/order|return|credit/i.test(v.t);}); }
@@ -272,6 +281,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     if(tab==="upload") return drawUpload();
     if(tab==="ask") return drawAsk();
     if(tab==="vault") return drawVault();
+    if(tab==="audit") return drawAudit();
     if(!D) { $("view").innerHTML='<div class="card">Loading…</div>'; return; }
     var m=D.meta||{};
     $("asof").textContent=m.vouchers?"· data up to "+m.vouchers.upTo:"· no data yet";
@@ -366,6 +376,22 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
       var lg=(D&&D.mailLog)||[]; if($("gmlog")) $("gmlog").innerHTML=lg.length?'<b>Recent email imports</b>\n'+lg.slice(0,5).map(function(e){ return esc(new Date(e.at).toLocaleString("en-IN"))+(e.manual?" (manual)":"")+(e.error?" — ⚠ "+esc(e.error):"")+"\n"+e.files.map(function(f){return "   • "+esc(f);}).join("\n"); }).join("\n"):"";
     });
   }
+  /* ===================== Audit ===================== */
+  var AUD=null, aFilter="open";
+  function drawAudit(){
+    if(AUD===null){ $("view").innerHTML='<div class="card">Loading audit checks…</div>'; return api("audit").then(function(r){ AUD=(r&&r.flags)||[]; drawAudit(); }); }
+    var col={high:"#b42318",medium:"#b54708",low:"#667085"}, lab={high:"Important",medium:"Check",low:"Note"};
+    var list=AUD.filter(function(f){ return aFilter==="all"||(aFilter==="open"?f.status!=="reviewed":f.status==="reviewed"); });
+    var cnt=function(st){ return AUD.filter(function(f){ return st==="open"?f.status!=="reviewed":f.status==="reviewed"; }).length; };
+    $("view").innerHTML='<div class="card"><h2>🧾 Audit checks on Maadhu\'s Day Book</h2><div class="hint">Checked automatically on every Day Book upload or email: cancelled vouchers, entries deleted or changed after an earlier export, back-dated entries, missing or duplicate invoice numbers, possible double entries, zero-value invoices, and e-way bills (when the export carries them). New findings are emailed to you once.</div>'+
+      '<div style="margin-top:10px">'+[["open","Open ("+cnt("open")+")"],["reviewed","Reviewed ("+cnt("reviewed")+")"],["all","All"]].map(function(k){ return '<button class="btn" data-af="'+k[0]+'" style="margin:3px 4px 0 0;padding:6px 10px;font-size:12.5px'+(aFilter===k[0]?';background:#14532d;color:#fff;border-color:#14532d':'')+'">'+k[1]+'</button>'; }).join("")+'</div></div>'+
+      (list.length?'<div class="card scroll"><table><tr><th></th><th>Check</th><th>Date</th><th>Voucher</th><th>Party</th><th class="n">Amount</th><th>Details</th><th></th></tr>'+
+      list.map(function(f){ return '<tr><td><span class="tag" style="background:'+col[f.sev]+'">'+lab[f.sev]+'</span></td><td><b>'+esc(f.kind)+'</b></td><td>'+esc(f.d)+'</td><td>'+esc((f.t||"")+" "+(f.n||""))+'</td><td>'+esc(f.p||"")+'</td><td class="n">'+(f.a?inr(f.a):"")+'</td><td>'+esc(f.note)+'</td><td><button class="btn" data-ak="'+esc(f.key)+'" data-as="'+(f.status==="reviewed"?"open":"reviewed")+'" style="padding:4px 8px;font-size:12px">'+(f.status==="reviewed"?"↺ Reopen":"✓ Reviewed")+'</button></td></tr>'; }).join("")+'</table></div>':'<div class="card hint">'+(aFilter==="open"?"Nothing open — all clear so far. Checks run on the next Day Book upload.":"Nothing here.")+'</div>');
+    Array.prototype.forEach.call(document.querySelectorAll("[data-af]"),function(b){ b.onclick=function(){ aFilter=b.dataset.af; drawAudit(); }; });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ak]"),function(b){ b.onclick=function(){ var k=b.dataset.ak, st=b.dataset.as;
+      api("auditSet",{key:k,status:st}).then(function(){ AUD.forEach(function(f){ if(f.key===k) f.status=st; }); drawAudit(); }); }; });
+  }
+
   /* ===================== Vault ===================== */
   var VAULT=null, vFilter="all";
   function drawVault(){

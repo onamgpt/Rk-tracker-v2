@@ -22,7 +22,9 @@ function classify(sheets, fname) {
   if (/day.?book/.test(f)) return "vouchers"; if (/trial/.test(f)) return "tb"; if (/pay/.test(f)) return "pay"; if (/recei|debtor/.test(f)) return "recv"; if (/stock/.test(f)) return "stock";
   return null; }
 function dayBookRows(rows) { const out = []; rows.forEach((r) => { r = r || []; const d = dateOf(r[0]); if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return; const t = S(r[2]).trim(); if (!t) return;
-  out.push({ d, t, n: S(r[3]), p: S(r[1]).trim(), a: Math.max(Math.abs(num(r[4])), Math.abs(num(r[5]))), r: "" }); }); return out; }
+  const v = { d, t, n: S(r[3]), p: S(r[1]).trim(), a: Math.max(Math.abs(num(r[4])), Math.abs(num(r[5]))), r: "" };
+  if (r.some((c) => /\bcancel+ed\b|\(cancel/i.test(S(c)))) v.c = 1;
+  out.push(v); }); return out; }
 function tbRows(rows) { const hi = rows.findIndex((r) => (r || []).some((c) => /^debit$/i.test(S(c).trim()))); if (hi < 0) return [];
   const out = []; for (let j = hi + 1; j < rows.length; j++) { const r = rows[j] || [], name = S(r[0]).trim(); if (!name) continue; if (/grand total/i.test(name)) break; out.push({ name, dr: Math.abs(num(r[1])), cr: Math.abs(num(r[2])) }); } return out; }
 function billRows(rows) { const hi = rows.findIndex((r) => (r || []).some((c) => /party/i.test(S(c)))); if (hi < 0) return [];
