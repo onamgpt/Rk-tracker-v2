@@ -278,7 +278,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   }
 
   /* ===================== Views ===================== */
-  var TABS=OWNER?[["home","🏠 Summary"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["comp","📅 Compliance"],["lic","📜 Licences"],["assets","🏭 Assets"],["recon","🏦 Bank recon"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"],["comp","📅 Compliance"]];
+  var TABS=OWNER?[["home","🏠 Summary"],["health","🩺 Health"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["comp","📅 Compliance"],["lic","📜 Licences"],["assets","🏭 Assets"],["recon","🏦 Bank recon"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"],["comp","📅 Compliance"]];
   function drawTabs(){ $("tabs").innerHTML=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(t[0]===tab?"on":"")+'">'+t[1]+'</button>';}).join("");
     Array.prototype.forEach.call($("tabs").children,function(b){ b.onclick=function(){ tab=b.dataset.t; draw(); }; }); }
   function sales(){ return (D.vouchers||[]).filter(function(v){return /sales/i.test(v.t)&&!/order|return|credit/i.test(v.t);}); }
@@ -289,6 +289,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     if(tab==="ask") return drawAsk();
     if(tab==="vault") return drawVault();
     if(tab==="audit") return drawAudit();
+    if(tab==="health") return drawHealth();
     if(tab==="comp"||tab==="lic"||tab==="assets"||tab==="recon") return drawCompliance();
     if(!D) { $("view").innerHTML='<div class="card">Loading…</div>'; return; }
     var m=D.meta||{};
@@ -384,6 +385,64 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
       var lg=(D&&D.mailLog)||[]; if($("gmlog")) $("gmlog").innerHTML=lg.length?'<b>Recent email imports</b>\n'+lg.slice(0,5).map(function(e){ return esc(new Date(e.at).toLocaleString("en-IN"))+(e.manual?" (manual)":"")+(e.error?" — ⚠ "+esc(e.error):"")+"\n"+e.files.map(function(f){return "   • "+esc(f);}).join("\n"); }).join("\n"):"";
     });
   }
+  /* ===================== Health & AI advisor ===================== */
+  var HL=null;
+  function drawHealth(){
+    if(HL===null){ $("view").innerHTML='<div class="card">Reading the books…</div>'; return api("health").then(function(r){ HL=r&&r.ok?r:{error:(r&&r.error)||"error"}; drawHealth(); }); }
+    if(HL.error){ $("view").innerHTML='<div class="card">⚠ '+esc(HL.error)+'</div>'; return; }
+    var h=HL.health, a=(HL.advice&&HL.advice.advice)||null, R=h.ratios, Lt=h.lights;
+    var dot={green:"#1f9d55",amber:"#d97706",red:"#c0392b",grey:"#98a2b3"};
+    var f1=function(x,sfx){ return x==null||!isFinite(x)?"—":(Math.round(x*10)/10).toLocaleString("en-IN")+(sfx||""); };
+    var sc=h.score, scCol=sc==null?"#98a2b3":sc>=70?"#1f9d55":sc>=45?"#d97706":"#c0392b";
+    var li=function(arr){ return (arr||[]).map(function(x){ return '<li>'+esc(x)+'</li>'; }).join(""); };
+    var html='<div class="card" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap"><div style="width:86px;height:86px;border-radius:50%;border:7px solid '+scCol+';display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;color:'+scCol+'">'+(sc==null?"—":sc)+'</div>'+
+      '<div style="flex:1;min-width:220px"><div class="hint">Company health score (ratios, red flags, overdue filings, open audit items)</div><div style="font-size:18px;font-weight:800;margin-top:4px">'+esc(a?a.headline:"No AI brief yet — tap ‘Ask the advisor now’")+'</div>'+
+      '<div class="hint" style="margin-top:4px">'+(HL.advice?(HL.advice.deep?"Weekly review":"Morning brief")+" · "+esc(new Date(HL.advice.at).toLocaleString("en-IN")):"")+(HL.advice&&HL.advice.error?' · ⚠ '+esc(HL.advice.error):'')+'</div></div>'+
+      '<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn" id="advNow">🧭 Ask the advisor now</button><button class="btn" id="advDeep">📋 Weekly deep review</button></div></div>';
+    if(a){
+      html+='<div class="card"><h2>✅ Decisions</h2><ol style="margin:0;padding-left:20px">'+(a.decisions||[]).map(function(d){ return '<li style="margin-bottom:8px"><b>'+esc(d.do)+'</b><div class="hint">'+esc(d.why)+'</div></li>'; }).join("")+'</ol></div>';
+      if((a.wins||[]).length) html+='<div class="card"><h2>🎉 Wins</h2><ul style="margin:0">'+li(a.wins)+'</ul></div>';
+      if((a.warnings||[]).length) html+='<div class="card"><h2>⚠️ Watch</h2><ul style="margin:0">'+li(a.warnings)+'</ul></div>';
+      html+='<div class="card"><h2>💰 Profit</h2><div>'+esc(a.profit||"")+'</div></div>';
+      if((a.people||[]).length) html+='<div class="card"><h2>👥 People & admin</h2><ul style="margin:0">'+li(a.people)+'</ul></div>';
+      if((a.ask_ca||[]).length) html+='<div class="card"><h2>📞 Ask the CA</h2><ul style="margin:0">'+li(a.ask_ca)+'</ul></div>';
+      if(a.think) html+='<div class="card" style="background:#f4f7f5">💭 '+esc(a.think)+'</div>';
+    }
+    var rr=[["Current ratio","currentRatio","",'Current assets ÷ current liabilities. Above 1.33 is comfortable.'],["Days to collect","dso"," d","How many days of sales are sitting with customers."],["Days to pay suppliers","dpo"," d","How long suppliers wait, on average."],
+      ["Stock days","stockDays"," d","Days of purchases held as stock."],["Cash cycle","cashCycle"," d","Collect + stock − pay days: how long money is locked up."],["Collections vs sales (90 d)","collection","%","Money received ÷ sales billed."],
+      ["Purchases vs sales (90 d)","purchaseToSales","%","Rising fast = stock build-up or margin squeeze."],["Receivables over 90 days","recv90plus","%","Share of customer dues older than 90 days."],["Payables over 90 days","pay90plus","%","Share of supplier bills older than 90 days."],["OD limit used","odUse","%","Needs your OD limit in the settings below."]];
+    html+='<div class="card"><h2>📊 Health ratios</h2><div class="scroll"><table>'+rr.map(function(x){ return '<tr><td><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:'+dot[Lt[x[1]]||"grey"]+'"></span> '+x[0]+'<div class="hint">'+x[3]+'</div></td><td class="n"><b>'+f1(R[x[1]],x[2])+'</b></td></tr>'; }).join("")+'</table></div></div>';
+    var pl=h.pl;
+    html+='<div class="card"><h2>📒 Profit this year (from the Trial Balance)</h2><div class="scroll"><table>'+
+      [["Sales",pl.sales],["Purchases",pl.purchases],["Direct expenses",pl.directExp],["Opening stock",pl.openingStock],["Closing stock",pl.closingStock],["Gross profit",pl.grossProfit],["Indirect expenses",pl.indirectExp],["Other income",pl.indirectInc],["Net profit (approx.)",pl.netProfit]]
+        .map(function(x){ return '<tr><td>'+x[0]+'</td><td class="n"><b>'+inr(x[1])+'</b></td></tr>'; }).join("")+'<tr><td>Gross margin / net margin</td><td class="n"><b>'+f1(pl.grossMargin,"%")+' / '+f1(pl.netMargin,"%")+'</b></td></tr></table></div>'+
+      (pl.note?'<div class="hint">'+esc(pl.note)+'</div>':'')+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:flex-end"><label class="hint">OD / CC limit (₹)<br><input id="hsOd" type="number" value="'+(HL.settings.odLimit||"")+'" style="padding:7px;width:150px"></label><label class="hint">Opening stock on 1 April (₹)<br><input id="hsOs" type="number" value="'+(HL.settings.openingStock||"")+'" style="padding:7px;width:150px"></label><button class="btn" id="hsSave">Save</button></div></div>';
+    if((h.alerts||[]).length) html+='<div class="card"><h2>🚨 Changes & red flags</h2>'+h.alerts.map(function(x){ return '<div style="margin:6px 0"><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:'+dot[x.sev==="green"?"green":x.sev]+'"></span> '+esc(x.text)+'</div>'; }).join("")+'</div>';
+    var mx=Math.max.apply(null,(h.months||[]).map(function(m){ return Math.max(m.netSales,m.netPurchases); }).concat([1]));
+    html+='<div class="card"><h2>📈 Month by month</h2><div class="scroll"><table><tr><th>Month</th><th class="n">Sales</th><th class="n">Purchases</th><th class="n">Collected</th><th class="n">Paid out</th><th style="min-width:120px"></th></tr>'+
+      (h.months||[]).map(function(m){ return '<tr><td>'+esc(m.m)+'</td><td class="n">'+inr(m.netSales)+'</td><td class="n">'+inr(m.netPurchases)+'</td><td class="n">'+inr(m.receipts)+'</td><td class="n">'+inr(m.payments)+'</td><td><div style="height:7px;background:#1f9d55;width:'+Math.round(m.netSales/mx*100)+'%;border-radius:3px"></div><div style="height:7px;background:#d97706;width:'+Math.round(m.netPurchases/mx*100)+'%;border-radius:3px;margin-top:2px"></div></td></tr>'; }).join("")+'</table></div><div class="hint">Green = sales, orange = purchases.</div></div>';
+    var ad=h.admin, da=ad.dataAge, ag=function(x){ return x==null?"never":x===0?"today":x+" d ago"; };
+    html+='<div class="card"><h2>👥 Admin monitoring</h2><div class="scroll"><table>'+
+      '<tr><td>Data from Maadhu</td><td>Day Book '+ag(da.dayBook)+' · TB '+ag(da.trialBalance)+' · Receivables '+ag(da.receivables)+' · Payables '+ag(da.payables)+' · Stock '+ag(da.stock)+'</td></tr>'+
+      '<tr><td>Filings</td><td>'+(ad.compliance.overdue.length?'<b style="color:#c0392b">'+ad.compliance.overdue.length+' overdue</b>: '+esc(ad.compliance.overdue.join("; ")):"none overdue")+(ad.compliance.onTimePct!=null?' · on time '+ad.compliance.onTimePct+'% of '+ad.compliance.done:'')+'</td></tr>'+
+      '<tr><td>Audit findings</td><td>'+ad.auditOpen.total+' open ('+ad.auditOpen.high+' important), oldest '+ad.auditOpen.oldestDays+' days</td></tr>'+
+      '<tr><td>Dispatch & production</td><td>'+ad.dispatch.late+' late dispatches'+(ad.dispatch.lateList.length?': '+esc(ad.dispatch.lateList.join("; ")):"")+' · '+ad.dispatch.productionNotReady+' orders due within 3 days not ready</td></tr>'+
+      '<tr><td>Field visits (7 days)</td><td>'+esc(Object.keys(ad.fieldVisits7d).map(function(k){ return k+" "+ad.fieldVisits7d[k]; }).join(" · ")||"—")+'</td></tr>'+
+      '<tr><td>Dispatched, not invoiced</td><td>'+h.cross.dispatchedNotInvoiced+(h.cross.list.length?': '+esc(h.cross.list.join("; ")):"")+'</td></tr></table></div></div>';
+    var tl=function(rows,cols){ return rows&&rows.length?'<div class="scroll"><table>'+rows.map(function(r){ return '<tr><td>'+esc(r.p)+'</td><td class="n">'+inr(r.a)+'</td>'+(cols?'<td class="n">'+r.days+' d</td>':'')+'</tr>'; }).join("")+'</table></div>':'<div class="hint">—</div>'; };
+    html+='<div class="card"><h2>💵 Cash</h2><div class="hint">Bank (last 30 days from statements): '+esc((h.bankFlow||[]).map(function(b2){ return b2.account+": in "+inr(b2.in30)+", out "+inr(b2.out30)+(b2.balance!=null?", balance "+inr(b2.balance)+" ("+b2.upTo+")":""); }).join(" · ")||"no statements yet")+'</div>'+
+      '<div style="margin-top:6px">Next 4 weeks: expected in <b>'+inr(h.cash4w.expectedIn)+'</b> · bills falling due <b>'+inr(h.cash4w.dueOut)+'</b></div></div>';
+    html+='<div class="card"><h2>⏰ Customers overdue 60+ days</h2>'+tl(h.overdueCustomers,1)+'</div><div class="card"><h2>⏰ Suppliers waiting 60+ days</h2>'+tl(h.overdueSuppliers,1)+'</div><div class="card"><h2>💸 Paid most in 90 days</h2>'+tl(h.paidTo)+'</div>';
+    if(h.dataNote) html+='<div class="card hint">'+esc(h.dataNote)+'</div>';
+    if((HL.hist||[]).length) html+='<div class="card"><h2>🗓 Recent briefs</h2>'+HL.hist.slice(0,14).map(function(x){ return '<div class="hint">'+esc(new Date(x.at).toLocaleDateString("en-IN"))+' · '+(x.score==null?"—":x.score)+' · '+esc(x.headline||"")+'</div>'; }).join("")+'</div>';
+    html+='<div class="card hint">Figures are computed from the uploaded data; the advisor only explains them. Not a CA opinion — check tax and legal points with your auditor.</div>';
+    $("view").innerHTML=html;
+    var go=function(deep){ api("advise",{deep:deep}).then(function(){ $("advNow").textContent="⏳ Writing… (about a minute)"; setTimeout(function(){ HL=null; drawHealth(); },60000); }); };
+    $("advNow").onclick=function(){ go(false); }; $("advDeep").onclick=function(){ go(true); };
+    $("hsSave").onclick=function(){ api("healthSettings",{settings:{odLimit:$("hsOd").value,openingStock:$("hsOs").value}}).then(function(){ HL=null; drawHealth(); }); };
+  }
+
   /* ===================== Compliance · Licences · Assets · Bank recon ===================== */
   var COMP=null;
   function fileObj(input){ var f=input&&input.files&&input.files[0]; if(!f) return Promise.resolve(null);

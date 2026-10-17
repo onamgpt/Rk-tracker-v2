@@ -166,11 +166,11 @@ exports.handler = async (event) => {
     if (b.action === "comp") {
       const C = require("./tally-compliance.js");
       const st = (await kvGet("tally_compliance")) || {};
-      const items = st.items || C.DEFAULT_ITEMS;
+      const items = C.mergeItems(st.items);
       const td = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
       if (!st.since) { st.since = td; await kvSet("tally_compliance", st); }
       const occ = C.occurrences(items, st.since > C.isoAdd(td, -120) ? st.since : C.isoAdd(td, -120), C.isoAdd(td, 75)).map((x) => Object.assign(x, { done: (st.done || {})[x.key] || null, left: C.days(td, x.due) }));
-      if (!owner) return OK({ ok: true, today: td, occ: occ.filter((x) => !x.done && x.left <= 30) });
+      if (!owner) return OK({ ok: true, today: td, occ: occ.filter((x) => !x.done && x.left <= 30 && x.who !== "ravi") });
       const [lic, assets, pay, bank, vch] = await Promise.all([kvGet("tally_licences"), kvGet("tally_assets"), kvGet("tally_pay"), kvGet("tally_bank"), kvGet("tally_vouchers")]);
       const recon = {};
       const map = st.reconMap || {};
@@ -216,6 +216,24 @@ exports.handler = async (event) => {
     if (b.action === "licDel" || b.action === "assetDel") {
       const key = b.action === "licDel" ? "tally_licences" : "tally_assets";
       const cur = (await kvGet(key)) || { list: [] }; cur.list = cur.list.filter((x) => x.id !== b.id); await kvSet(key, cur); return OK({ ok: true, list: cur.list });
+    }
+    if (b.action === "health") {
+      const H = require("./tally-health.js");
+      const td = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+      const d = await H.load(kvGet);
+      const [adv, hist] = await Promise.all([kvGet("tally_advice"), kvGet("tally_advice_hist")]);
+      return OK({ ok: true, health: H.compute(d, td, d.settings), settings: d.settings || {}, advice: adv ? { at: adv.at, deep: adv.deep, advice: adv.advice, error: adv.error } : null, hist: (hist || []).slice(0, 30) });
+    }
+    if (b.action === "advise") {
+      const base = process.env.URL || "https://rk-tracker-v2.netlify.app";
+      await fetch(base + "/.netlify/functions/tally-advisor-background", { method: "POST", headers: { "Content-Type": "application/json", "x-run-key": runKey() }, body: JSON.stringify({ deep: !!b.deep, quiet: !!b.quiet }) }).catch(() => {});
+      return OK({ ok: true, started: true });
+    }
+    if (b.action === "healthSettings") {
+      const cur = (await kvGet("tally_health_settings")) || {};
+      const n = b.settings || {};
+      const next = Object.assign(cur, { odLimit: Math.max(0, Number(n.odLimit) || 0), openingStock: Math.max(0, Number(n.openingStock) || 0) });
+      await kvSet("tally_health_settings", next); return OK({ ok: true, settings: next });
     }
     if (b.action === "audit") {
       if (!owner) return OK({ error: "owner only" });

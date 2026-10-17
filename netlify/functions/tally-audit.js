@@ -4,7 +4,7 @@
 // numbering and amounts. New findings are emailed to Ravi once.
 const FY_START = (d) => { const y = +d.slice(0, 4), m = +d.slice(5, 7); return (m >= 4 ? y : y - 1) + "-04-01"; };
 const isSales = (t) => /sales/i.test(t || "") && !/order|return|credit/i.test(t || "");
-const isPurchaseLike = (t) => /purchase|payment|journal/i.test(t || "") && !/order/i.test(t || "");
+const isPurchaseLike = (t) => /purchase|payment|pymt|\bpmt\b|journal/i.test(t || "") && !/order/i.test(t || "");
 const inr = (n) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
 const tn = (v) => (v.t || "") + "#" + (v.n || "");
 

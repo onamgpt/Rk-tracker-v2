@@ -66,6 +66,9 @@ async function summary() {
     await T.tg(msg);
   } catch (e) {}
   try { await compliance(); } catch (e) {}
+  // the AI advisor writes the morning brief (deeper review on Mondays)
+  try { const base = process.env.URL || "https://rk-tracker-v2.netlify.app";
+    await fetch(base + "/.netlify/functions/tally-advisor-background", { method: "POST", headers: { "Content-Type": "application/json", "x-run-key": T.runKey() }, body: "{}" }); } catch (e) {}
 }
 exports.summary = summary;
 
@@ -79,7 +82,15 @@ async function compliance() {
   const fmt = (d) => new Date(d + "T00:00:00Z").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
   const when = (l) => l > 0 ? "in " + l + " day" + (l > 1 ? "s" : "") : l === 0 ? "TODAY" : "OVERDUE by " + -l + " day" + (l < -1 ? "s" : "");
   // 1) statutory due dates → Maadhu and Ravi
-  const due = C.dueReminders(st, today);
+  const dueAll = C.dueReminders(st, today);
+  const due = dueAll.filter((d) => d.who !== "ravi"), mine = dueAll.filter((d) => d.who === "ravi");
+  if (mine.length) {
+    const lines = mine.map((d) => "• " + d.name + " — " + d.period + " (" + when(d.left) + ")");
+    await T.mail(s.ownerEmail, "Ask your CA: " + mine.map((d) => d.name.replace(/^Ask CA: /, "")).join("; ").slice(0, 120), "Time to check with your CA:\n\n" + lines.join("\n") + "\n\nMark done in Tally → 📅 Compliance: https://rk-tracker-v2.netlify.app/tally/");
+    await T.tg("📞 <b>Ask your CA</b>\n" + lines.join("\n"));
+    st.sent = st.sent || {}; mine.forEach((d) => { st.sent[d.key] = today; });
+    await call({ action: "savePortfolio", user: "main", key: "tally_compliance", data: st });
+  }
   if (due.length) {
     const lines = due.map((d) => "• " + d.name + " — " + d.period + " — due " + fmt(d.due) + " (" + when(d.left) + ")");
     await T.mail(s.accountantEmail, "Compliance due: " + due.map((d) => d.name.split(" (")[0]).join(", "),

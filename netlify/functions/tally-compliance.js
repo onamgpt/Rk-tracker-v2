@@ -26,7 +26,21 @@ const DEFAULT_ITEMS = [
   { id: "aoc4", name: "AOC-4 (financial statements)", cat: "Company law (ROC)", kind: "dates", dates: [["10-30", "30 days after AGM"]], on: true },
   { id: "mgt7", name: "MGT-7A annual return", cat: "Company law (ROC)", kind: "dates", dates: [["11-29", "60 days after AGM"]], on: true },
   { id: "msme1", name: "MSME-1 (dues to MSMEs over 45 days)", cat: "Company law (ROC)", kind: "dates", dates: [["04-30", "Oct–Mar"], ["10-31", "Apr–Sep"]], on: true },
+  // Exports under LUT
+  { id: "lut", name: "LUT renewal for exports without IGST (GST RFD-11)", cat: "Exports", kind: "dates", dates: [["03-15", "for the coming financial year — must be in place before 1 April"]], on: true, who: "both" },
+  // "Ask your CA" — reminders to Ravi only
+  { id: "ca_gstr1", name: "Ask CA: send last month's sales data for GSTR-1", cat: "Ask your CA", kind: "monthly", day: 5, on: true, who: "ravi" },
+  { id: "ca_gstr3b", name: "Ask CA: GSTR-3B working & GST payable (and refund position)", cat: "Ask your CA", kind: "monthly", day: 15, on: true, who: "ravi" },
+  { id: "ca_adv", name: "Ask CA: advance tax estimate for the instalment", cat: "Ask your CA", kind: "dates", dates: [["06-05", "June instalment"], ["09-05", "September instalment"], ["12-05", "December instalment"], ["03-05", "March instalment"]], on: true, who: "ravi" },
+  { id: "ca_audit", name: "Ask CA: tax audit & financial statements status", cat: "Ask your CA", kind: "dates", dates: [["08-20", "audit due 30 Sep"]], on: true, who: "ravi" },
+  { id: "ca_gstr9", name: "Ask CA: GSTR-9 / 9C working and reconciliation", cat: "Ask your CA", kind: "dates", dates: [["11-30", "annual return due 31 Dec"]], on: true, who: "ravi" },
 ];
+// saved lists keep the user's edits; new default items are added automatically
+function mergeItems(saved) {
+  if (!Array.isArray(saved) || !saved.length) return DEFAULT_ITEMS;
+  const ids = new Set(saved.map((x) => x.id));
+  return saved.concat(DEFAULT_ITEMS.filter((x) => !ids.has(x.id)));
+}
 const LICENCE_SUGGESTIONS = ["Factory licence", "Pollution board consent (KSPCB CFO)", "Fire NOC", "BBMP trade licence", "Legal Metrology registration (packaged goods)",
   "GST registration", "Import Export Code (IEC)", "Udyam registration", "GS1 barcode membership", "Factory fire & stock insurance", "Vehicle insurance", "Keyman insurance", "Boiler / machinery certificate", "Weighing scale stamping"];
 
@@ -42,13 +56,13 @@ function occurrences(items, from, to) {
         if (pm === 2 && it.marchDue) due = py + "-" + it.marchDue;
         else { const dm = new Date(Date.UTC(py, pm + 1, 1)); due = dm.getUTCFullYear() + "-" + pad(dm.getUTCMonth() + 1) + "-" + pad(it.day); }
         if (due < from || due > to) continue;
-        out.push({ key: it.id + "|" + due, id: it.id, name: it.name, cat: it.cat, due, period: MONTHS[pm] + " " + py, month: py + "-" + pad(pm + 1) });
+        out.push({ key: it.id + "|" + due, id: it.id, name: it.name, cat: it.cat, who: it.who || "both", due, period: MONTHS[pm] + " " + py, month: py + "-" + pad(pm + 1) });
       }
     } else {
       const y0 = +from.slice(0, 4) - 1, y1 = +to.slice(0, 4) + 1;
       for (let y = y0; y <= y1; y++) (it.dates || []).forEach(([md, label]) => {
         const due = y + "-" + md; if (due < from || due > to) return;
-        out.push({ key: it.id + "|" + due, id: it.id, name: it.name, cat: it.cat, due, period: label });
+        out.push({ key: it.id + "|" + due, id: it.id, name: it.name, cat: it.cat, who: it.who || "both", due, period: label });
       });
     }
   });
@@ -66,7 +80,7 @@ function filedMonths(state) {
 function dueReminders(state, today) {
   const st = state || {}, done = st.done || {}, sent = st.sent || {};
   // only remind about deadlines from the day tracking started (earlier ones were handled before this existed)
-  const occ = occurrences(st.items || DEFAULT_ITEMS, st.since || today, isoAdd(today, 8));
+  const occ = occurrences(mergeItems(st.items), st.since || today, isoAdd(today, 8));
   const out = [];
   occ.forEach((o) => {
     if (done[o.key]) return;
@@ -124,4 +138,4 @@ function reconcile(bankTxns, vouchers, ledger) {
 const IT_RATES = { "Plant & machinery": 15, "Building (factory)": 10, "Furniture & fittings": 10, "Computers & software": 40, "Motor car": 15, "Motor vehicle (commercial)": 30, "Electrical installations": 10, "Intangibles": 25 };
 const CO_LIFE = { "Plant & machinery": 15, "Building (factory)": 30, "Furniture & fittings": 10, "Computers & software": 3, "Motor car": 8, "Motor vehicle (commercial)": 6, "Electrical installations": 10, "Intangibles": 10 };
 
-module.exports = { DEFAULT_ITEMS, LICENCE_SUGGESTIONS, IT_RATES, CO_LIFE, occurrences, filedMonths, dueReminders, expiryReminders, msmeDues, reconcile, days, isoAdd };
+module.exports = { mergeItems, DEFAULT_ITEMS, LICENCE_SUGGESTIONS, IT_RATES, CO_LIFE, occurrences, filedMonths, dueReminders, expiryReminders, msmeDues, reconcile, days, isoAdd };
