@@ -79,6 +79,15 @@ exports.handler = async (event) => {
   const h = H.compute(d, today, d.settings);
   const facts = factsFor(h, deep);
   try { facts.inbox = MI.factsFor(await kvGet("mail_intel")); } catch (e) {}
+  try {
+    const P = require("./tally-payplan.js");
+    const [ps, comp, mi] = await Promise.all([kvGet("payplan_settings"), kvGet("tally_compliance"), kvGet("mail_intel")]);
+    const sup = P.suppliers((d.pay && d.pay.rows) || [], { tiers: (ps || {}).tiers, msme: (comp && comp.msme) || [] }, mi);
+    const im = P.imbalance(sup, P.history((d.vouchers && d.vouchers.list) || [], 90));
+    facts.suppliers = { starved: im.starved.slice(0, 6), paidAhead: im.ahead.slice(0, 5),
+      criticalDue: sup.filter((x) => x.tier === "critical").sort((a, b) => b.oldest - a.oldest).slice(0, 6).map((x) => ({ party: x.party, due: Math.round(x.due), oldestDays: x.oldest, chasing: x.chasing })),
+      lastPlan: ((await kvGet("payplan_hist")) || [])[0] || null };
+  } catch (e) {}
   const a = await claude(facts, deep);
   const rec = { at: new Date().toISOString(), deep, health: h, advice: a, error: a ? "" : "The AI could not write the brief this time — figures are still up to date." };
   await kvSet("tally_advice", rec);

@@ -162,6 +162,50 @@ exports.handler = async (event) => {
       const gm = await kvGet("gmail_oauth"), mlog = (await kvGet("tally_mail_log")) || [], bankAll = await kvGet("tally_bank");
       return OK({ ok: true, bank: bankSummary(bankAll), gmail: gm && gm.refresh ? { email: gm.email || "", at: gm.at } : null, mailLog: mlog.slice(0, 10), settings: s, meta: meta || {}, tb, recv, pay, stock, vouchers: (vch && vch.list) || [], dispatches: ((lr && lr.shipments) || []).filter(x => x.invoiceNo).map(x => ({ customer: x.customer, invoiceNo: x.invoiceNo, date: x.dispatchedOn || x.date, amount: x.invoiceAmount })) });
     }
+    // ---------------- Supplier payment planner ----------------
+    if (b.action === "plan" || b.action === "planSettings" || b.action === "planSend") {
+      if (!owner) return OK({ error: "owner only" });
+      const P = require("./tally-payplan.js"), C = require("./tally-compliance.js");
+      const td = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+      const ps = (await kvGet("payplan_settings")) || {};
+      if (b.action === "planSettings") {
+        const n = b.settings || {};
+        if (n.tiers) ps.tiers = Object.assign(ps.tiers || {}, n.tiers);
+        ["budget", "capPct", "buffer", "goodwillPct"].forEach((k) => { if (n[k] !== undefined) ps[k] = Math.max(0, Number(n[k]) || 0); });
+        if (n.stat) ps.stat = Object.assign(ps.stat || {}, n.stat);
+        await kvSet("payplan_settings", ps); return OK({ ok: true });
+      }
+      const [pay, vch, comp, mi, bank, recv] = await Promise.all([kvGet("tally_pay"), kvGet("tally_vouchers"), kvGet("tally_compliance"), kvGet("mail_intel"), kvGet("tally_bank"), kvGet("tally_recv")]);
+      const sup = P.suppliers((pay && pay.rows) || [], { tiers: ps.tiers, msme: (comp && comp.msme) || [] }, mi);
+      const hist = P.history((vch && vch.list) || [], 90);
+      // statutory payments due in the next 10 days (amounts typed in by you / Maadhu)
+      const occ = C.occurrences(C.mergeItems(comp && comp.items), td, C.isoAdd(td, 10)).filter((o) => ["gstr3b", "tdspay", "pf", "esi", "pt", "advtax"].includes(o.id) && !((comp && comp.done) || {})[o.key]);
+      const statutory = occ.map((o) => ({ key: o.key, name: o.name, due: o.due, period: o.period, amount: Number((ps.stat || {})[o.key]) || 0 }));
+      const sug = P.suggestBudget(bank, (recv && recv.rows) || [], statutory, ps);
+      const budget = Number(ps.budget) || sug.suggested;
+      const statTotal = statutory.reduce((a, x) => a + x.amount, 0);
+      const plan = P.buildPlan(sup, hist, Math.max(0, budget - statTotal), { capPct: ps.capPct || 40, goodwillPct: ps.goodwillPct || 5 });
+      if (b.action === "plan") return OK({ ok: true, today: td, settings: ps, suggestion: sug, budget, statutory, plan, suppliers: sup.map((x) => ({ party: x.party, tier: x.tier, msme: x.msme, due: Math.round(x.due), oldest: x.oldest, chasing: x.chasing, bills: x.bills.length })).sort((a, b) => b.due - a.due),
+        imbalance: P.imbalance(sup, hist), sent: ((await kvGet("payplan_hist")) || []).slice(0, 10), noData: !((pay && pay.rows) || []).length });
+      // planSend: the approved list goes to Maadhu (copy to Ravi)
+      const lines = (b.lines || []).filter((l) => Number(l.amount) > 0).map((l) => ({ party: String(l.party), amount: Math.round(Number(l.amount)), bills: (l.bills || []).slice(0, 10), reason: String(l.reason || "").slice(0, 160) }));
+      const st2 = (b.statutory || []).filter((x) => Number(x.amount) > 0);
+      if (!lines.length && !st2.length) return OK({ error: "Nothing to send" });
+      const total = lines.reduce((a, l) => a + l.amount, 0) + st2.reduce((a, x) => a + Number(x.amount), 0);
+      const inr2 = (n) => "Rs " + Math.round(n).toLocaleString("en-IN");
+      const text = "Hello Maadhu,\n\nPlease process these payments this week (approved by Ravi):\n\n" +
+        (st2.length ? "STATUTORY\n" + st2.map((x) => "  • " + x.name + " (" + x.period + ") — " + inr2(x.amount) + " — due " + x.due).join("\n") + "\n\n" : "") +
+        "SUPPLIERS\n" + lines.map((l) => "  • " + l.party + " — " + inr2(l.amount) + (l.bills.length ? " (bills: " + l.bills.join(", ") + ")" : "")).join("\n") +
+        "\n\nTotal: " + inr2(total) + (b.note ? "\n\nNote: " + String(b.note).slice(0, 300) : "") + "\n\nAfter paying, the next Day Book will show them. Thank you.";
+      const s2 = await settings();
+      await mail(s2.accountantEmail, "Payments to make this week — " + inr2(total), text);
+      await mail(s2.ownerEmail, "Payment plan sent to Maadhu — " + inr2(total), text);
+      await tg("💸 <b>Payment plan sent to Maadhu</b> — " + inr2(total) + "\n" + lines.slice(0, 10).map((l) => "• " + l.party + " " + inr2(l.amount)).join("\n"));
+      const h2 = (await kvGet("payplan_hist")) || [];
+      h2.unshift({ at: new Date().toISOString(), total, lines, statutory: st2 });
+      await kvSet("payplan_hist", h2.slice(0, 52));
+      return OK({ ok: true, total });
+    }
     // ---------------- Export register (LUT) ----------------
     if (b.action && b.action.indexOf("exp") === 0) {
       const X = require("./tally-exports.js");

@@ -278,7 +278,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   }
 
   /* ===================== Views ===================== */
-  var TABS=OWNER?[["home","🏠 Summary"],["health","🩺 Health"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["comp","📅 Compliance"],["exports","🌍 Exports"],["lic","📜 Licences"],["assets","🏭 Assets"],["recon","🏦 Bank recon"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"],["comp","📅 Compliance"],["exports","🌍 Exports"]];
+  var TABS=OWNER?[["home","🏠 Summary"],["health","🩺 Health"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["plan","💸 Pay plan"],["comp","📅 Compliance"],["exports","🌍 Exports"],["lic","📜 Licences"],["assets","🏭 Assets"],["recon","🏦 Bank recon"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"],["comp","📅 Compliance"],["exports","🌍 Exports"]];
   function drawTabs(){ $("tabs").innerHTML=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(t[0]===tab?"on":"")+'">'+t[1]+'</button>';}).join("");
     Array.prototype.forEach.call($("tabs").children,function(b){ b.onclick=function(){ tab=b.dataset.t; draw(); }; }); }
   function sales(){ return (D.vouchers||[]).filter(function(v){return /sales/i.test(v.t)&&!/order|return|credit/i.test(v.t);}); }
@@ -291,6 +291,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     if(tab==="audit") return drawAudit();
     if(tab==="health") return drawHealth();
     if(tab==="exports") return drawExports();
+    if(tab==="plan") return drawPlan();
     if(tab==="comp"||tab==="lic"||tab==="assets"||tab==="recon") return drawCompliance();
     if(!D) { $("view").innerHTML='<div class="card">Loading…</div>'; return; }
     var m=D.meta||{};
@@ -447,6 +448,42 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     $("advNow").onclick=function(){ go(false); }; $("advDeep").onclick=function(){ go(true); };
     Array.prototype.forEach.call(document.querySelectorAll("[data-md]"),function(b){ b.onclick=function(){ api("mailDone",{id:b.dataset.md}).then(function(){ HL=null; drawHealth(); }); }; });
     $("hsSave").onclick=function(){ api("healthSettings",{settings:{odLimit:$("hsOd").value,openingStock:$("hsOs").value}}).then(function(){ HL=null; drawHealth(); }); };
+  }
+
+  /* ===================== Supplier payment planner ===================== */
+  var PL=null;
+  function drawPlan(){
+    if(PL===null){ $("view").innerHTML='<div class="card">Working out this week’s payments…</div>'; return api("plan").then(function(r){ PL=r&&r.ok?r:{error:(r&&r.error)||"error"}; drawPlan(); }); }
+    if(PL.error){ $("view").innerHTML='<div class="card">⚠ '+esc(PL.error)+'</div>'; return; }
+    if(PL.noData){ $("view").innerHTML='<div class="card"><h2>💸 Pay plan</h2><div class="hint">Needs the Payables (Bills Payable) report from Maadhu. Once it arrives, this page plans the week’s supplier payments.</div></div>'; return; }
+    var g=PL.suggestion, ps=PL.settings||{}, P2=PL.plan, tierCol={critical:"#c0392b",important:"#d97706",flexible:"#667085"};
+    var tag=function(t){ return '<span class="tag" style="background:'+tierCol[t]+'">'+t+'</span>'; };
+    var h='<div class="card"><h2>💸 This week’s payment budget</h2><div class="hint">Suggested = bank balance '+inr(g.bankBalance)+' + half of what customers owe this week ('+inr(g.customerDue7d)+') − statutory dues entered ('+inr(g.statutory)+') − safety buffer ('+inr(g.buffer)+') = <b>'+inr(g.suggested)+'</b>. Type your own figure to override.</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:flex-end"><label class="hint">Budget (₹)<br><input id="pbB" type="number" value="'+(ps.budget||"")+'" placeholder="'+g.suggested+'" style="padding:7px;width:150px"></label><label class="hint">Max to one supplier (%)<br><input id="pbC" type="number" value="'+(ps.capPct||40)+'" style="padding:7px;width:90px"></label><label class="hint">Safety buffer (₹)<br><input id="pbF" type="number" value="'+(ps.buffer||200000)+'" style="padding:7px;width:130px"></label><button class="btn" id="pbSave">Recalculate</button></div>'+
+      '<div style="margin-top:8px">Using <b>'+inr(PL.budget)+'</b> this week.</div></div>';
+    var S=PL.statutory||[];
+    h+='<div class="card"><h2>🏛 Statutory payments due (next 10 days)</h2>'+(S.length?'<div class="hint">Type the amounts (from the CA / Maadhu) — they are paid first.</div><div class="scroll"><table>'+S.map(function(x,i){ return '<tr><td><b>'+esc(x.name)+'</b><div class="hint">'+esc(x.period)+' · due '+fd(x.due)+'</div></td><td><input type="number" data-st="'+i+'" value="'+(x.amount||"")+'" style="padding:6px;width:130px"></td></tr>'; }).join("")+'</table></div><button class="btn" id="stSave" style="margin-top:6px">Save amounts</button>':'<div class="hint">None due.</div>')+'</div>';
+    h+='<div class="card"><h2>✅ Proposed supplier payments</h2><div class="hint">Order: MSME bills near 45 days → critical suppliers (raw bathi, perfumery, packaging), oldest first → a fair part-payment to anyone ignored too long → the rest. Suppliers chasing by email move up. Edit any amount or untick before sending.</div>'+
+      (P2.lines.length?'<div class="scroll"><table><tr><th></th><th>Supplier</th><th>Why</th><th class="n">Outstanding</th><th class="n">Pay now</th></tr>'+P2.lines.map(function(l,i){ return '<tr><td><input type="checkbox" data-pi="'+i+'" checked></td><td><b>'+esc(l.party)+'</b><div>'+tag(l.tier)+(l.msme?' <span class="tag" style="background:#6941c6">MSME</span>':'')+(l.chasing?' <span class="tag" style="background:#b42318">chasing ×'+l.chasing+'</span>':'')+'</div></td><td class="hint">'+esc(l.reasons.join("; "))+'<div>bills: '+esc(l.bills.join(", "))+'</div></td><td class="n">'+inr(l.due)+'<div class="hint">oldest '+l.oldest+' d</div></td><td class="n"><input type="number" data-pa="'+i+'" value="'+l.amount+'" style="padding:6px;width:120px;text-align:right"></td></tr>'; }).join("")+'</table></div>':'<div class="hint">Nothing proposed — budget too small or no overdue bills.</div>')+
+      '<div style="margin-top:8px">Total: <b id="plTot"></b> of '+inr(PL.budget)+'</div><textarea id="plNote" rows="2" placeholder="Note to Maadhu (optional)" style="width:100%;margin-top:8px;padding:8px;border:1px solid #ccd5df;border-radius:9px;font:inherit"></textarea><button class="btn" id="plSend" style="margin-top:8px">📤 Send to Maadhu</button> <span id="plMsg" class="hint"></span></div>';
+    var I=PL.imbalance;
+    h+='<div class="card"><h2>⚖️ Fairness check (last 90 days)</h2><b>Waiting too long</b> <span class="hint">(bills over 90 days, nothing paid in 60 days)</span>'+(I.starved.length?'<div class="scroll"><table>'+I.starved.map(function(r){ return '<tr><td>'+esc(r.party)+' '+tag(r.tier)+(r.chasing?' <span class="tag" style="background:#b42318">chasing</span>':'')+'</td><td class="n">'+inr(r.due)+'</td><td class="n">'+r.oldest+' d</td><td class="hint">last paid '+esc(r.lastPaid||"—")+'</td></tr>'; }).join("")+'</table></div>':' ✓ none')+
+      '<div style="margin-top:10px"><b>Paid ahead</b> <span class="hint">(paid more than they billed, while their bills are recent)</span></div>'+(I.ahead.length?'<div class="scroll"><table>'+I.ahead.map(function(r){ return '<tr><td>'+esc(r.party)+'</td><td class="n">paid '+inr(r.paid90)+'</td><td class="n">billed '+inr(r.bought90)+'</td></tr>'; }).join("")+'</table></div>':' ✓ none')+'</div>';
+    h+='<div class="card"><h2>🏷 Supplier priority</h2><div class="hint">Guessed from the name — correct any that are wrong. MSME suppliers are set in 📅 Compliance.</div><div class="scroll"><table>'+(PL.suppliers||[]).map(function(x,i){ return '<tr><td>'+esc(x.party)+(x.msme?' <span class="tag" style="background:#6941c6">MSME</span>':'')+'</td><td class="n">'+inr(x.due)+'</td><td><select data-ti="'+i+'" style="padding:5px">'+["critical","important","flexible"].map(function(t){ return '<option'+(x.tier===t?" selected":"")+'>'+t+'</option>'; }).join("")+'</select></td></tr>'; }).join("")+'</table></div><button class="btn" id="tiSave" style="margin-top:8px">Save priorities</button></div>';
+    if((PL.sent||[]).length) h+='<div class="card"><h2>📜 Sent plans</h2>'+PL.sent.map(function(x){ return '<div class="hint">'+esc(new Date(x.at).toLocaleDateString("en-IN"))+' · '+inr(x.total)+' · '+esc(x.lines.slice(0,5).map(function(l){ return l.party; }).join(", "))+(x.lines.length>5?"…":"")+'</div>'; }).join("")+'</div>';
+    $("view").innerHTML=h;
+    var reload=function(){ PL=null; drawPlan(); };
+    var total=function(){ var t=0; P2.lines.forEach(function(l,i){ if(document.querySelector('[data-pi="'+i+'"]').checked) t+=+document.querySelector('[data-pa="'+i+'"]').value||0; }); S.forEach(function(x,i){ t+=+document.querySelector('[data-st="'+i+'"]').value||0; }); $("plTot").textContent=inr(t); $("plTot").style.color=t>PL.budget?"#c0392b":""; };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-pa],[data-pi],[data-st]"),function(e){ e.oninput=total; e.onchange=total; }); total();
+    $("pbSave").onclick=function(){ api("planSettings",{settings:{budget:$("pbB").value||0,capPct:$("pbC").value,buffer:$("pbF").value}}).then(reload); };
+    if($("stSave")) $("stSave").onclick=function(){ var st={}; S.forEach(function(x,i){ st[x.key]=+document.querySelector('[data-st="'+i+'"]').value||0; }); api("planSettings",{settings:{stat:st}}).then(reload); };
+    $("tiSave").onclick=function(){ var t={}; (PL.suppliers||[]).forEach(function(x,i){ t[x.party]=document.querySelector('[data-ti="'+i+'"]').value; }); api("planSettings",{settings:{tiers:t}}).then(reload); };
+    $("plSend").onclick=function(){
+      var lines=P2.lines.map(function(l,i){ return document.querySelector('[data-pi="'+i+'"]').checked?{party:l.party,amount:+document.querySelector('[data-pa="'+i+'"]').value||0,bills:l.bills,reason:l.reasons.join("; ")}:null; }).filter(Boolean);
+      var st=S.map(function(x,i){ return {name:x.name,period:x.period,due:x.due,amount:+document.querySelector('[data-st="'+i+'"]').value||0}; });
+      if(!confirm("Send this payment list to Maadhu?")) return; $("plMsg").textContent="Sending…";
+      api("planSend",{lines:lines,statutory:st,note:$("plNote").value}).then(function(r){ $("plMsg").textContent=r.ok?"✓ Sent ("+inr(r.total)+")":"⚠ "+(r.error||""); if(r.ok) setTimeout(reload,1500); });
+    };
   }
 
   /* ===================== Export register (LUT) ===================== */
