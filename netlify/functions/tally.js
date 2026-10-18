@@ -150,6 +150,20 @@ exports.handler = async (event) => {
       const r = await ingest(b.kind, b.data, b.file, user, b.asof);
       return OK(r);
     }
+    if (b.action === "csd" || b.action === "csdMailNow" || b.action === "csdRecon") {
+      if (!owner) return OK({ error: "owner only" });
+      const C = require("./csd-lib.js");
+      if (b.action === "csdMailNow") {
+        const base = process.env.URL || "https://rk-tracker-v2.netlify.app";
+        await fetch(base + "/.netlify/functions/csd-mail-background", { method: "POST", headers: { "Content-Type": "application/json", "x-run-key": runKey() }, body: JSON.stringify({ manual: true }) }).catch(() => {});
+        return OK({ ok: true, started: true });
+      }
+      const recon = b.action === "csdRecon" ? await C.reconcile() : ((await kvGet("csd_recon")) || await C.reconcile());
+      const [st, pay, csd] = await Promise.all([kvGet("csd_mail_state"), kvGet("csd_payments"), kvGet("csd")]);
+      return OK({ ok: true, recon, log: ((st && st.log) || []).slice(0, 15),
+        statements: ((pay && pay.statements) || []).slice(0, 24).map((x) => ({ id: x.id, period: x.period, uploaded: x.uploaded, n: x.billCount, paid: x.totals && x.totals.paidAmt, db: x.debitTotal, source: x.source || "upload", mismatch: x.mismatch || [], file: x.file || "" })),
+        pos: ((csd && csd.orders) || []).slice(0, 15).map((o) => ({ poNo: o.poNo, poDate: o.poDate, deliveryTo: o.deliveryTo, depots: (o.depots || []).length, cases: (o.lines || []).reduce((t, l) => t + (+l.cases || 0), 0), source: o.source || "upload", paid: (o.depots || []).filter((d) => d.stage === "paid").length })) });
+    }
     if (b.action === "mailNow") {
       if (!owner) return OK({ error: "owner only" });
       const base = process.env.URL || "https://rk-tracker-v2.netlify.app";

@@ -59,6 +59,8 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   var USER=(new URLSearchParams(location.search).get("user")||"main").toLowerCase();
   var OWNER=USER==="main", PK="tally_pin_"+USER, pin=sessionStorage.getItem(PK)||"";
   var D=null, tab=OWNER?"home":"upload";
+  try{ var _qt=new URLSearchParams(location.search).get("tab"); if(_qt&&OWNER) tab=_qt; }catch(e){}
+  var CSDD=null;
   function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
   function inr(n){var v=Math.round(Number(n)||0);return (v<0?"-":"")+"₹"+Math.abs(v).toLocaleString("en-IN");}
   function api(a,x){ return fetch("/.netlify/functions/tally",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action:a,user:USER,pin:pin},x||{}))}).then(function(r){return r.json();}); }
@@ -278,7 +280,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   }
 
   /* ===================== Views ===================== */
-  var TABS=OWNER?[["home","🏠 Summary"],["health","🩺 Health"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["plan","💸 Pay plan"],["comp","📅 Compliance"],["exports","🌍 Exports"],["prof","🧾 Prof. bills"],["gst","💰 GST refund"],["lic","📜 Licences"],["assets","🏭 Assets"],["recon","🏦 Bank recon"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"],["comp","📅 Compliance"],["exports","🌍 Exports"],["prof","🧾 Prof. bills"],["gst","💰 GST refund"]];
+  var TABS=OWNER?[["home","🏠 Summary"],["health","🩺 Health"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["csd","🛡️ CSD"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["plan","💸 Pay plan"],["comp","📅 Compliance"],["exports","🌍 Exports"],["prof","🧾 Prof. bills"],["gst","💰 GST refund"],["lic","📜 Licences"],["assets","🏭 Assets"],["recon","🏦 Bank recon"],["purchase","🧾 Purchase & Stock"],["production","⚙️ Production"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"],["comp","📅 Compliance"],["exports","🌍 Exports"],["prof","🧾 Prof. bills"],["gst","💰 GST refund"]];
   function drawTabs(){ $("tabs").innerHTML=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(t[0]===tab?"on":"")+'">'+t[1]+'</button>';}).join("");
     Array.prototype.forEach.call($("tabs").children,function(b){ b.onclick=function(){ tab=b.dataset.t; draw(); }; }); }
   function sales(){ return (D.vouchers||[]).filter(function(v){return /sales/i.test(v.t)&&!/order|return|credit/i.test(v.t);}); }
@@ -291,6 +293,8 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     if(tab==="audit") return drawAudit();
     if(tab==="health") return drawHealth();
     if(tab==="exports") return drawExports();
+    if(tab==="csd") return drawCsd();
+    if(tab==="purchase"||tab==="production") return drawFrame(tab==="purchase"?"/purchase/?user=main":"/production/");
     if(tab==="prof") return drawProf();
     if(tab==="gst") return drawGst();
     if(tab==="plan") return drawPlan();
@@ -586,6 +590,45 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
 
   /* ===================== Export register (LUT) ===================== */
   var EX=null, exEdit=null;
+  function drawFrame(src){
+    $("view").innerHTML='<div class="card" style="padding:0;overflow:hidden"><iframe src="'+src+'" style="width:100%;height:calc(100vh - 170px);min-height:560px;border:0;display:block" title="embedded"></iframe></div>'+
+      '<div class="hint" style="margin:6px 4px">Opens in full screen: <a href="'+src+'" target="_blank">'+src+'</a></div>';
+  }
+  function drawCsd(force){
+    if(CSDD===null||force){ $("view").innerHTML='<div class="card">Loading CSD…</div>'; return api(force==="recon"?"csdRecon":"csd").then(function(r){ CSDD=r&&r.ok?r:{error:(r&&r.error)||"error"}; drawCsd(); }); }
+    if(CSDD.error){ $("view").innerHTML='<div class="card">⚠ '+esc(CSDD.error)+'</div>'; return; }
+    var R=CSDD.recon||{}, B=R.buckets||{};
+    var short=function(p){ return String(p||"").replace(/^.*?-\s*/,""); };
+    var h='<div class="card"><h2>🛡️ CSD — orders, payments, receivables</h2>'+
+      '<div class="hint">POs from mgrgp2@gmail.com go straight to the CSD desk. Payment advices from pafa@csdindia.gov.in are read, kept in the Vault, matched bill-by-bill with Tally receivables, and Maadhu is emailed the receipts to enter. Mail is checked every 2 hours (9 am–7 pm).</div>'+
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">'+
+      [["Outstanding",inr(R.total)],["Bills open",(R.open||[]).length],["Receipts to enter",(R.toEnter||[]).length],["Skipped by CSD",(R.skipped||[]).length],["Over 120 days",(R.long||[]).length],["Expected ≤30 days",inr((R.next30||{}).amt)],["Usual pay time",(R.lag||"—")+" days"]].map(function(k){ return '<div><div class="hint">'+k[0]+'</div><div style="font-size:18px;font-weight:800">'+k[1]+'</div></div>'; }).join("")+'</div>'+
+      '<div class="hint" style="margin-top:8px">Age: '+Object.keys(B).map(function(k){return k+' d '+inr(B[k]);}).join(" · ")+(R.recvAsof?' · Tally receivables as of '+esc(R.recvAsof):' · <b>no Tally receivables yet</b>')+'</div>'+
+      '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button id="csdMail">📧 Check CSD mail now</button><button id="csdRe">🔄 Re-match with Tally</button></div></div>';
+    var T=R.toEnter||[];
+    if(T.length) h+='<div class="card"><h2>Receipts to enter in Tally ('+T.length+')</h2><div class="hint">CSD has paid these, Tally still shows them open. Emailed to Maadhu.</div><div class="scroll"><table><tr><th>Bill</th><th>Depot</th><th class="n">Bill amt</th><th class="n">TDS</th><th class="n">DB note</th><th class="n">Net</th><th>UTR date</th></tr>'+
+      T.map(function(r){ return '<tr><td><b>'+esc(r.billNo)+'</b></td><td>'+esc(r.depot)+'</td><td class="n">'+inr(r.billAmt)+(r.diff?'<div class="hint">Tally '+inr(r.tallyAmt)+'</div>':'')+'</td><td class="n">'+inr(r.tds)+'</td><td class="n">'+(r.db?inr(r.db):"—")+'</td><td class="n"><b>'+inr(r.net)+'</b></td><td>'+esc(r.utrDate||"")+'</td></tr>'; }).join("")+'</table></div></div>';
+    var S=R.skipped||[];
+    if(S.length) h+='<div class="card"><h2>⚠ Skipped by CSD ('+S.length+')</h2><div class="hint">A newer bill of the same depot was paid but these were not — usually a missing GRN/document or a dispute. Call the depot.</div><div class="scroll"><table><tr><th>Bill</th><th>Date</th><th>Depot</th><th class="n">Amount</th><th class="n">Age</th></tr>'+
+      S.map(function(r){ return '<tr><td>'+esc(r.billNo)+'</td><td>'+esc(r.date)+'</td><td>'+esc(short(r.party))+'</td><td class="n">'+inr(r.amt)+'</td><td class="n">'+r.age+' d</td></tr>'; }).join("")+'</table></div></div>';
+    var P=R.parties||[];
+    if(P.length) h+='<div class="card"><h2>Outstanding by depot</h2><div class="scroll"><table><tr><th>Depot</th><th class="n">Bills</th><th class="n">Outstanding</th><th class="n">Oldest</th></tr>'+
+      P.map(function(p){ return '<tr><td>'+esc(short(p.party))+'</td><td class="n">'+p.n+'</td><td class="n">'+inr(p.amt)+'</td><td class="n">'+p.oldest+' d</td></tr>'; }).join("")+'</table></div></div>';
+    var O=(R.open||[]).slice(0,80);
+    if(O.length) h+='<div class="card"><h2>Open CSD bills (oldest first)</h2><div class="scroll"><table><tr><th>Bill</th><th>Date</th><th>Depot</th><th class="n">Amount</th><th class="n">Age</th><th>Expected</th></tr>'+
+      O.map(function(r){ return '<tr><td>'+esc(r.billNo)+'</td><td>'+esc(r.date)+'</td><td>'+esc(short(r.party))+'</td><td class="n">'+inr(r.amt)+'</td><td class="n">'+r.age+' d</td><td>'+esc(r.expected||"")+'</td></tr>'; }).join("")+'</table></div></div>';
+    var ST=CSDD.statements||[];
+    h+='<div class="card"><h2>Payment advices ('+ST.length+')</h2><div class="scroll"><table><tr><th>Period</th><th class="n">Lines</th><th class="n">Paid</th><th class="n">Debit notes</th><th>From</th><th></th></tr>'+
+      ST.map(function(s){ return '<tr><td>'+esc(s.period||s.uploaded)+(s.mismatch&&s.mismatch.length?' <span class="hint">⚠ totals differ</span>':'')+'</td><td class="n">'+s.n+'</td><td class="n">'+inr(s.paid)+'</td><td class="n">'+(s.db?inr(s.db):"—")+'</td><td>'+esc(s.source)+'</td><td>'+(s.file?'<a href="'+esc(s.file)+'" target="_blank">PDF</a>':'')+'</td></tr>'; }).join("")+'</table></div></div>';
+    var PO=CSDD.pos||[];
+    h+='<div class="card"><h2>CSD POs ('+PO.length+' latest)</h2><div class="scroll"><table><tr><th>PO</th><th>Date</th><th>Deliver by</th><th class="n">Cases</th><th class="n">Depots</th><th class="n">Paid</th><th>From</th></tr>'+
+      PO.map(function(o){ return '<tr><td><b>'+esc(o.poNo)+'</b></td><td>'+esc(o.poDate)+'</td><td>'+esc(o.deliveryTo)+'</td><td class="n">'+o.cases+'</td><td class="n">'+o.depots+'</td><td class="n">'+o.paid+'</td><td>'+esc(o.source)+'</td></tr>'; }).join("")+'</table></div><div class="hint">Full detail and dispatch stages: main tracker → 🛡️ CSD.</div></div>';
+    var LG=CSDD.log||[];
+    if(LG.length) h+='<div class="card"><h2>Mail log</h2>'+LG.slice(0,8).map(function(l){ return '<div class="hint" style="margin:4px 0">'+esc(l.at.slice(0,16).replace("T"," "))+' — '+esc((l.pos||[]).concat(l.advices||[]).join(" · ")||"nothing new")+(l.errors&&l.errors.length?' ⚠ '+esc(l.errors.join(" | ")):'')+'</div>'; }).join("")+'</div>';
+    $("view").innerHTML=h;
+    $("csdMail").onclick=function(){ api("csdMailNow").then(function(){ alert("Checking CSD mail now — takes a minute or two per PDF. Reopen this tab shortly."); }); };
+    $("csdRe").onclick=function(){ drawCsd("recon"); };
+  }
   function drawExports(){
     if(EX===null){ $("view").innerHTML='<div class="card">Loading exports…</div>'; return api("exp").then(function(r){ EX=r&&r.ok?r:{error:(r&&r.error)||"error"}; drawExports(); }); }
     if(EX.error){ $("view").innerHTML='<div class="card">⚠ '+esc(EX.error)+'</div>'; return; }

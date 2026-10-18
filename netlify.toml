@@ -58,6 +58,10 @@
 [functions."logistics-daily"]
   schedule = "0 4 * * *"
 
+# CSD mail — POs from mgrgp2@gmail.com and payment advices from pafa@csdindia.gov.in — every 2 h, 09:00–19:00 IST
+[functions."csd-cron"]
+  schedule = "30 3-13/2 * * *"
+
 # Purchase & Stock — order lists to Prakash/Virupaksha, summary to Ravi — 09:40 IST (04:10 UTC)
 [functions."purchase-daily"]
   schedule = "10 4 * * *"
