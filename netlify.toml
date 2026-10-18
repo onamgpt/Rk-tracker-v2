@@ -58,6 +58,10 @@
 [functions."logistics-daily"]
   schedule = "0 4 * * *"
 
+# Purchase & Stock — order lists to Prakash/Virupaksha, summary to Ravi — 09:40 IST (04:10 UTC)
+[functions."purchase-daily"]
+  schedule = "10 4 * * *"
+
 # Tally morning summary + stale-upload reminder — 09:15 IST (03:45 UTC)
 [functions."tally-daily"]
   schedule = "45 3 * * *"

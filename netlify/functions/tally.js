@@ -53,6 +53,7 @@ async function ingest(kind, data, file, by, asof) {
     await kvSet("tally_" + kind, { asof: asof || null, at: now, by, rows: data || [], file: file || "" });
     if (kind === "tb" || kind === "stock") { try { await reportFlags(require("./tally-audit.js").checkSnapshot(kind, data || [], asof || now.slice(0, 10)), "Tally audit check"); } catch (e) {} }
     meta[kind] = { at: now, by, rows: (data || []).length, asof: asof || null, file: file || "" };
+    if (kind === "stock") { try { await require("./purchase-lib.js").recordStock(data || [], asof || now.slice(0, 10)); } catch (e) {} }
   } else return { error: "unknown kind" };
   meta.lastUpload = now; meta.lastBy = by;
   await kvSet("tally_meta", meta);

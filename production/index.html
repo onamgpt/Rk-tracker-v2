@@ -93,6 +93,8 @@
 "use strict";
 
 var DB="/.netlify/functions/db", KEY="production_v1", LS="rk_production_v1";
+var BOMN=[]; // product names that have materials set on /purchase/ (for the Product field)
+try{ fetch("/.netlify/functions/db",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"getPortfolio",user:"main",key:"purchase_boms"})}).then(function(r){return r.json();}).then(function(r){ BOMN=Object.keys((r&&r.data)||{}).sort(); }).catch(function(){}); }catch(e){}
 var S={ orders:[] };
 var tab="live", editing=null, logFor=null, entries=null;
 
@@ -288,7 +290,7 @@ function form(v){
     '<select id="f_entry"><option value="">— loading orders —</option></select>'+
     '<div class="note">Linking pulls the customer name across and keeps production tied to the real order.</div>'+
     '<div class="row"><div><label>Customer</label><input id="f_cust" value="'+esc(d.customer||"")+'"></div>'+
-    '<div><label>Product</label><input id="f_prod" value="'+esc(d.product||"")+'" placeholder="Vaishak 100g, mixed…"></div></div>'+
+    '<div><label>Product</label><input id="f_prod" list="bomL" value="'+esc(d.product||"")+'" placeholder="Vaishak 100g, mixed…"><datalist id="bomL">'+BOMN.map(function(n){return '<option value="'+esc(n)+'">';}).join("")+'</datalist><div class="note">Pick a product from the list so its materials are planned on Purchase &amp; Stock.</div></div></div>'+
     '<div class="row3"><div><label>Target (cases)</label><input id="f_target" type="number" step="any" value="'+esc(d.targetCases||"")+'"></div>'+
     '<div><label>Started</label><input id="f_start" type="date" value="'+esc(d.startDate||today())+'"></div>'+
     '<div><label>Promised to customer</label><input id="f_prom" type="date" value="'+esc(d.promisedDate||"")+'"></div></div>'+

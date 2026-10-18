@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Purchase & Stock — Onam Agarbathi</title>
+<style>
+:root{--paper:#F4F3EF;--card:#FFF;--ink:#16181C;--muted:#6A6F76;--rule:#DEDCD6;--navy:#1d3557;--red:#b42318;--redBg:#fdecea;--ok:#1F7A4D;--okBg:#E8F3EC;--warnBg:#FBF3DD;--warnInk:#5C4A15}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;padding-bottom:env(safe-area-inset-bottom,0px)}
+header{position:sticky;top:0;z-index:5;background:var(--paper);border-bottom:1px solid var(--rule);padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 0}
+h1{font-size:19px;margin:0 0 2px}.sub{font-size:13px;color:var(--muted)}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:10px 0}
+.tab{border:1px solid var(--rule);background:var(--card);padding:8px 13px;border-radius:999px;font-size:14px;white-space:nowrap;color:var(--ink)}
+.tab.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+main{max-width:860px;margin:0 auto;padding:12px}
+.card{background:var(--card);border:1px solid var(--rule);border-radius:12px;padding:13px 14px;margin-bottom:10px}
+.card.late{border-left:4px solid var(--red)}.card.sug{border-left:4px solid var(--navy)}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.name{font-weight:600;font-size:16px}.muted{color:var(--muted);font-size:13px}
+.badge{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;background:#eef1f6;color:var(--navy);margin:2px 4px 2px 0}
+.badge.red{background:var(--redBg);color:var(--red)}.badge.ok{background:var(--okBg);color:var(--ok)}
+.why{font-size:13px;color:var(--warnInk);background:var(--warnBg);padding:6px 9px;border-radius:7px;margin:8px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+label{font-size:12px;color:var(--muted);display:block;margin-bottom:3px}
+input,select{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--rule);border-radius:8px;background:#fff;color:var(--ink)}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+button.b{font:inherit;font-size:15px;padding:9px 14px;border-radius:8px;border:1px solid var(--navy);background:var(--navy);color:#fff}
+button.g{background:#fff;color:var(--navy)}button.r{background:#fff;color:var(--red);border-color:var(--red)}
+.empty{text-align:center;color:var(--muted);padding:40px 10px}
+.note{background:var(--warnBg);color:var(--warnInk);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:10px}
+.pin{max-width:320px;margin:18vh auto;text-align:center;padding:0 16px}.pin input{font-size:28px;text-align:center;letter-spacing:10px;margin:14px 0}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#16181c;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;display:none;z-index:9}
+table{width:100%;border-collapse:collapse}td,th{padding:7px 6px;border-bottom:1px solid var(--rule);font-size:14px;text-align:left}
+.h2{font-size:15px;font-weight:600;margin:16px 2px 8px}
+</style>
+</head>
+<body>
+<div id="pinBox" class="pin" style="display:none">
+  <h1>Purchase & Stock</h1><div class="sub" id="pinWho"></div>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="••••">
+  <button class="b" id="pinGo" style="width:100%">Open</button>
+  <div id="pinErr" style="color:var(--red);margin-top:10px"></div>
+</div>
+<div id="app" style="display:none">
+<header>
+  <h1>🧾 Purchase & Stock</h1>
+  <div class="sub" id="hsub"></div>
+  <div class="tabs" id="tabs"></div>
+</header>
+<main id="view"></main>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+(function(){
+var API="/.netlify/functions/purchase";
+var qs=new URLSearchParams(location.search), USER=(qs.get("user")||"main").toLowerCase();
+var PK="pu_pin_"+USER, pin=localStorage.getItem(PK)||"";
+var D=null, tab="todo", search="", openItem=null;
+function $(i){return document.getElementById(i);}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+function fmt(n){ return n==null||n===""?"—":(Math.round(n*100)/100).toLocaleString("en-IN"); }
+function toast(t){ var e=$("toast"); e.textContent=t; e.style.display="block"; clearTimeout(e._t); e._t=setTimeout(function(){e.style.display="none";},2400); }
+function api(action,extra){ return fetch(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action:action,user:USER,pin:pin},extra||{}))}).then(function(r){return r.json();}); }
+function plus(d,n){ var x=new Date(d+"T00:00:00Z"); x.setUTCDate(x.getUTCDate()+n); return x.toISOString().slice(0,10); }
+var WHO={main:"Ravi",prakash:"Prakash",viru:"Virupaksha","":"— nobody —"};
+
+function lock(err){ $("app").style.display="none"; $("pinBox").style.display=""; $("pinWho").textContent=WHO[USER]||USER; $("pinErr").textContent=err||""; $("pin").value=""; $("pin").focus(); }
+$("pinGo").onclick=function(){ pin=$("pin").value.trim(); load(); };
+$("pin").onkeydown=function(e){ if(e.key==="Enter") $("pinGo").click(); };
+
+function load(){
+  return api("get").then(function(r){
+    if(r.error==="pin"){ localStorage.removeItem(PK); lock(pin?"Wrong PIN":""); return; }
+    if(r.error){ toast(r.error); return; }
+    localStorage.setItem(PK,pin); D=r;
+    $("pinBox").style.display="none"; $("app").style.display="";
+    $("hsub").textContent=r.name+" · Tally stock: "+(r.hasStock?("as of "+r.asof+(r.stale>2?" ("+r.stale+" days old)":"")):"not received yet");
+    render();
+  }).catch(function(){ toast("No connection — try again"); });
+}
+
+function tabs(){
+  var T=[["todo","To order"],["on","On order"],["stock","Stock"]];
+  if(D.owner) T.push(["bom","Production needs"],["set","Settings"]);
+  $("tabs").innerHTML=T.map(function(t){ return '<button class="tab'+(tab===t[0]?" on":"")+'" data-t="'+t[0]+'">'+t[1]+cnt(t[0])+'</button>'; }).join("");
+  Array.prototype.forEach.call($("tabs").querySelectorAll(".tab"),function(b){ b.onclick=function(){ tab=b.getAttribute("data-t"); openItem=null; render(); scrollTo(0,0); }; });
+}
+function cnt(t){ if(t==="todo"){ var n=D.pos.filter(function(p){return p.status==="suggested";}).length; return n?" ("+n+")":""; }
+  if(t==="on"){ var m=D.pos.filter(function(p){return p.status==="ordered";}).length; return m?" ("+m+")":""; } return ""; }
+function render(){ tabs(); var v=$("view");
+  if(tab==="todo") return todo(v); if(tab==="on") return onOrder(v); if(tab==="stock") return stock(v); if(tab==="bom") return bom(v); if(tab==="set") return sets(v); }
+function rowOf(item){ return D.rows.find(function(r){return r.item===item;})||{}; }
+
+function stale(){ if(!D.hasStock) return '<div class="note">No Stock Summary from Tally yet. Until Maadhu sends it, enter a physical count on the <b>Stock</b> tab for the materials that matter.</div>';
+  if(D.stale>2) return '<div class="note">Tally stock is '+D.stale+' days old — check the real stock before ordering.</div>'; return ""; }
+
+function todo(v){
+  var list=D.pos.filter(function(p){return p.status==="suggested";});
+  var h=stale();
+  if(!list.length) h+='<div class="empty">Nothing to order today. ✅</div>';
+  var groups=D.owner?["prakash","viru",""]:[USER];
+  groups.forEach(function(g){
+    var L=list.filter(function(p){return (p.owner||"")===g;}); if(!L.length) return;
+    if(D.owner) h+='<div class="h2">'+WHO[g]+' — '+L.length+'</div>';
+    L.forEach(function(p){ var r=rowOf(p.item);
+      h+='<div class="card sug"><div class="row"><div><div class="name">'+esc(p.item)+'</div><div class="muted">'+esc((D.cats[p.cat]||""))+'</div></div>'+
+      '<div style="text-align:right"><div class="muted">In stock</div><b>'+fmt(r.qty)+' '+esc(r.unit||"")+'</b>'+(r.daysLeft!=null?'<div class="badge red">~'+r.daysLeft+' days</div>':'')+'</div></div>'+
+      (p.why?'<div class="why">'+esc(p.why)+'</div>':'')+
+      (r.lastPurchase?'<div class="muted">Last bought '+esc(r.lastPurchase.d)+' from '+esc(r.lastPurchase.supplier)+(r.lastPurchase.rate?' @ ₹'+fmt(r.lastPurchase.rate):'')+'</div>':'')+
+      '<div class="grid"><div><label>Order qty ('+esc(p.unit||"")+')</label><input id="q_'+p.id+'" inputmode="decimal" value="'+esc(p.qty)+'"></div>'+
+      '<div><label>Supplier</label><input id="s_'+p.id+'" value="'+esc(p.supplier||"")+'"></div>'+
+      '<div><label>Delivery expected</label><input type="date" id="e_'+p.id+'" value="'+plus(D.today,r.lead||7)+'"></div>'+
+      '<div><label>Rate ₹ (optional)</label><input id="r_'+p.id+'" inputmode="decimal"></div></div>'+
+      '<div class="btns"><button class="b" data-ord="'+p.id+'">✓ Ordered</button><button class="b g" data-share="'+p.id+'">Send to supplier</button><button class="b r" data-snz="'+esc(p.item)+'">Not now</button></div></div>';
+    });
+  });
+  v.innerHTML=h;
+  each(v,"[data-ord]",function(b){ b.onclick=function(){ var id=b.getAttribute("data-ord");
+    api("order",{id:id,qty:$("q_"+id).value,supplier:$("s_"+id).value,expected:$("e_"+id).value,rate:$("r_"+id).value}).then(function(r){ if(r.error) return toast(r.error); toast("Ordered — "+r.po.poNo); load(); }); }; });
+  each(v,"[data-share]",function(b){ b.onclick=function(){ var id=b.getAttribute("data-share"), p=D.pos.find(function(x){return x.id===id;});
+    share(p.item,$("q_"+id).value,p.unit,$("e_"+id).value,""); }; });
+  each(v,"[data-snz]",function(b){ b.onclick=function(){ var d=prompt("Hide this for how many days?","7"); if(!d) return; api("snooze",{item:b.getAttribute("data-snz"),days:d}).then(function(){ toast("Hidden for "+d+" days"); load(); }); }; });
+}
+function share(item,qty,unit,exp,poNo){
+  var t="Purchase order from Onam Agarbathi Pvt. Ltd."+(poNo?"\nPO: "+poNo:"")+"\n\nItem: "+item+"\nQuantity: "+qty+" "+(unit||"")+(exp?"\nRequired by: "+exp:"")+"\n\nPlease confirm the delivery date and send the invoice with the goods.\n— "+(WHO[USER]||"")+", Onam Agarbathi, Bangalore";
+  if(navigator.share){ navigator.share({text:t}).catch(function(){}); } else { location.href="https://wa.me/?text="+encodeURIComponent(t); }
+}
+function onOrder(v){
+  var L=D.pos.filter(function(p){return p.status==="ordered";}).sort(function(a,b){return (a.expected||"")<(b.expected||"")?-1:1;});
+  var done=D.pos.filter(function(p){return p.status==="received";}).sort(function(a,b){return (a.receivedOn||"")<(b.receivedOn||"")?1:-1;}).slice(0,15);
+  var h=L.length?"":'<div class="empty">No open orders.</div>';
+  L.forEach(function(p){ var late=p.expected&&p.expected<D.today;
+    h+='<div class="card'+(late?" late":"")+'"><div class="row"><div><div class="name">'+esc(p.item)+'</div><div class="muted">'+esc(p.poNo||"")+' · '+esc(p.supplier||"no supplier")+(D.owner?' · '+WHO[p.owner||""]:'')+'</div></div>'+
+    '<div style="text-align:right"><b>'+fmt(p.orderedQty)+' '+esc(p.unit||"")+'</b>'+((p.receivedQty||0)>0?'<div class="muted">got '+fmt(p.receivedQty)+'</div>':'')+'</div></div>'+
+    '<div style="margin-top:6px"><span class="badge'+(late?" red":"")+'">'+(late?"Late — was due ":"Due ")+esc(p.expected||"?")+'</span><span class="badge">Ordered '+esc(p.orderedOn)+'</span></div>'+
+    (p.note?'<div class="muted" style="margin-top:6px">'+esc(p.note)+'</div>':'')+
+    '<div class="btns"><button class="b" data-rcv="'+p.id+'">Received</button><button class="b g" data-dt="'+p.id+'">New date</button><button class="b g" data-sh="'+p.id+'">Share PO</button><button class="b r" data-cx="'+p.id+'">Cancel</button></div></div>';
+  });
+  if(done.length) h+='<div class="h2">Recently received</div><div class="card"><table>'+done.map(function(p){ return '<tr><td>'+esc(p.item)+(p.autoReceived?' <span class="badge ok">from Tally bill</span>':'')+'</td><td>'+fmt(p.receivedQty)+' '+esc(p.unit||"")+'</td><td class="muted">'+esc(p.receivedOn||"")+'</td></tr>'; }).join("")+'</table></div>';
+  v.innerHTML=h;
+  each(v,"[data-rcv]",function(b){ b.onclick=function(){ var p=D.pos.find(function(x){return x.id===b.getAttribute("data-rcv");});
+    var q=prompt("Quantity received ("+(p.unit||"")+")",String(Math.max(0,(p.orderedQty||0)-(p.receivedQty||0)))); if(q==null) return;
+    var full=confirm("Is this order now complete?\nOK = complete · Cancel = more still to come");
+    api("receive",{id:p.id,qty:q,full:full}).then(function(){ toast("Saved"); load(); }); }; });
+  each(v,"[data-dt]",function(b){ b.onclick=function(){ var d=prompt("New delivery date (YYYY-MM-DD)",plus(D.today,3)); if(!d) return; var n=prompt("Note (what the supplier said)","")||"";
+    api("expected",{id:b.getAttribute("data-dt"),date:d,note:n}).then(function(){ toast("Updated"); load(); }); }; });
+  each(v,"[data-sh]",function(b){ b.onclick=function(){ var p=D.pos.find(function(x){return x.id===b.getAttribute("data-sh");}); share(p.item,p.orderedQty,p.unit,p.expected,p.poNo); }; });
+  each(v,"[data-cx]",function(b){ b.onclick=function(){ if(!confirm("Cancel this order?")) return; api("cancel",{id:b.getAttribute("data-cx")}).then(function(){ toast("Cancelled"); load(); }); }; });
+}
+function stock(v){
+  var L=D.rows.filter(function(r){ return !search||r.item.toLowerCase().indexOf(search.toLowerCase())>=0; });
+  var h=stale()+'<div class="card"><input id="srch" placeholder="Search items…" value="'+esc(search)+'"><div class="btns"><button class="b g" id="addIt">+ Add an item Tally doesn\'t have</button></div></div>';
+  if(!L.length) h+='<div class="empty">No items yet. They appear once Maadhu sends the Stock Summary — or add one above.</div>';
+  L.forEach(function(r){ var on=openItem===r.item;
+    h+='<div class="card" data-it="'+esc(r.item)+'"><div class="row"><div><div class="name">'+esc(r.item)+'</div><div class="muted">'+esc(D.cats[r.cat]||"")+(D.owner?' · '+WHO[r.owner||""]:'')+(r.track?'':' · not tracked')+'</div></div>'+
+      '<div style="text-align:right"><b>'+fmt(r.qty)+' '+esc(r.unit||"")+'</b><div class="muted">'+(r.use?fmt(r.use)+'/day':'')+(r.daysLeft!=null?' · ~'+r.daysLeft+'d':'')+'</div></div></div>';
+    if(on){
+      h+='<div class="muted" style="margin-top:6px">'+esc(r.src||"No stock figure yet")+(r.onOrder?' · on order '+fmt(r.onOrder):'')+(r.prodNeed?' · production needs '+fmt(r.prodNeed):'')+'</div>'+
+      '<div class="grid"><div><label>Counted now</label><input id="cnt" inputmode="decimal" placeholder="actual qty"></div><div><label>&nbsp;</label><button class="b" id="cntGo" style="width:100%">Save count</button></div></div>'+
+      '<div class="grid"><div><label>Minimum to keep</label><input id="i_min" inputmode="decimal" value="'+esc(r.min||"")+'"></div>'+
+      '<div><label>Usual order qty</label><input id="i_rq" inputmode="decimal" value="'+esc(r.reorderQty||"")+'"></div>'+
+      '<div><label>Supplier takes (days)</label><input id="i_ld" inputmode="numeric" value="'+esc(r.lead||"")+'"></div>'+
+      '<div><label>Supplier</label><input id="i_sup" value="'+esc(r.supplier||"")+'"></div>'+
+      '<div><label>Category</label><select id="i_cat">'+Object.keys(D.cats).map(function(k){return '<option value="'+k+'"'+(k===r.cat?" selected":"")+'>'+esc(D.cats[k])+'</option>';}).join("")+'</select></div>'+
+      (D.owner?'<div><label>Who orders it</label><select id="i_own">'+["prakash","viru","main",""].map(function(k){return '<option value="'+k+'"'+(k===(r.owner||"")?" selected":"")+'>'+WHO[k]+'</option>';}).join("")+'</select></div>':'')+
+      '<div><label>Unit</label><input id="i_unit" value="'+esc(r.unit||"")+'"></div>'+
+      '<div><label>Plan orders for it</label><select id="i_tr"><option value="1"'+(r.track?" selected":"")+'>Yes</option><option value="0"'+(r.track?"":" selected")+'>No</option></select></div></div>'+
+      '<div class="btns"><button class="b" id="itSave">Save</button><button class="b g" id="itClose">Close</button></div>';
+    }
+    h+='</div>';
+  });
+  v.innerHTML=h;
+  $("srch").oninput=function(){ search=this.value; var p=this.selectionStart; stock(v); $("srch").focus(); $("srch").setSelectionRange(p,p); };
+  $("addIt").onclick=function(){ var n=prompt("Item name (as you call it)"); if(!n) return; var u=prompt("Unit (kg, nos, litres…)","kg")||""; var q=prompt("How much is in stock now? (leave blank if unsure)","");
+    api("addItem",{item:n,unit:u,qty:q}).then(function(r){ if(r.error) return toast(r.error); toast("Added"); openItem=n; load(); }); };
+  each(v,"[data-it]",function(c){ c.onclick=function(e){ if(e.target.closest("input,select,button")) return; var it=c.getAttribute("data-it"); openItem=openItem===it?null:it; stock(v); }; });
+  if(openItem){
+    $("cntGo").onclick=function(){ var q=$("cnt").value; if(q==="") return; api("count",{item:openItem,qty:q}).then(function(r){ if(r.error) return toast(r.error); toast("Count saved"); load(); }); };
+    $("itSave").onclick=function(){ var p={min:$("i_min").value,reorderQty:$("i_rq").value,leadDays:$("i_ld").value,supplier:$("i_sup").value,cat:$("i_cat").value,unit:$("i_unit").value,track:$("i_tr").value==="1"};
+      if($("i_own")) p.owner=$("i_own").value;
+      api("itemSave",{item:openItem,patch:p}).then(function(r){ if(r.error) return toast(r.error); toast("Saved"); load(); }); };
+    $("itClose").onclick=function(){ openItem=null; stock(v); };
+  }
+}
+function bom(v){
+  var names=D.rows.map(function(r){return r.item;});
+  var prods={}; D.prod.forEach(function(o){ if(o.product) prods[o.product]=1; }); Object.keys(D.boms).forEach(function(k){prods[k]=1;});
+  var h='<div class="note">For each product, enter how much of each material one <b>case</b> uses. Production orders with the same product name then add their remaining cases to the order list automatically.</div>';
+  h+='<datalist id="itemsL">'+names.map(function(n){return '<option value="'+esc(n)+'">';}).join("")+'</datalist>';
+  var running=D.prod.filter(function(o){return (o.target||0)>(o.made||0);});
+  if(running.length) h+='<div class="h2">Running production</div><div class="card"><table>'+running.map(function(o){ var has=Object.keys(D.boms).some(function(k){return k.toLowerCase().trim()===String(o.product||"").toLowerCase().trim();});
+    return '<tr><td>'+esc(o.customer||"")+'<div class="muted">'+esc(o.product||"")+'</div></td><td>'+fmt((o.target||0)-(o.made||0))+' cs left</td><td>'+(has?'<span class="badge ok">materials set</span>':'<span class="badge red">no materials</span>')+'</td></tr>'; }).join("")+'</table></div>';
+  Object.keys(prods).sort().forEach(function(p){ var lines=(D.boms[p]||[]).concat([{item:"",perCase:""},{item:"",perCase:""}]);
+    h+='<div class="card" data-bom="'+esc(p)+'"><div class="name">'+esc(p)+'</div>'+lines.map(function(l,i){ return '<div class="grid"><div><input list="itemsL" class="bi" value="'+esc(l.item)+'" placeholder="Material"></div><div><input class="bq" inputmode="decimal" value="'+esc(l.perCase)+'" placeholder="Per case"></div></div>'; }).join("")+
+      '<div class="btns"><button class="b" data-bs>Save</button>'+(D.boms[p]?'<button class="b r" data-bd>Delete</button>':'')+'</div></div>'; });
+  h+='<div class="btns"><button class="b g" id="newP">+ Product</button></div>';
+  v.innerHTML=h;
+  each(v,"[data-bom]",function(c){ var p=c.getAttribute("data-bom");
+    c.querySelector("[data-bs]").onclick=function(){ var its=c.querySelectorAll(".bi"), qs=c.querySelectorAll(".bq"), L=[];
+      for(var i=0;i<its.length;i++) if(its[i].value.trim()&&qs[i].value) L.push({item:its[i].value.trim(),perCase:qs[i].value});
+      api("bomSave",{product:p,lines:L}).then(function(r){ if(r.error) return toast(r.error); toast("Saved"); load(); }); };
+    var d=c.querySelector("[data-bd]"); if(d) d.onclick=function(){ if(confirm("Delete materials for "+p+"?")) api("bomDel",{product:p}).then(function(){ load(); }); }; });
+  $("newP").onclick=function(){ var n=prompt("Product name — use the same name as on the Production page"); if(!n) return; D.boms[n]=D.boms[n]||[]; bom(v); };
+}
+function sets(v){ var s=D.settings||{};
+  v.innerHTML='<div class="card"><div class="grid">'+
+    f("ownerEmail","Ravi's email",s.ownerEmail)+f("prakashEmail","Prakash's email",s.prakashEmail)+f("viruEmail","Virupaksha's email",s.viruEmail)+f("maadhuEmail","Maadhu's email",s.maadhuEmail)+
+    f("coverDays","Order enough for (days)",s.coverDays)+f("defaultLead","Usual supplier time (days)",s.defaultLead)+
+    '<div><label>Email Prakash & Virupaksha daily</label><select id="emailStaff"><option value="1">Yes</option><option value="0"'+(s.emailStaff===false?" selected":"")+'>No</option></select></div>'+
+    '<div><label>Email me daily</label><select id="emailOwner"><option value="1">Yes</option><option value="0"'+(s.emailOwner===false?" selected":"")+'>No</option></select></div></div>'+
+    '<div class="btns"><button class="b" id="sSave">Save</button><button class="b g" id="runNow">Send today\'s emails now</button></div>'+
+    '<p class="muted">Runs by itself every morning at 9:40, after Maadhu\'s Tally email is read at 9:15.</p></div>';
+  $("sSave").onclick=function(){ var p={}; ["ownerEmail","prakashEmail","viruEmail","maadhuEmail","coverDays","defaultLead"].forEach(function(k){p[k]=$(k).value;});
+    p.emailStaff=$("emailStaff").value==="1"; p.emailOwner=$("emailOwner").value==="1";
+    api("settingsSave",{settings:p}).then(function(r){ toast(r.error||"Saved"); load(); }); };
+  $("runNow").onclick=function(){ if(!confirm("Send today's purchase emails now?")) return; api("runNow").then(function(r){ toast(r.error||("Done: "+((r.sent||[]).join(", ")||"nothing to send"))); }); };
+}
+function f(id,l,val){ return '<div><label>'+l+'</label><input id="'+id+'" value="'+esc(val==null?"":val)+'"></div>'; }
+function each(root,sel,fn){ Array.prototype.forEach.call(root.querySelectorAll(sel),fn); }
+if(pin) load(); else lock("");
+})();
+</script>
+</body>
+</html>
