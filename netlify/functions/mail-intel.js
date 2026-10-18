@@ -68,7 +68,8 @@ async function scan(opts) {
       st.items.unshift({ id: m.id, at: m.internalDate ? new Date(m.internalDate).toISOString() : new Date().toISOString(), from: String(m.from || "").replace(/<[^>]+>/, "").trim().slice(0, 80),
         subject: String(m.subject || "").slice(0, 140), cat: CATS.includes(r.cat) ? r.cat : "other_business", imp: ["high", "medium", "low"].includes(r.imp) ? r.imp : "low",
         summary: String(r.summary || "").slice(0, 240), party: String(r.party || "").slice(0, 80), amount: r.amount == null ? null : Number(r.amount) || null,
-        due: /^\d{4}-\d{2}-\d{2}$/.test(r.due || "") ? r.due : "", action: String(r.action || "").slice(0, 200), attach: (m.attachments || []).map((a) => a.name).slice(0, 5), status: "open" });
+        due: /^\d{4}-\d{2}-\d{2}$/.test(r.due || "") ? r.due : "", action: String(r.action || "").slice(0, 200), attach: (m.attachments || []).map((a) => a.name).slice(0, 5),
+        files: (m.attachments || []).filter((a) => /pdf|image/i.test(a.type || "") || /\.(pdf|jpe?g|png)$/i.test(a.name || "")).slice(0, 4).map((a) => ({ name: a.name, id: a.id, type: a.type })), status: "open" });
       added++;
     });
   }

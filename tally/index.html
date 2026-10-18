@@ -278,7 +278,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   }
 
   /* ===================== Views ===================== */
-  var TABS=OWNER?[["home","🏠 Summary"],["health","🩺 Health"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["plan","💸 Pay plan"],["comp","📅 Compliance"],["exports","🌍 Exports"],["lic","📜 Licences"],["assets","🏭 Assets"],["recon","🏦 Bank recon"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"],["comp","📅 Compliance"],["exports","🌍 Exports"]];
+  var TABS=OWNER?[["home","🏠 Summary"],["health","🩺 Health"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["plan","💸 Pay plan"],["comp","📅 Compliance"],["exports","🌍 Exports"],["prof","🧾 Prof. bills"],["lic","📜 Licences"],["assets","🏭 Assets"],["recon","🏦 Bank recon"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"],["comp","📅 Compliance"],["exports","🌍 Exports"],["prof","🧾 Prof. bills"]];
   function drawTabs(){ $("tabs").innerHTML=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(t[0]===tab?"on":"")+'">'+t[1]+'</button>';}).join("");
     Array.prototype.forEach.call($("tabs").children,function(b){ b.onclick=function(){ tab=b.dataset.t; draw(); }; }); }
   function sales(){ return (D.vouchers||[]).filter(function(v){return /sales/i.test(v.t)&&!/order|return|credit/i.test(v.t);}); }
@@ -291,6 +291,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     if(tab==="audit") return drawAudit();
     if(tab==="health") return drawHealth();
     if(tab==="exports") return drawExports();
+    if(tab==="prof") return drawProf();
     if(tab==="plan") return drawPlan();
     if(tab==="comp"||tab==="lic"||tab==="assets"||tab==="recon") return drawCompliance();
     if(!D) { $("view").innerHTML='<div class="card">Loading…</div>'; return; }
@@ -484,6 +485,51 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
       if(!confirm("Send this payment list to Maadhu?")) return; $("plMsg").textContent="Sending…";
       api("planSend",{lines:lines,statutory:st,note:$("plNote").value}).then(function(r){ $("plMsg").textContent=r.ok?"✓ Sent ("+inr(r.total)+")":"⚠ "+(r.error||""); if(r.ok) setTimeout(reload,1500); });
     };
+  }
+
+  /* ===================== Professional & compliance bills ===================== */
+  var PR=null;
+  function drawProf(){
+    if(PR===null){ $("view").innerHTML='<div class="card">Loading bills…</div>'; return api("prof").then(function(r){ PR=r&&r.ok?r:{error:(r&&r.error)||"error"}; drawProf(); }); }
+    if(PR.error){ $("view").innerHTML='<div class="card">⚠ '+esc(PR.error)+'</div>'; return; }
+    var S=PR.summary, L=PR.list||[];
+    var h='<div class="card"><h2>🧾 Professional & compliance bills — FY '+esc(S.fy.slice(0,4))+'-'+String(+S.fy.slice(0,4)+1).slice(2)+'</h2><div class="hint">Upload the auditor’s, CA’s or consultant’s invoice (PDF or photo). The AI reads the amounts and GST and suggests the TDS to deduct (usually 10% under s.194J for professional fees) — check the figures, then mark paid. Reminders before the due date go to Maadhu and you; on the 3rd you’re reminded of the TDS to deposit by the 7th. Confirm TDS with the CA.</div>'+
+      '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px">'+[["Bills this year",S.count],["Cost (before GST)",inr(S.costExGst)],["GST credit",inr(S.gstCredit)],["TDS deducted",inr(S.tdsThisYear)],["Unpaid",S.unpaidCount+" · "+inr(S.unpaidNet)],["Overdue",S.overdue]].map(function(k){ return '<div><div class="hint">'+k[0]+'</div><div style="font-size:17px;font-weight:800">'+k[1]+'</div></div>'; }).join("")+'</div>'+
+      (S.byCategory.length?'<div class="hint" style="margin-top:8px">'+S.byCategory.map(function(c){ return esc(c.k)+' '+inr(c.v); }).join(" · ")+'</div>':'')+
+      '<div style="margin-top:10px"><button class="btn" id="pbUp">📤 Upload bill(s)</button><input type="file" id="pbFile" accept=".pdf,image/*" multiple hidden> <span id="pbMsg" class="hint"></span></div></div>';
+    var M=PR.fromMail||[];
+    if(M.length) h+='<div class="card"><h2>📧 Bills seen in your email</h2>'+M.map(function(m){ return '<div style="margin:6px 0"><b>'+esc(m.party||m.from)+'</b> — '+esc(m.summary)+'<div>'+(m.files||[]).map(function(f,i){ return '<button class="btn" data-pm="'+esc(m.id)+'|'+i+'" style="padding:4px 8px;font-size:12px;margin:3px 4px 0 0">⬇ Import '+esc(f.name)+'</button>'; }).join("")+'</div></div>'; }).join("")+'</div>';
+    h+='<div class="card"><h2>Bills</h2>'+(L.length?'<div class="scroll"><table><tr><th>Vendor</th><th>Invoice</th><th class="n">Fee</th><th class="n">GST</th><th class="n">TDS</th><th class="n">Pay vendor</th><th>Status</th><th></th></tr>'+L.map(function(x){
+        var st=x.status==="paid"?'<span class="tag g">paid '+fd(x.paidOn)+'</span>':(x.due?fd(x.due)+' '+leftTag(daysTo(x.due)):'—');
+        return '<tr'+(x.needsReview?' style="background:#fff8e6"':'')+'><td><b>'+esc(x.vendor||"?")+'</b><div class="hint">'+esc(x.category||"")+(x.desc?' · '+esc(x.desc):'')+'</div>'+(x.needsReview?'<div class="hint" style="color:#b54708">'+(x.readError?esc(x.readError):'check the figures read by AI')+'</div>':'')+'</td><td>'+esc(x.invNo||"")+'<div class="hint">'+fd(x.invDate)+'</div></td>'+
+          '<td class="n">'+inr(x.taxable)+'</td><td class="n">'+inr((x.cgst||0)+(x.sgst||0)+(x.igst||0))+'</td><td class="n">'+(x.tds?inr(x.tds)+'<div class="hint">'+esc(x.tdsSection)+' '+x.tdsRate+'%</div>':'—')+'</td><td class="n"><b>'+inr(x.netPayable)+'</b></td><td>'+st+'</td>'+
+          '<td>'+(x.file?'<a href="'+esc(x.file)+'" target="_blank" rel="noopener">📄</a> ':'')+'<button class="btn" data-pe="'+esc(x.id)+'" style="padding:4px 8px;font-size:12px">Edit</button> '+(x.status==="paid"?'<button class="btn" data-pu="'+esc(x.id)+'" style="padding:4px 8px;font-size:12px">↺</button>':'<button class="btn" data-pp="'+esc(x.id)+'" style="padding:4px 8px;font-size:12px">✓ Paid</button>')+'</td></tr>'; }).join("")+'</table></div>':'<div class="hint">No bills yet — upload one above.</div>')+'</div><div id="pbForm"></div>';
+    $("view").innerHTML=h;
+    var reload=function(){ PR=null; drawProf(); };
+    $("pbUp").onclick=function(){ $("pbFile").click(); };
+    $("pbFile").onchange=function(){ var files=Array.prototype.slice.call($("pbFile").files), chain=Promise.resolve(), n=0, errs2=[];
+      files.forEach(function(f){ chain=chain.then(function(){ $("pbMsg").textContent="Reading "+f.name+"… (about 15 s)"; return fileObj({files:[f]}).then(function(fo){ return api("profUpload",{file:fo}); }).then(function(r){ if(r&&r.ok) n++; else errs2.push(f.name+": "+((r&&r.error)||"failed")); }).catch(function(e){ errs2.push(f.name+": "+e.message); }); }); });
+      chain.then(function(){ $("pbMsg").textContent=""; if(errs2.length) alert(errs2.join("\n")); reload(); }); };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-pm]"),function(b){ b.onclick=function(){ var parts=b.dataset.pm.split("|"), m=M.find(function(x){ return x.id===parts[0]; }), f=m.files[+parts[1]];
+      b.disabled=true; b.textContent="Reading…"; api("profFromEmail",{msgId:m.id,attId:f.id,name:f.name,type:f.type}).then(function(r){ if(!r||!r.ok) alert((r&&r.error)||"failed"); reload(); }); }; });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-pp]"),function(b){ b.onclick=function(){ var ref=prompt("Paid — payment reference (UTR / cheque no.), optional:",""); if(ref===null) return; api("profPaid",{id:b.dataset.pp,ref:ref}).then(reload); }; });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-pu]"),function(b){ b.onclick=function(){ api("profPaid",{id:b.dataset.pu,undo:true}).then(reload); }; });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-pe]"),function(b){ b.onclick=function(){ profForm(L.find(function(x){ return x.id===b.dataset.pe; })); }; });
+  }
+  function profForm(x){
+    var f=function(id,label,type){ return '<label class="hint">'+label+'<input id="pf_'+id+'"'+(type?' type="'+type+'"':'')+' value="'+esc(x[id]==null?"":x[id])+'" style="width:100%;padding:8px"></label>'; };
+    $("pbForm").innerHTML='<div class="card"><h2>Check / edit bill</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">'+
+      f("vendor","Vendor")+f("gstin","Vendor GSTIN")+f("invNo","Invoice no.")+f("invDate","Invoice date","date")+f("desc","Service")+
+      '<label class="hint">Category<select id="pf_category" style="width:100%;padding:8px">'+(PR.cats||[]).map(function(c){ return '<option'+(x.category===c?" selected":"")+'>'+esc(c)+'</option>'; }).join("")+'</select></label>'+
+      f("taxable","Fee before GST (₹)","number")+f("cgst","CGST","number")+f("sgst","SGST","number")+f("igst","IGST","number")+f("total","Invoice total","number")+
+      '<label class="hint">TDS section<select id="pf_tdsSection" style="width:100%;padding:8px">'+["194J","194C","194H","194I","none"].map(function(c){ return '<option'+(x.tdsSection===c?" selected":"")+'>'+c+'</option>'; }).join("")+'</select></label>'+
+      f("tdsRate","TDS rate %","number")+f("due","Pay by","date")+f("notes","Notes")+'</div>'+(x.tdsNote?'<div class="hint" style="margin-top:6px">AI note on TDS: '+esc(x.tdsNote)+'</div>':'')+
+      '<div style="margin-top:10px"><button class="btn" id="pf_save">Save</button> <button class="btn" id="pf_cancel">Cancel</button>'+(OWNER?' <button class="btn" id="pf_del">Delete</button>':'')+'</div></div>';
+    if($("pbForm").scrollIntoView) $("pbForm").scrollIntoView();
+    var reload=function(){ PR=null; drawProf(); };
+    $("pf_cancel").onclick=function(){ $("pbForm").innerHTML=""; };
+    $("pf_save").onclick=function(){ var it={id:x.id}; ["vendor","gstin","invNo","invDate","desc","category","taxable","cgst","sgst","igst","total","tdsSection","tdsRate","due","notes"].forEach(function(k){ it[k]=$("pf_"+k).value; }); api("profSave",{item:it}).then(reload); };
+    if($("pf_del")) $("pf_del").onclick=function(){ if(confirm("Delete this bill?")) api("profDel",{id:x.id}).then(reload); };
   }
 
   /* ===================== Export register (LUT) ===================== */

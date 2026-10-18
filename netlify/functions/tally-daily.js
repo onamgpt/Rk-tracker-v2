@@ -128,6 +128,20 @@ async function compliance() {
       await call({ action: "savePortfolio", user: "main", key: "export_register", data: reg });
     }
   } catch (e) {}
+  // 2c) professional bills: due soon / overdue, and last month's TDS to deposit
+  try {
+    const PB = require("./tally-profbills.js");
+    const pr = (await kvGet("prof_bills")) || { list: [] }; pr.sent = pr.sent || {};
+    const rem = PB.reminders(pr.list, today).filter((r) => !pr.sent[r.key]);
+    if (rem.length) {
+      const lines = rem.map((r) => "• " + r.text);
+      await T.mail(s.accountantEmail, "Professional bills to pay", "Hello Maadhu,\n\n" + lines.join("\n") + "\n\nMark them paid at https://rk-tracker-v2.netlify.app/tally/?user=maadhu (🧾 Prof. bills)\n\nThank you.");
+      await T.tg("🧾 <b>Professional bills</b>\n" + lines.join("\n"));
+      rem.forEach((r) => { pr.sent[r.key] = today; });
+      const keepP = {}; Object.keys(pr.sent).forEach((k) => { if (C.days(pr.sent[k], today) < 120) keepP[k] = pr.sent[k]; }); pr.sent = keepP;
+      await call({ action: "savePortfolio", user: "main", key: "prof_bills", data: pr });
+    }
+  } catch (e) {}
   // 3) MSME suppliers unpaid beyond 45 days (section 43B(h)) and 4) bank reconciliation → audit findings
   const flags = [];
   const pay = (await kvGet("tally_pay")) || { rows: [] };

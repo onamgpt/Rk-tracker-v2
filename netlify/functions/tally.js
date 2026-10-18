@@ -156,7 +156,7 @@ exports.handler = async (event) => {
       return OK({ ok: true, started: true });
     }
     // Maadhu (uploader) may also: add bank statements, see what's due, and mark it done
-    if (!owner && !["comp", "compDone", "bankIngest", "exp", "expSave", "expRealise", "expUnrealise", "expAddFromTally"].includes(b.action)) return OK({ error: "owner only" });
+    if (!owner && !["comp", "compDone", "bankIngest", "exp", "expSave", "expRealise", "expUnrealise", "expAddFromTally", "prof", "profUpload", "profSave", "profPaid"].includes(b.action)) return OK({ error: "owner only" });
     if (b.action === "get") {
       const [meta, tb, recv, pay, stock, vch, lr] = await Promise.all(["tally_meta", "tally_tb", "tally_recv", "tally_pay", "tally_stock", "tally_vouchers", "logistics_v2"].map(kvGet));
       const gm = await kvGet("gmail_oauth"), mlog = (await kvGet("tally_mail_log")) || [], bankAll = await kvGet("tally_bank");
@@ -205,6 +205,50 @@ exports.handler = async (event) => {
       h2.unshift({ at: new Date().toISOString(), total, lines, statutory: st2 });
       await kvSet("payplan_hist", h2.slice(0, 52));
       return OK({ ok: true, total });
+    }
+    // ---------------- Professional & compliance bills ----------------
+    if (b.action && b.action.indexOf("prof") === 0) {
+      const PB = require("./tally-profbills.js");
+      const td = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+      const reg = (await kvGet("prof_bills")) || { list: [] }; reg.list = reg.list || [];
+      const save = () => kvSet("prof_bills", reg);
+      const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      const store = async (buf, name, type) => { const r = await db.storageUpload("tally", { name, type: type || "application/octet-stream", data: buf.toString("base64") }); return (r && r.url) || ""; };
+      const addFrom = async (buf, name, type, source, extra) => {
+        if (buf.length > 4.3 * 1024 * 1024) return { error: "File too large (max 4 MB)" };
+        const [url, x] = await Promise.all([store(buf, name, type), PB.extract(buf, type, name)]);
+        const it = Object.assign({ id: newId(), file: url, fileName: name, status: "unpaid", needsReview: true, source, added: new Date().toISOString(), by: user }, x.error ? { readError: x.error } : x, extra || {});
+        if (it.invNo && it.vendor && reg.list.some((y) => y.invNo === it.invNo && (y.vendor || "").toLowerCase() === it.vendor.toLowerCase())) return { error: "This bill (" + it.vendor + " " + it.invNo + ") is already in the list" };
+        reg.list.unshift(it); await save(); return { ok: true, item: it };
+      };
+      if (b.action === "prof") {
+        const mi = await kvGet("mail_intel"), have = new Set(reg.list.map((x) => x.mailId).filter(Boolean));
+        const fromMail = owner ? ((mi && mi.items) || []).filter((m) => m.cat === "professional_bill" && (m.files || []).length && !have.has(m.id)).slice(0, 15) : [];
+        return OK({ ok: true, today: td, cats: PB.CATS, summary: PB.summary(reg.list, td), list: reg.list, fromMail });
+      }
+      if (b.action === "profUpload") {
+        const f = b.file || {}; if (!f.data) return OK({ error: "No file" });
+        return OK(await addFrom(Buffer.from(String(f.data).replace(/^data:[^,]+,/, ""), "base64"), String(f.name || "invoice"), f.type || "", "upload"));
+      }
+      if (b.action === "profSave") {
+        const it = b.item || {}, x = reg.list.find((y) => y.id === it.id); if (!x) return OK({ error: "not found" });
+        ["vendor", "gstin", "invNo", "invDate", "desc", "category", "due", "tdsSection", "notes"].forEach((k) => { if (it[k] !== undefined) x[k] = String(it[k]).slice(0, 160); });
+        ["taxable", "cgst", "sgst", "igst", "total", "tdsRate"].forEach((k) => { if (it[k] !== undefined) x[k] = Number(it[k]) || 0; });
+        PB.compute(x); x.needsReview = false; await save(); return OK({ ok: true });
+      }
+      if (b.action === "profPaid") {
+        const x = reg.list.find((y) => y.id === b.id); if (!x) return OK({ error: "not found" });
+        if (b.undo) { x.status = "unpaid"; delete x.paidOn; delete x.payRef; } else { x.status = "paid"; x.paidOn = String(b.paidOn || td).slice(0, 10); x.payRef = String(b.ref || "").slice(0, 80); }
+        await save(); return OK({ ok: true });
+      }
+      if (!owner) return OK({ error: "owner only" });
+      if (b.action === "profFromEmail") {
+        const G = require("./gmail.js"), tok = await G.accessToken();
+        const buf = await G.attachment(tok, String(b.msgId), String(b.attId));
+        return OK(await addFrom(buf, String(b.name || "invoice.pdf"), String(b.type || ""), "email", { mailId: String(b.msgId) }));
+      }
+      if (b.action === "profDel") { reg.list = reg.list.filter((x) => x.id !== b.id); await save(); return OK({ ok: true }); }
+      return OK({ error: "unknown action" });
     }
     // ---------------- Export register (LUT) ----------------
     if (b.action && b.action.indexOf("exp") === 0) {
