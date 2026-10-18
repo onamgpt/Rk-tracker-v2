@@ -79,6 +79,7 @@ exports.handler = async (event) => {
   const h = H.compute(d, today, d.settings);
   const facts = factsFor(h, deep);
   try { facts.inbox = MI.factsFor(await kvGet("mail_intel")); } catch (e) {}
+  try { const gs = await kvGet("gst_refund"); if (gs && Object.keys(gs.periods || {}).length) facts.gstRefund = require("./tally-gstrefund.js").summary(gs, today); } catch (e) {}
   try { const pr = await kvGet("prof_bills"); if (pr && (pr.list || []).length) facts.professionalBills = require("./tally-profbills.js").summary(pr.list, today); } catch (e) {}
   try {
     const P = require("./tally-payplan.js");

@@ -156,7 +156,7 @@ exports.handler = async (event) => {
       return OK({ ok: true, started: true });
     }
     // Maadhu (uploader) may also: add bank statements, see what's due, and mark it done
-    if (!owner && !["comp", "compDone", "bankIngest", "exp", "expSave", "expRealise", "expUnrealise", "expAddFromTally", "prof", "profUpload", "profSave", "profPaid"].includes(b.action)) return OK({ error: "owner only" });
+    if (!owner && !["comp", "compDone", "bankIngest", "exp", "expSave", "expRealise", "expUnrealise", "expAddFromTally", "prof", "profUpload", "profSave", "profPaid", "gst", "gstSave", "gstPrefill"].includes(b.action)) return OK({ error: "owner only" });
     if (b.action === "get") {
       const [meta, tb, recv, pay, stock, vch, lr] = await Promise.all(["tally_meta", "tally_tb", "tally_recv", "tally_pay", "tally_stock", "tally_vouchers", "logistics_v2"].map(kvGet));
       const gm = await kvGet("gmail_oauth"), mlog = (await kvGet("tally_mail_log")) || [], bankAll = await kvGet("tally_bank");
@@ -205,6 +205,38 @@ exports.handler = async (event) => {
       h2.unshift({ at: new Date().toISOString(), total, lines, statutory: st2 });
       await kvSet("payplan_hist", h2.slice(0, 52));
       return OK({ ok: true, total });
+    }
+    // ---------------- GST refund calculator ----------------
+    if (b.action && b.action.indexOf("gst") === 0 && ["gst", "gstSave", "gstPrefill", "gstDel"].includes(b.action)) {
+      const GR = require("./tally-gstrefund.js");
+      const td = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+      const store = (await kvGet("gst_refund")) || { periods: {} }; store.periods = store.periods || {};
+      const okPeriod = (k) => /^\d{4}-\d{2}$/.test(String(k || ""));
+      if (b.action === "gst") {
+        const months = []; const d0 = new Date(td + "T00:00:00Z"); d0.setUTCDate(1);
+        for (let i = 1; i <= 24; i++) { const x = new Date(d0); x.setUTCMonth(x.getUTCMonth() - i); months.push(x.toISOString().slice(0, 7)); }
+        const rows = months.map((k) => { const p = store.periods[k]; return p ? { period: k, data: p, c: GR.compute(p), dl: GR.deadlines(k, p) } : { period: k, data: null, dl: GR.deadlines(k, null) }; });
+        return OK({ ok: true, today: td, rows, summary: GR.summary(store, td) });
+      }
+      if (!okPeriod(b.period)) return OK({ error: "bad period" });
+      if (b.action === "gstPrefill") {
+        const [vch, reg] = await Promise.all([kvGet("tally_vouchers"), kvGet("export_register")]);
+        return OK({ ok: true, prefill: GR.prefill((vch && vch.list) || [], reg, b.period) });
+      }
+      if (b.action === "gstSave") {
+        const cur = store.periods[b.period] || {}, n = b.data || {};
+        ["invertedTurnover", "taxOnInverted", "zeroRatedTurnover", "adjTurnover", "itcInputs", "itcServices", "itcCapital", "ledgerBalance", "sanctioned"].forEach((k) => { if (n[k] !== undefined) cur[k] = n[k] === "" ? "" : Number(n[k]) || 0; });
+        ["status", "arn", "filedOn", "sanctionedOn", "notes", "firstExportDate", "source"].forEach((k) => { if (n[k] !== undefined) cur[k] = String(n[k]).slice(0, 200); });
+        if (b.file && b.file.data) {
+          const buf = Buffer.from(String(b.file.data).replace(/^data:[^,]+,/, ""), "base64");
+          if (buf.length <= 4.3 * 1024 * 1024) { const r = await db.storageUpload("tally", { name: String(b.file.name || "gst-refund"), type: b.file.type || "", data: buf.toString("base64") }); if (r && r.url) (cur.files = cur.files || []).push({ name: String(b.file.name || "document"), url: r.url, at: new Date().toISOString() }); }
+        }
+        cur.updated = new Date().toISOString(); cur.by = user;
+        store.periods[b.period] = cur; await kvSet("gst_refund", store);
+        return OK({ ok: true, c: GR.compute(cur), dl: GR.deadlines(b.period, cur) });
+      }
+      if (!owner) return OK({ error: "owner only" });
+      if (b.action === "gstDel") { delete store.periods[b.period]; await kvSet("gst_refund", store); return OK({ ok: true }); }
     }
     // ---------------- Professional & compliance bills ----------------
     if (b.action && b.action.indexOf("prof") === 0) {

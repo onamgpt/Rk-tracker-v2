@@ -142,6 +142,18 @@ async function compliance() {
       await call({ action: "savePortfolio", user: "main", key: "prof_bills", data: pr });
     }
   } catch (e) {}
+  // 2d) GST refund: monthly nudge and time-limit warnings
+  try {
+    const GR = require("./tally-gstrefund.js");
+    const gs = (await kvGet("gst_refund")) || { periods: {} }; gs.sent = gs.sent || {};
+    const rem = GR.reminders(gs, today).filter((r) => !gs.sent[r.key]);
+    if (rem.length) {
+      await T.tg("💰 <b>GST refund</b>\n" + rem.map((r) => "• " + r.text).join("\n"));
+      await T.mail(s.ownerEmail, "GST refund", rem.map((r) => "• " + r.text).join("\n") + "\n\nhttps://rk-tracker-v2.netlify.app/tally/ (💰 GST refund)");
+      rem.forEach((r) => { gs.sent[r.key] = today; });
+      await call({ action: "savePortfolio", user: "main", key: "gst_refund", data: gs });
+    }
+  } catch (e) {}
   // 3) MSME suppliers unpaid beyond 45 days (section 43B(h)) and 4) bank reconciliation → audit findings
   const flags = [];
   const pay = (await kvGet("tally_pay")) || { rows: [] };

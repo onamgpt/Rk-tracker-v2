@@ -278,7 +278,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
   }
 
   /* ===================== Views ===================== */
-  var TABS=OWNER?[["home","🏠 Summary"],["health","🩺 Health"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["plan","💸 Pay plan"],["comp","📅 Compliance"],["exports","🌍 Exports"],["prof","🧾 Prof. bills"],["lic","📜 Licences"],["assets","🏭 Assets"],["recon","🏦 Bank recon"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"],["comp","📅 Compliance"],["exports","🌍 Exports"],["prof","🧾 Prof. bills"]];
+  var TABS=OWNER?[["home","🏠 Summary"],["health","🩺 Health"],["ask","🤖 Ask AI"],["recv","💰 Receivables"],["pay","🧾 Payables"],["sales","📈 Sales"],["stock","📦 Stock"],["check","🔎 Cross-check"],["audit","🧾 Audit"],["plan","💸 Pay plan"],["comp","📅 Compliance"],["exports","🌍 Exports"],["prof","🧾 Prof. bills"],["gst","💰 GST refund"],["lic","📜 Licences"],["assets","🏭 Assets"],["recon","🏦 Bank recon"],["vault","🗄 Vault"],["upload","⬆ Upload"]]:[["upload","⬆ Upload"],["comp","📅 Compliance"],["exports","🌍 Exports"],["prof","🧾 Prof. bills"],["gst","💰 GST refund"]];
   function drawTabs(){ $("tabs").innerHTML=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(t[0]===tab?"on":"")+'">'+t[1]+'</button>';}).join("");
     Array.prototype.forEach.call($("tabs").children,function(b){ b.onclick=function(){ tab=b.dataset.t; draw(); }; }); }
   function sales(){ return (D.vouchers||[]).filter(function(v){return /sales/i.test(v.t)&&!/order|return|credit/i.test(v.t);}); }
@@ -292,6 +292,7 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
     if(tab==="health") return drawHealth();
     if(tab==="exports") return drawExports();
     if(tab==="prof") return drawProf();
+    if(tab==="gst") return drawGst();
     if(tab==="plan") return drawPlan();
     if(tab==="comp"||tab==="lic"||tab==="assets"||tab==="recon") return drawCompliance();
     if(!D) { $("view").innerHTML='<div class="card">Loading…</div>'; return; }
@@ -485,6 +486,57 @@ input,textarea,select{font:inherit;padding:9px;border:1px solid #c9d2dc;border-r
       if(!confirm("Send this payment list to Maadhu?")) return; $("plMsg").textContent="Sending…";
       api("planSend",{lines:lines,statutory:st,note:$("plNote").value}).then(function(r){ $("plMsg").textContent=r.ok?"✓ Sent ("+inr(r.total)+")":"⚠ "+(r.error||""); if(r.ok) setTimeout(reload,1500); });
     };
+  }
+
+  /* ===================== GST refund calculator ===================== */
+  var GS=null;
+  // same formulas as the server (tally-gstrefund.js)
+  function gstCalc(p){ var n=function(k){ return Number(p[k])||0; }, att=n("adjTurnover"), ii=n("itcInputs"), is=n("itcServices");
+    var p1=att?n("invertedTurnover")*ii/att:0, p2=(ii+is)?n("taxOnInverted")*(ii/(ii+is)):0, inv=Math.max(0,p1-p2), ex=att?Math.max(0,n("zeroRatedTurnover")*(ii+is)/att):0, tot=inv+ex;
+    var led=(p.ledgerBalance===""||p.ledgerBalance==null)?null:n("ledgerBalance");
+    return {p1:p1,p2:p2,inv:inv,ex:ex,tot:tot,led:led,claim:led==null?tot:Math.min(tot,led)}; }
+  function drawGst(){
+    if(GS===null){ $("view").innerHTML='<div class="card">Loading…</div>'; return api("gst").then(function(r){ GS=r&&r.ok?r:{error:(r&&r.error)||"error"}; drawGst(); }); }
+    if(GS.error){ $("view").innerHTML='<div class="card">⚠ '+esc(GS.error)+'</div>'; return; }
+    var S=GS.summary, stCol={"not filed":"#98a2b3",filed:"#2563eb",sanctioned:"#1f9d55",rejected:"#c0392b"};
+    var h='<div class="card"><h2>💰 GST refund</h2><div class="hint">Agarbathi is taxed at <b>5%</b>, but perfumery compounds, packaging and other inputs carry <b>12–18%</b> — so input credit builds up and can be refunded (<b>inverted duty, Rule 89(5)</b>). Exports under <b>LUT</b> also allow a refund of input credit (<b>Rule 89(4)</b>). Enter each month’s figures from the GST returns (or fill an estimate from Tally), and the refund and its 2-year time limit are worked out. The CA files the claim (RFD-01) — please have him confirm.</div>'+
+      '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px"><div><div class="hint">Refund not yet claimed</div><div style="font-size:18px;font-weight:800">'+inr(S.potential)+'</div><div class="hint">'+S.open+' month(s)</div></div><div><div class="hint">Filed, awaiting sanction</div><div style="font-size:18px;font-weight:800">'+S.filedPending+'</div></div>'+
+      (S.nearest?'<div><div class="hint">Nearest time limit</div><div style="font-size:15px;font-weight:800">'+esc(S.nearest.period)+' · '+fd(S.nearest.dl.earliest)+' '+leftTag(S.nearest.left)+'</div></div>':'')+'</div></div>';
+    h+='<div class="card"><h2>Month by month</h2><div class="scroll"><table><tr><th>Month</th><th class="n">Inverted duty</th><th class="n">Exports (LUT)</th><th class="n">Claimable</th><th>Time limit</th><th>Status</th><th></th></tr>'+GS.rows.map(function(r){
+      var c=r.c, st=(r.data&&r.data.status)||(r.data?"not filed":"");
+      return '<tr><td><b>'+esc(r.period)+'</b></td><td class="n">'+(c?inr(c.inverted.refund):'<span class="hint">—</span>')+'</td><td class="n">'+(c?inr(c.exports.refund):'')+'</td><td class="n"><b>'+(c?inr(c.claimable):'')+'</b>'+(c&&c.cappedByLedger?'<div class="hint">capped by credit ledger</div>':'')+'</td>'+
+        '<td>'+fd(r.dl.earliest)+(r.data&&st==="not filed"?' '+leftTag(daysTo(r.dl.earliest)):'')+'</td><td>'+(st?'<span class="tag" style="background:'+stCol[st]+'">'+esc(st)+'</span>':'')+'</td><td><button class="btn" data-gm="'+r.period+'" style="padding:4px 8px;font-size:12px">'+(r.data?"Open":"Enter")+'</button></td></tr>'; }).join("")+'</table></div></div><div id="gsForm"></div>';
+    $("view").innerHTML=h;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-gm]"),function(b){ b.onclick=function(){ var r=GS.rows.find(function(x){ return x.period===b.dataset.gm; }); gstForm(r.period, Object.assign({}, r.data||{})); }; });
+  }
+  function gstForm(period, d){
+    var F=[["invertedTurnover","Domestic sales at 5% — value before GST","Turnover of inverted rated supply"],["taxOnInverted","GST charged on those sales","Tax payable on inverted supply"],["zeroRatedTurnover","Export sales under LUT","Zero-rated turnover"],
+      ["adjTurnover","Adjusted total turnover","All taxable + export sales of the month (excl. exempt)"],["itcInputs","ITC on inputs (goods)","Raw bathi, compounds, packaging… from GSTR-3B / 2B"],["itcServices","ITC on input services","Freight, professional fees, rent…"],
+      ["itcCapital","ITC on capital goods","Not refundable — for reference"],["ledgerBalance","Electronic credit ledger balance at month end","The refund can't exceed this"]];
+    var inp=function(k,lab,hint){ return '<label class="hint">'+lab+'<input id="gf_'+k+'" type="number" value="'+esc(d[k]==null?"":d[k])+'" style="width:100%;padding:8px"><span style="font-size:11px">'+hint+'</span></label>'; };
+    $("gsForm").innerHTML='<div class="card"><h2>GST refund — '+esc(period)+'</h2><button class="btn" id="gf_pre">↙ Fill estimate from Tally</button> <span id="gf_pmsg" class="hint"></span>'+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-top:10px">'+F.map(function(f){ return inp(f[0],f[1],f[2]); }).join("")+'<label class="hint">First export date in the month<input id="gf_firstExportDate" type="date" value="'+esc(d.firstExportDate||"")+'" style="width:100%;padding:8px"></label></div>'+
+      '<div id="gf_calc" style="margin-top:12px;padding:10px;background:#f4f7f5;border-radius:9px"></div>'+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-top:10px"><label class="hint">Status<select id="gf_status" style="width:100%;padding:8px">'+["not filed","filed","sanctioned","rejected"].map(function(x){ return '<option'+((d.status||"not filed")===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
+      '<label class="hint">RFD-01 ARN<input id="gf_arn" value="'+esc(d.arn||"")+'" style="width:100%;padding:8px"></label><label class="hint">Filed on<input id="gf_filedOn" type="date" value="'+esc(d.filedOn||"")+'" style="width:100%;padding:8px"></label>'+
+      '<label class="hint">Sanctioned ₹<input id="gf_sanctioned" type="number" value="'+esc(d.sanctioned||"")+'" style="width:100%;padding:8px"></label><label class="hint">Sanctioned on<input id="gf_sanctionedOn" type="date" value="'+esc(d.sanctionedOn||"")+'" style="width:100%;padding:8px"></label>'+
+      '<label class="hint">Notes<input id="gf_notes" value="'+esc(d.notes||"")+'" style="width:100%;padding:8px"></label><label class="hint">Document (ARN, order…)<input id="gf_file" type="file"></label></div>'+
+      ((d.files||[]).length?'<div class="hint" style="margin-top:6px">'+d.files.map(function(f){ return '<a href="'+esc(f.url)+'" target="_blank" rel="noopener">📄 '+esc(f.name)+'</a>'; }).join(" · ")+'</div>':'')+
+      '<div style="margin-top:10px"><button class="btn" id="gf_save">Save</button> <button class="btn" id="gf_close">Close</button> <span id="gf_msg" class="hint"></span></div></div>';
+    if($("gsForm").scrollIntoView) $("gsForm").scrollIntoView();
+    var keys=F.map(function(f){ return f[0]; });
+    var read=function(){ var o={}; keys.forEach(function(k){ o[k]=$("gf_"+k).value; }); return o; };
+    var show=function(){ var c=gstCalc(read()), v=read(), N=function(k){ return inr(Number(v[k])||0); };
+      $("gf_calc").innerHTML='<b>Inverted duty (Rule 89(5))</b><br>('+N("invertedTurnover")+' × '+N("itcInputs")+' ÷ '+N("adjTurnover")+') − ('+N("taxOnInverted")+' × '+N("itcInputs")+' ÷ ('+N("itcInputs")+' + '+N("itcServices")+')) = '+inr(c.p1)+' − '+inr(c.p2)+' = <b>'+inr(c.inv)+'</b>'+
+        '<br><b>Exports under LUT (Rule 89(4))</b><br>'+N("zeroRatedTurnover")+' × ('+N("itcInputs")+' + '+N("itcServices")+') ÷ '+N("adjTurnover")+' = <b>'+inr(c.ex)+'</b>'+
+        '<br><b>Claimable: '+inr(c.claim)+'</b>'+(c.led!=null&&c.tot>c.led?' (limited to the credit ledger balance '+inr(c.led)+')':'')+'<div class="hint" style="margin-top:4px">Indicative — the CA files RFD-01 using the returns’ figures.</div>'; };
+    keys.forEach(function(k){ $("gf_"+k).oninput=show; }); show();
+    $("gf_pre").onclick=function(){ $("gf_pmsg").textContent="Reading Tally…"; api("gstPrefill",{period:period}).then(function(r){ var p=r&&r.prefill; if(!p){ $("gf_pmsg").textContent="⚠ "+((r&&r.error)||"failed"); return; }
+      ["invertedTurnover","taxOnInverted","zeroRatedTurnover","adjTurnover","itcInputs","itcServices"].forEach(function(k){ $("gf_"+k).value=p[k]; }); if(p.firstExportDate) $("gf_firstExportDate").value=p.firstExportDate;
+      $("gf_pmsg").textContent="Estimate filled — "+(p.basis.join("; ")||"from Tally")+". Replace with the GSTR-3B / 2B figures when you have them."; show(); }); };
+    $("gf_close").onclick=function(){ $("gsForm").innerHTML=""; };
+    $("gf_save").onclick=function(){ var data=read(); ["status","arn","filedOn","sanctioned","sanctionedOn","notes","firstExportDate"].forEach(function(k){ data[k]=$("gf_"+k).value; });
+      $("gf_msg").textContent="Saving…"; fileObj($("gf_file")).then(function(f){ return api("gstSave",{period:period,data:data,file:f}); }).then(function(r){ if(!r.ok) throw new Error(r.error||"not saved"); GS=null; drawGst(); }).catch(function(e){ $("gf_msg").textContent="⚠ "+e.message; }); };
   }
 
   /* ===================== Professional & compliance bills ===================== */
