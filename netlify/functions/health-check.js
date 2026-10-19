@@ -53,6 +53,9 @@ async function checkResend() {
   if (!k) return { name: "Resend (email)", ok: false, detail: "RESEND_API_KEY not set" };
   // Listing domains validates the key without sending anything.
   const r = await get("api.resend.com", "/domains", { Authorization: "Bearer " + k });
+  // A key created with "Sending access" can send mail but is not allowed to list domains — Resend answers 401 "restricted to only send emails".
+  // That is a working send-only key (what mail.js needs), not a rejected one. A revoked or wrong key answers "API key is invalid".
+  if ((r.status === 401 || r.status === 403) && /restricted/i.test(r.body || "")) return { name: "Resend (email)", ok: true, detail: "send-only key (can send; domain status can't be checked with this key)" };
   if (r.status === 401 || r.status === 403) return { name: "Resend (email)", ok: false, detail: "key rejected: " + short(r.body, 90) };
   if (r.status >= 300) return { name: "Resend (email)", ok: false, detail: "HTTP " + r.status + " " + short(r.body, 80) };
   // Confirm the sending domain is still verified, not just that the key works.
