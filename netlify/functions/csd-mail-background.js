@@ -114,7 +114,7 @@ exports.handler = async (event) => {
   // Monday morning: outstanding intelligence
   const dow = new Date(Date.now() + 5.5 * 3600e3).getUTCDay();
   if (R && dow === 1 && state.lastIntel !== C.todayIST() && !b.manual) {
-    await mail(s.ownerEmail, "CSD receivables — weekly: " + C.inr(R.total) + " outstanding, " + R.long.length + " over 120 days", wrap(intelHtml(R) +
+    await mail([s.ownerEmail, s.accountantEmail].filter(Boolean), "CSD receivables — weekly: " + C.inr(R.total) + " outstanding, " + R.long.length + " over 120 days", wrap(intelHtml(R) +
       (R.toEnter.length ? "<h3>Still not entered in Tally: " + R.toEnter.length + " receipts</h3>" : "") + "<p><a href='" + SITE + "/tally/?tab=csd'>Open Tally → CSD</a></p>"));
     if (R.toEnter.length) await mail(s.accountantEmail, "Reminder: " + R.toEnter.length + " CSD receipts still to enter in Tally", wrap("<p>Hello Maadhu,</p><p>These CSD receipts are still open in Tally:</p>" + toEnterHtml(R.toEnter) + "<p>Thank you.</p>"));
     state.lastIntel = C.todayIST();
