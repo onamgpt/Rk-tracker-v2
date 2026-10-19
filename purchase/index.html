@@ -82,14 +82,14 @@ function load(){
 
 function tabs(){
   var T=[["todo","To order"],["on","On order"],["stock","Stock"],["prod","Production"]];
-  if(D.owner) T.push(["bom","Production needs"],["set","Settings"]);
+  if(D.owner) T.push(["intel","Purchases"],["bom","Production needs"],["set","Settings"]);
   $("tabs").innerHTML=T.map(function(t){ return '<button class="tab'+(tab===t[0]?" on":"")+'" data-t="'+t[0]+'">'+t[1]+cnt(t[0])+'</button>'; }).join("");
   Array.prototype.forEach.call($("tabs").querySelectorAll(".tab"),function(b){ b.onclick=function(){ tab=b.getAttribute("data-t"); openItem=null; render(); scrollTo(0,0); }; });
 }
 function cnt(t){ if(t==="todo"){ var n=D.pos.filter(function(p){return p.status==="suggested";}).length; return n?" ("+n+")":""; }
   if(t==="on"){ var m=D.pos.filter(function(p){return p.status==="ordered";}).length; return m?" ("+m+")":""; } return ""; }
 function render(){ tabs(); var v=$("view");
-  if(tab==="todo") return todo(v); if(tab==="on") return onOrder(v); if(tab==="stock") return stock(v); if(tab==="prod") return prodTab(v); if(tab==="bom") return bom(v); if(tab==="set") return sets(v); }
+  if(tab==="todo") return todo(v); if(tab==="on") return onOrder(v); if(tab==="stock") return stock(v); if(tab==="prod") return prodTab(v); if(tab==="intel") return intelTab(v); if(tab==="bom") return bom(v); if(tab==="set") return sets(v); }
 function canAct(p){ return D.owner||p.owner===USER; }
 function rowOf(item){ return D.rows.find(function(r){return r.item===item;})||{}; }
 
@@ -186,6 +186,31 @@ function stock(v){
     $("itClose").onclick=function(){ openItem=null; stock(v); };
   }
 }
+function rs(n){ return "₹"+Math.round(Number(n)||0).toLocaleString("en-IN"); }
+function spark(h){ if(!h||h.length<2) return ""; var r=h.map(function(x){return x.rate;}), mn=Math.min.apply(null,r), mx=Math.max.apply(null,r), w=120, ht=28;
+  var pts=r.map(function(v,i){ return (i*(w/(r.length-1))).toFixed(1)+","+(mx===mn?ht/2:(ht-2-(v-mn)/(mx-mn)*(ht-4))).toFixed(1); }).join(" ");
+  return '<svg width="'+w+'" height="'+ht+'" viewBox="0 0 '+w+' '+ht+'" aria-hidden="true"><polyline points="'+pts+'" fill="none" stroke="#1d3557" stroke-width="1.6"/></svg>'; }
+var openIntel=null;
+function intelTab(v){
+  var I=D.intel||{}, h="";
+  if(!I.hasData){ v.innerHTML='<div class="note"><b>No purchase bills with item lines yet.</b> They come from the Day Book <b>XML</b> Maadhu sends (purchase vouchers with items). Payables below use the Receivables/Payables export.</div>'+payHtml(I); return; }
+  h+='<div class="card"><div class="muted">'+I.billCount+' purchase bills from Tally · '+esc(I.from)+' to '+esc(I.to)+'</div></div>';
+  if(I.jumps.length) h+='<div class="h2">⚠ Price up more than 10%</div><div class="card"><table>'+I.jumps.map(function(j){ return '<tr><td><b>'+esc(j.item)+'</b><div class="muted">'+esc(j.supplier)+' · '+esc(j.d)+(j.best&&j.best.supplier!==j.supplier?' · '+esc(j.best.supplier)+' last at ₹'+fmt(j.best.rate):'')+'</div></td><td style="text-align:right">₹'+fmt(j.rate)+'/'+esc(j.unit)+'<div class="badge red">+'+j.change+'%</div></td></tr>'; }).join("")+'</table></div>';
+  var M=I.months||[], mx=Math.max.apply(null,M.map(function(x){return x.amt;}).concat([1]));
+  if(M.length) h+='<div class="h2">Purchases by month</div><div class="card">'+M.map(function(x){ return '<div class="row" style="align-items:center;margin:3px 0"><span class="muted" style="width:62px">'+esc(x.m)+'</span><span style="flex:1;margin:0 8px;background:#eef1f6;border-radius:4px;height:14px"><span style="display:block;height:14px;border-radius:4px;background:#1d3557;width:'+(x.amt/mx*100).toFixed(1)+'%"></span></span><span style="width:96px;text-align:right">'+rs(x.amt)+'</span></div>'; }).join("")+'</div>';
+  h+='<div class="h2">Last 90 days</div><div class="card"><table><tr><th>By category</th><th style="text-align:right">Spend</th></tr>'+(I.byCat90||[]).map(function(x){return '<tr><td>'+esc(x.k)+'</td><td style="text-align:right">'+rs(x.amt)+'</td></tr>';}).join("")+'</table>'+
+     '<table style="margin-top:10px"><tr><th>Top suppliers</th><th style="text-align:right">Spend</th></tr>'+(I.bySup90||[]).map(function(x){return '<tr><td>'+esc(x.k)+'</td><td style="text-align:right">'+rs(x.amt)+'</td></tr>';}).join("")+'</table></div>';
+  h+='<div class="h2">Material prices</div><div class="card"><table>'+(I.items||[]).map(function(x,i){ var on=openIntel===x.item;
+      return '<tr data-pi="'+i+'" style="cursor:pointer"><td><b>'+esc(x.item)+'</b><div class="muted">'+esc(D.cats[x.cat]||"")+' · '+x.buys+' buys · last '+esc(x.lastDate)+'</div></td><td>'+spark(x.history)+'</td><td style="text-align:right">₹'+fmt(x.lastRate)+'/'+esc(x.unit)+
+        (x.change!=null?'<div class="badge'+(x.change>10?' red':(x.change<0?' ok':''))+'">'+(x.change>0?'+':'')+x.change+'%</div>':'')+'</td></tr>'+
+        (on?'<tr><td colspan="3"><div class="muted">90-day average ₹'+fmt(x.avg90)+(x.best?' · lowest recent: '+esc(x.best.supplier)+' ₹'+fmt(x.best.rate):'')+'</div><table>'+x.history.slice().reverse().map(function(r){ return '<tr><td class="muted">'+esc(r.d)+'</td><td>'+esc(r.supplier)+'</td><td style="text-align:right">'+fmt(r.q)+' @ ₹'+fmt(r.rate)+'</td></tr>'; }).join("")+'</table></td></tr>':''); }).join("")+'</table></div>';
+  h+=payHtml(I);
+  v.innerHTML=h;
+  each(v,"[data-pi]",function(r){ r.onclick=function(){ var x=I.items[+r.getAttribute("data-pi")]; openIntel=openIntel===x.item?null:x.item; intelTab(v); }; });
+}
+function payHtml(I){ var P=(I&&I.payables)||[]; if(!P.length) return "";
+  return '<div class="h2">Payables (what we owe suppliers)</div><div class="card"><div class="muted">Total '+rs(I.payTotal)+' · overdue '+rs(I.payOverdue)+' · due in 15 days '+rs(I.dueSoon)+'</div><table style="margin-top:6px">'+
+    P.map(function(p){ return '<tr><td>'+esc(p.party)+'<div class="muted">'+p.bills+' bill(s)'+(p.oldest?' · oldest '+p.oldest+' days overdue':'')+'</div></td><td style="text-align:right">'+rs(p.amt)+(p.overdue?'<div class="badge red">'+rs(p.overdue)+' overdue</div>':'')+'</td></tr>'; }).join("")+'</table></div>'; }
 function prodTab(v){
   var P=D.tallyProd||{}, B=P.boms||[], su=P.setup||[], h="";
   if(!P.itemLevel) h+='<div class="note"><b>Day Book has no item lines.</b> Maadhu must export the Day Book as <b>XML</b> (Day Book → Ctrl+E → Format: XML (Data Interchange)) — the Excel version cannot show production. He will be reminded in tomorrow\'s email.</div>';

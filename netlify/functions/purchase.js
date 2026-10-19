@@ -25,6 +25,7 @@ exports.handler = async (event) => {
         rows: P.rows.filter(mine), pos: D.pos.list.filter(mine), boms: D.boms, cats: L.CATS,
         prod: D.prod.map((o) => ({ customer: o.customer, product: o.product, target: o.targetCases, made: (o.logs || []).reduce((t, l) => t + (+l.qty || 0), 0), promised: o.promisedDate })),
         settings: owner ? D.s : null,
+        intel: owner ? L.purchaseIntel(D, ((await L.kvGet("tally_pay")) || {}).rows || []) : null,
         tallyProd: { recent: D.pt.recent, boms: D.pt.boms.slice(0, 40), vouchers: D.pt.vouchers, itemLevel: D.pt.itemLevel, hasOut: D.pt.hasOut, units: D.units, alias: D.alias, setup: P.setup } });
     }
     if (b.action === "count") {          // physical stock count

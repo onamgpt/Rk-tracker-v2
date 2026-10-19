@@ -46,6 +46,9 @@ async function run(opt) {
   const synced = L.syncProduction(D);
   if (synced.length) { const pv = (await L.kvGet("production_v1")) || {}; pv.orders = D.prod; await L.kvSet("production_v1", pv); }
   const PR = L.productionReport(D);
+  const PI = L.purchaseIntel(D, ((await L.kvGet("tally_pay")) || {}).rows || []);
+  const jumpSeen = (await L.kvGet("purchase_jump_seen")) || [];
+  const newJumps = PI.jumps.filter((j) => jumpSeen.indexOf(j.item + "|" + j.d + "|" + j.rate) < 0);
   const P = L.plan(D);
   L.syncSuggestions(D, P);
   await L.kvSet("purchase_pos", D.pos);
@@ -83,7 +86,7 @@ async function run(opt) {
     return h;
   })();
   const recips = [["main", s.ownerEmail, s.emailOwner !== false], ["prakash", s.prakashEmail, s.emailStaff !== false], ["viru", s.viruEmail, s.emailStaff !== false]];
-  const any = all.length || P.overdue.length || PR.output.length || PR.orders.some((o) => o.risk) || PR.variance.length;
+  const any = newJumps.length || all.length || P.overdue.length || PR.output.length || PR.orders.some((o) => o.risk) || PR.variance.length;
   for (const [who, addr, on] of recips) {
     if (opt.only && opt.only !== who) continue;
     if (!on || !addr) continue;
@@ -96,6 +99,9 @@ async function run(opt) {
     h += prodHtml;
     order.forEach((w) => { h += section(w, w === who); });
     if (!any) h += "<p>Nothing to order today.</p>";
+    if (who === "main" && newJumps.length) h += "<h3 style='margin:18px 0 8px'>⚠ Purchase price up more than 10%</h3><table style='border-collapse:collapse;width:100%'><tr><th " + TH + ">Material</th><th " + TH + ">New rate</th><th " + TH + ">Before</th><th " + TH + ">Supplier</th></tr>" +
+      newJumps.map((j) => "<tr><td " + TD + "><b>" + esc(j.item) + "</b></td><td " + TD + ">₹" + fmt(j.rate) + "/" + esc(j.unit) + " <b style='color:#b42318'>+" + j.change + "%</b></td><td " + TD + ">₹" + fmt(j.prev) + "</td><td " + TD + ">" + esc(j.supplier) + " · " + esc(j.d) +
+        (j.best && j.best.supplier !== j.supplier ? "<br><span style='color:#555'>" + esc(j.best.supplier) + " last at ₹" + fmt(j.best.rate) + "</span>" : "") + "</td></tr>").join("") + "</table>";
     if (who === "main" && setupN) h += "<p style='color:#555'>" + setupN + " item(s) need a person or category set on the Stock tab.</p>";
     if (who !== "main") h += "<p style='color:#555'>After placing an order tap <b>Ordered</b> on the page and enter the supplier's delivery date. If an item isn't needed, tap <b>Not now</b>.</p>";
     h += btn(link(who), "Open Purchase & Stock");
@@ -121,6 +127,7 @@ async function run(opt) {
     const r = await mail(s.maadhuEmail, "Please add the Stock Summary to the daily Tally backup", wrap(h));
     s.lastMaadhu = today; sent.push("Maadhu: " + (r.ok ? "stock how-to emailed" : "email failed"));
   }
+  if (newJumps.length && !opt.only) await L.kvSet("purchase_jump_seen", jumpSeen.concat(newJumps.map((j) => j.item + "|" + j.d + "|" + j.rate)).slice(-500));
   if (!opt.force) s.lastRun = today;
   await L.kvSet("purchase_settings", s);
   return sent;

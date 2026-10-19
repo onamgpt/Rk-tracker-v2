@@ -142,6 +142,56 @@ function productionReport(D) {
   return { lastDay, output, orders, variance: variance.sort((a, b) => b.pct - a.pct).slice(0, 15) };
 }
 
+
+// ---- Purchase intelligence from Tally purchase vouchers (Day Book XML item lines) + Payables export ----
+// Rate = item amount ÷ quantity as Tally records it (before tax). Nothing here writes to Tally.
+function purchaseIntel(D, payRows) {
+  const today = todayIST();
+  const bills = (D.vouchers || []).filter((v) => !v.c && /purchase/i.test(v.t || "") && !/order|return|debit/i.test(v.t || "") && v.i && v.i.length)
+    .map((v) => ({ d: v.d, n: v.n || "", p: v.p || "", total: v.a || 0,
+      items: v.i.filter((x) => x.q > 0 && x.a > 0).map((x) => ({ i: x.i, q: x.q, u: x.u || "", a: x.a, rate: Math.round(x.a / x.q * 100) / 100 })) }))
+    .filter((b) => b.items.length).sort((a, b) => (a.d < b.d ? -1 : 1));
+  const catOf = (name) => (D.items[name] && D.items[name].cat) || classify(name);
+  const items = {};
+  bills.forEach((b) => b.items.forEach((x) => {
+    const it = items[x.i] = items[x.i] || { item: x.i, cat: catOf(x.i), unit: x.u, history: [], suppliers: {} };
+    it.history.push({ d: b.d, rate: x.rate, supplier: b.p, q: x.q, vno: b.n });
+    const s = it.suppliers[b.p] = it.suppliers[b.p] || { supplier: b.p, lastRate: 0, lastDate: "", qty: 0, spend: 0 };
+    s.lastRate = x.rate; s.lastDate = b.d; s.qty += x.q; s.spend += x.a;
+  }));
+  const since90 = addDays(today, -90), since30 = addDays(today, -30);
+  const list = Object.values(items).map((it) => {
+    const h = it.history, last = h[h.length - 1], prev = h.length > 1 ? h[h.length - 2] : null;
+    const h90 = h.filter((x) => x.d >= since90);
+    const avg90 = h90.length ? h90.reduce((s, x) => s + x.rate * x.q, 0) / h90.reduce((s, x) => s + x.q, 0) : null;
+    const sup = Object.values(it.suppliers).filter((s) => s.lastDate >= addDays(today, -365)).sort((a, b) => a.lastRate - b.lastRate);
+    return { item: it.item, cat: it.cat, unit: it.unit, lastRate: last.rate, lastDate: last.d, lastSupplier: last.supplier, prevRate: prev ? prev.rate : null,
+      change: prev && prev.rate ? Math.round((last.rate / prev.rate - 1) * 1000) / 10 : null, avg90: avg90 ? Math.round(avg90 * 100) / 100 : null,
+      best: sup.length > 1 ? { supplier: sup[0].supplier, rate: sup[0].lastRate } : null, buys: h.length, history: h.slice(-24), suppliers: sup.length };
+  }).sort((a, b) => (a.lastDate < b.lastDate ? 1 : -1));
+  // >10% jump on the latest purchase vs the one before, within the last 30 days
+  const jumps = list.filter((x) => x.change != null && x.change > 10 && x.lastDate >= since30)
+    .map((x) => ({ item: x.item, cat: x.cat, unit: x.unit, rate: x.lastRate, prev: x.prevRate, change: x.change, supplier: x.lastSupplier, d: x.lastDate, best: x.best }))
+    .sort((a, b) => b.change - a.change);
+  // spend
+  const byMonth = {}; bills.forEach((b) => { const m = b.d.slice(0, 7); byMonth[m] = (byMonth[m] || 0) + b.items.reduce((s, x) => s + x.a, 0); });
+  const months = Object.keys(byMonth).sort().slice(-12).map((m) => ({ m, amt: Math.round(byMonth[m]) }));
+  const spendBy = (from, key) => { const o = {}; bills.filter((b) => b.d >= from).forEach((b) => b.items.forEach((x) => { const k = key(b, x); o[k] = (o[k] || 0) + x.a; }));
+    return Object.keys(o).map((k) => ({ k, amt: Math.round(o[k]) })).sort((a, b) => b.amt - a.amt); };
+  const byCat90 = spendBy(since90, (b, x) => CATS[catOf(x.i)] || "Other");
+  const bySup90 = spendBy(since90, (b) => b.p || "(no supplier)").slice(0, 15);
+  // payables: amounts we owe (positive), not CSD/customer debit balances
+  const pr = (payRows || []).filter((r) => r && r.amt > 0 && !/canteen\s*stores|\bcsd\b/i.test(r.party || ""));
+  const pay = {}; pr.forEach((r) => { const p = pay[r.party] = pay[r.party] || { party: r.party, amt: 0, overdue: 0, bills: 0, oldest: 0 };
+    p.amt += r.amt; p.bills++; if ((r.over || 0) > 0) { p.overdue += r.amt; p.oldest = Math.max(p.oldest, r.over); } });
+  const payables = Object.values(pay).sort((a, b) => b.overdue - a.overdue || b.amt - a.amt).slice(0, 25)
+    .map((p) => ({ party: p.party, amt: Math.round(p.amt), overdue: Math.round(p.overdue), bills: p.bills, oldest: p.oldest }));
+  const dueSoon = pr.filter((r) => r.due && r.due >= today && r.due <= addDays(today, 15)).reduce((s, r) => s + r.amt, 0);
+  return { hasData: bills.length > 0, billCount: bills.length, from: bills.length ? bills[0].d : null, to: bills.length ? bills[bills.length - 1].d : null,
+    items: list.slice(0, 150), jumps, months, byCat90, bySup90, payables, payTotal: Math.round(pr.reduce((s, r) => s + r.amt, 0)),
+    payOverdue: Math.round(pr.filter((r) => (r.over || 0) > 0).reduce((s, r) => s + r.amt, 0)), dueSoon: Math.round(dueSoon), bills: bills.slice(-60).reverse() };
+}
+
 async function settings() { return Object.assign({}, SDEF, (await kvGet("purchase_settings")) || {}); }
 
 async function checkPin(user, pin) {
@@ -301,5 +351,5 @@ function syncSuggestions(D, P) {
   D.pos.list = keep.filter((p) => p.status === "suggested" || p.status === "ordered" || (p.receivedOn || p.cancelledOn || p.created || P.today) >= cut);
 }
 
-module.exports = { deriveProduction, matchProduct, syncProduction, productionReport, kvGet, kvSet, hash, todayIST, addDays, daysBetween, norm, classify, settings, checkPin, recordStock, load, plan, autoReceive,
+module.exports = { purchaseIntel, deriveProduction, matchProduct, syncProduction, productionReport, kvGet, kvSet, hash, todayIST, addDays, daysBetween, norm, classify, settings, checkPin, recordStock, load, plan, autoReceive,
   syncSuggestions, USERS, NAMES, CATS, OWNER_OF, SITE };

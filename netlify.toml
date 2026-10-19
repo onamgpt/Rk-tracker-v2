@@ -74,6 +74,10 @@
 [functions."csd-cron"]
   schedule = "30 3-13/2 * * *"
 
+# Monthly purchases summary — 1st of month 08:30 IST (03:00 UTC), to Ravi only
+[functions."purchase-monthly"]
+  schedule = "0 3 1 * *"
+
 # Purchase & Stock — order lists to Prakash/Virupaksha, summary to Ravi — 09:40 IST (04:10 UTC)
 [functions."purchase-daily"]
   schedule = "10 4 * * *"
