@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="robots" content="noindex">
+<title>Inventory — Onam Agarbathi</title>
+<style>
+:root{--ink:#16181c;--muted:#6a6f76;--rule:#dcdad4;--paper:#f4f3ef;--navy:#1d3557;--ok:#1F7A4D;--okBg:#e6f4ec;--red:#b42318;--redBg:#fdecea;--warnBg:#fbf3dd}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.4 -apple-system,Segoe UI,Roboto,Arial,sans-serif;padding-bottom:env(safe-area-inset-bottom,0px)}
+header{padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 8px;border-bottom:1px solid var(--rule);background:var(--paper);position:sticky;top:0;z-index:5}
+h1{font-size:19px;margin:0}.sub{font-size:13px;color:var(--muted)}main{max-width:760px;margin:0 auto;padding:12px}
+.card{background:#fff;border:1px solid var(--rule);border-radius:12px;padding:14px;margin-bottom:12px}
+input,select{font:inherit;padding:10px 12px;border:1px solid var(--rule);border-radius:9px;width:100%;background:#fff;color:var(--ink)}
+label{font-size:12px;color:var(--muted);display:block;margin:8px 0 3px}
+button{font:inherit;padding:10px 14px;border-radius:9px;border:1px solid var(--navy);background:var(--navy);color:#fff}
+button.g{background:#fff;color:var(--navy)}button.r{background:#fff;color:var(--red);border-color:var(--red)}
+.tabs{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.tab{background:#fff;color:var(--ink);border-color:var(--rule);padding:8px 13px;border-radius:999px;font-size:14px}.tab.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+#video{width:100%;border-radius:12px;background:#000;max-height:46vh;object-fit:cover}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-bottom:1px solid var(--rule);text-align:left;font-size:14px}
+.muted{color:var(--muted);font-size:13px}.row{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.big{font-size:20px;font-weight:700}.badge{display:inline-block;font-size:12px;padding:2px 9px;border-radius:99px;background:#eef1f6;color:var(--navy)}
+.badge.ok{background:var(--okBg);color:var(--ok)}.badge.red{background:var(--redBg);color:var(--red)}.badge.w{background:var(--warnBg);color:#5c4a15}
+.pin{max-width:320px;margin:16vh auto;text-align:center}.pin input{font-size:28px;text-align:center;letter-spacing:10px;margin:14px 0}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#16181c;color:#fff;padding:10px 16px;border-radius:999px;display:none;font-size:14px;z-index:9}
+#labels{display:none}
+.lab{width:100mm;height:50mm;box-sizing:border-box;padding:3mm 4mm;display:flex;gap:4mm;align-items:center;border:1px dashed #bbb;margin:0 0 4mm;background:#fff;color:#000;font-family:Arial,sans-serif}
+.lab .qr img{width:40mm;height:40mm;display:block}.lab .t{font-size:11pt;font-weight:700;line-height:1.15}.lab .s{font-size:8.5pt;line-height:1.3;margin-top:1.5mm}.lab .n{font-size:14pt;font-weight:800;margin-top:1.5mm}
+@media print{@page{size:100mm 50mm;margin:0}body{background:#fff;padding:0}#app,#pinBox,.toast{display:none!important}#labels{display:block!important}.lab{border:0;margin:0;page-break-after:always;break-after:page}}
+</style></head><body>
+<div id="pinBox" class="pin" style="display:none"><h1>Inventory</h1><div class="sub" id="pinWho"></div>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN"><button id="pinGo" style="width:100%">Open</button>
+  <div id="pinErr" style="color:var(--red);margin-top:10px"></div></div>
+<div id="app" style="display:none"><header><h1>📦 Inventory</h1><div class="sub" id="hsub"></div><div class="tabs" id="tabs"></div></header><main id="view"></main></div>
+<div id="labels"></div>
+<div class="toast" id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script>
+(function(){
+var API="/.netlify/functions/inventory";
+var qs=new URLSearchParams(location.search), USER=(qs.get("user")||"gate").toLowerCase();
+if(["gate","viru","prakash","main"].indexOf(USER)<0) USER="gate";
+var PK="inv_pin_"+USER, pin=localStorage.getItem(PK)||"";
+var D=null, tab="scan", stream=null, scanning=false, detector=null, lastCode="", lastAt=0, cur=null;
+function $(i){return document.getElementById(i);}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+function fmt(n){ return n==null?"—":(Math.round(n*1000)/1000).toLocaleString("en-IN"); }
+function api(a,x){ return fetch(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action:a,user:USER,pin:pin},x||{}))}).then(function(r){return r.json();}); }
+function toast(t){ var e=$("toast"); e.textContent=t; e.style.display="block"; clearTimeout(e._t); e._t=setTimeout(function(){e.style.display="none";},2400); }
+var WHO={gate:"Security",viru:"Virupaksha",prakash:"Prakash",main:"Ravi"};
+function lock(err){ stopCam(); $("app").style.display="none"; $("pinBox").style.display=""; $("pinWho").textContent=WHO[USER]; $("pinErr").textContent=err||""; $("pin").value=""; $("pin").focus(); }
+$("pinGo").onclick=function(){ pin=$("pin").value.trim(); load(); };
+$("pin").onkeydown=function(e){ if(e.key==="Enter") $("pinGo").click(); };
+function load(){ return api("state").then(function(r){
+  if(r.error==="pin"){ localStorage.removeItem(PK); lock(pin?"Wrong PIN":""); return; }
+  if(r.error){ toast(r.error); return; }
+  localStorage.setItem(PK,pin); D=r; $("pinBox").style.display="none"; $("app").style.display="";
+  $("hsub").textContent=D.name+" · "+D.today+" · "+D.today_ev.length+" scans today"; tabs(); render();
+}).catch(function(){ toast("No connection"); }); }
+function tabs(){ var T=[["scan","Scan"]]; if(USER==="gate"||USER==="main") T.push(["in","Inward"]); T.push(["stock","Stock"],["today","Today"]);
+  $("tabs").innerHTML=T.map(function(t){return '<button class="tab'+(tab===t[0]?" on":"")+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join("");
+  Array.prototype.forEach.call($("tabs").querySelectorAll(".tab"),function(b){ b.onclick=function(){ tab=b.getAttribute("data-t"); cur=null; render(); }; }); }
+function render(){ if(tab!=="scan") stopCam(); tabs();
+  if(tab==="scan") return scanView(); if(tab==="in") return inView(); if(tab==="stock") return stockView(); if(tab==="today") return todayView(); }
+
+// ---------- scan ----------
+function scanView(){
+  $("view").innerHTML='<div class="card"><video id="video" playsinline muted></video><canvas id="cv" style="display:none"></canvas>'+
+    '<div style="margin-top:10px;display:flex;gap:8px"><input id="manual" placeholder="Label code (if camera fails)"><button class="g" id="manGo">Enter</button></div></div><div id="lot"></div>';
+  $("manGo").onclick=function(){ var v=$("manual").value.trim(); if(v){ $("manual").value=""; lookup(v); } };
+  startCam(); if(cur) showLot(cur);
+}
+function startCam(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ toast("Camera not available — type the label code"); return; }
+  navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:false}).then(function(s){
+    stream=s; var v=$("video"); if(!v) return; v.srcObject=s; v.play(); scanning=true;
+    if("BarcodeDetector" in window){ try{ detector=new BarcodeDetector({formats:["qr_code"]}); }catch(e){ detector=null; } }
+    if(!detector&&!document.getElementById("jsqr")){ var j=document.createElement("script"); j.id="jsqr"; j.src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"; document.head.appendChild(j); }
+    loop();
+  }).catch(function(){ toast("Allow camera access, or type the label code"); });
+}
+function loop(){ if(!scanning||tab!=="scan") return; var v=$("video"); if(!v||v.readyState<2) return setTimeout(loop,150);
+  if(detector){ detector.detect(v).then(function(c){ if(c.length) onCode(c[0].rawValue); setTimeout(loop,250); }).catch(function(){ setTimeout(loop,400); }); }
+  else if(window.jsQR){ var cv=$("cv"),ctx=cv.getContext("2d"); cv.width=v.videoWidth/2; cv.height=v.videoHeight/2; ctx.drawImage(v,0,0,cv.width,cv.height);
+    var im=ctx.getImageData(0,0,cv.width,cv.height), r=jsQR(im.data,im.width,im.height); if(r&&r.data) onCode(r.data); setTimeout(loop,200); } else setTimeout(loop,300); }
+function onCode(raw){ var c=String(raw||""); if(c.indexOf("ONAMI:")!==0) return; var n=Date.now(); if(c===lastCode&&n-lastAt<4000) return; lastCode=c; lastAt=n; lookup(c); }
+function stopCam(){ scanning=false; if(stream){ stream.getTracks().forEach(function(t){t.stop();}); stream=null; } }
+function lookup(code){ api("scan",{code:code}).then(function(r){ if(r.error==="pin") return lock("Session ended"); if(!r.ok){ toast(r.msg||"Not recognised"); return; } cur=r; showLot(r); beep(); }); }
+function beep(){ try{ var a=new (window.AudioContext||window.webkitAudioContext)(); var o=a.createOscillator(); o.connect(a.destination); o.frequency.value=900; o.start(); o.stop(a.currentTime+0.1); }catch(e){} }
+function showLot(r){
+  var l=r.lot, st={store:'<span class="badge ok">In store</span>',issued:'<span class="badge w">Issued to '+esc(l.dept||"")+'</span>',used:'<span class="badge red">Fully used</span>'}[l.status];
+  var h='<div class="card"><div class="big">'+esc(l.item)+'</div><div class="muted">'+esc(l.supplier||"")+' · received '+esc(l.recvd)+' · package '+l.no+' of '+l.of+'</div>'+
+    '<div style="margin:10px 0" class="row"><span>'+st+'</span><b>'+fmt(l.qty)+' '+esc(l.unit)+(l.qty!==l.orig?' <span class="muted">(of '+fmt(l.orig)+')</span>':'')+'</b></div>';
+  if(!r.can) h+='<div class="muted">'+esc(r.who)+' handles this material.</div>';
+  else if(l.status==="store") h+='<button id="aIssue" style="width:100%">Issue to '+esc(l.toDept)+'</button>';
+  else if(l.status==="issued") h+='<label>Quantity left to return ('+esc(l.unit)+')</label><input id="retQ" inputmode="decimal" placeholder="e.g. 12.5">'+
+     '<div class="row" style="margin-top:10px"><button id="aRet">Return to store</button><button class="r" id="aUsed">Fully used</button></div>';
+  h+='</div>'; $("lot").innerHTML=h;
+  if($("aIssue")) $("aIssue").onclick=function(){ doAct("issue"); };
+  if($("aRet")) $("aRet").onclick=function(){ var q=$("retQ").value; if(!q) return toast("Enter the quantity left"); doAct("return",q); };
+  if($("aUsed")) $("aUsed").onclick=function(){ if(confirm("Mark this package fully used?")) doAct("used"); };
+}
+function doAct(what,q){ api("act",{id:cur.lot.id,what:what,qty:q}).then(function(r){ if(r.error) return toast(r.error);
+  toast(what==="issue"?"Issued":what==="return"?"Returned to store":"Closed — fully used"); cur=null; $("lot").innerHTML=""; load(); }); }
+
+// ---------- inward (security) ----------
+function inView(){
+  var h='<div class="card"><b>Goods received at the gate</b><div class="muted">One entry per material on the supplier\'s bill. A label is printed for every package.</div>'+
+    '<datalist id="nl">'+D.names.map(function(n){return '<option value="'+esc(n)+'">';}).join("")+'</datalist>'+
+    '<datalist id="sl">'+D.suppliers.map(function(n){return '<option value="'+esc(n)+'">';}).join("")+'</datalist>'+
+    '<label>Material</label><input id="iItem" list="nl" placeholder="e.g. Charcoal powder">'+
+    '<label>Supplier</label><input id="iSup" list="sl">'+
+    '<div class="grid"><div><label>Bill / invoice no.</label><input id="iBill"></div><div><label>Category</label><select id="iCat">'+Object.keys(D.cats).filter(function(k){return k!=="finished";}).map(function(k){return '<option value="'+k+'">'+esc(D.cats[k])+'</option>';}).join("")+'</select></div>'+
+    '<div><label>Number of packages</label><input id="iN" inputmode="numeric" placeholder="e.g. 40"></div><div><label>Quantity per package</label><input id="iPer" inputmode="decimal" placeholder="e.g. 25"></div>'+
+    '<div><label>Unit</label><select id="iUnit"><option>kg</option><option>litre</option><option>nos</option><option>bundle</option><option>roll</option></select></div><div></div></div>'+
+    '<div style="margin-top:12px"><button id="iGo" style="width:100%">Save and print labels</button></div></div>';
+  $("view").innerHTML=h;
+  $("iItem").onchange=function(){ var c=D.catOf[$("iItem").value]; if(c&&c!=="finished") $("iCat").value=c; };
+  $("iGo").onclick=function(){
+    var p={item:$("iItem").value.trim(),supplier:$("iSup").value.trim(),bill:$("iBill").value.trim(),cat:$("iCat").value,packages:$("iN").value,per:$("iPer").value,unit:$("iUnit").value};
+    if(!p.item||!p.packages||!p.per) return toast("Material, packages and quantity are needed");
+    if(!confirm(p.packages+" × "+p.per+" "+p.unit+" of "+p.item+"\nfrom "+(p.supplier||"?")+". Save?")) return;
+    api("inward",p).then(function(r){ if(r.error) return toast(r.error); toast("Saved"+(r.po?" · "+r.po+" updated":"")); printLabels(r.labels); load(); });
+  };
+}
+function printLabels(L){
+  $("labels").innerHTML=L.map(function(l){ var q=qrcode(0,"M"); q.addData("ONAMI:"+l.token); q.make();
+    return '<div class="lab"><div class="qr">'+q.createImgTag(4,0)+'</div><div><div class="t">'+esc(l.item)+'</div><div class="n">'+l.no+' / '+l.of+' · '+fmt(l.qty)+' '+esc(l.unit)+'</div><div class="s">'+esc(l.supplier||"")+'<br>Bill '+esc(l.bill||"—")+' · '+esc(l.recvd)+'<br>Onam Agarbathi</div></div></div>'; }).join("");
+  setTimeout(function(){ window.print(); },300);
+}
+
+// ---------- stock ----------
+function stockView(){ var S=D.stock||[];
+  var h='<div class="card"><div class="row"><b>Live stock (by scan)</b><span class="muted">'+S.length+' materials</span></div><table><tr><th>Material</th><th style="text-align:right">In store</th><th style="text-align:right">Issued</th></tr>'+
+    (S.length?S.map(function(s){ return '<tr><td>'+esc(s.item)+'<div class="muted">'+esc(D.cats[s.cat]||"")+'</div></td><td style="text-align:right"><b>'+fmt(s.store)+'</b> '+esc(s.unit)+'<div class="muted">'+s.storePk+' pkg</div></td><td style="text-align:right">'+(s.deptPk?fmt(s.dept)+' '+esc(s.unit)+'<div class="muted">'+s.deptPk+' pkg</div>':'—')+'</td></tr>'; }).join(""):'<tr><td class="muted">Nothing received by scan yet.</td></tr>')+'</table></div>';
+  if((D.inDept||[]).length) h+='<div class="card"><b>Perfume / chemical drums open in the department</b><table>'+D.inDept.map(function(x){ return '<tr><td>'+esc(x.item)+'</td><td style="text-align:right">'+fmt(x.qty)+' '+esc(x.unit)+'<div class="muted">since '+esc(x.since)+'</div></td></tr>'; }).join("")+'</table></div>';
+  if(USER==="main") h+='<div class="card"><button class="g" id="rep">Email me today\'s report now</button></div>';
+  $("view").innerHTML=h;
+  if($("rep")) $("rep").onclick=function(){ api("reportNow").then(function(r){ toast(r.error||"Sent"); }); };
+}
+function todayView(){ var E=D.today_ev||[], W={in:"Received",issue:"Issued",return:"Returned",used:"Fully used"};
+  $("view").innerHTML='<div class="card"><b>Today</b><table>'+(E.length?E.map(function(e){ return '<tr><td>'+esc(e.at)+'</td><td>'+esc(e.item)+'<div class="muted">'+esc(W[e.t])+' by '+esc(e.by)+' · pkg '+e.no+'/'+e.of+'</div></td><td style="text-align:right">'+(e.q?fmt(e.q)+' '+esc(e.unit):'')+'</td></tr>'; }).join(""):'<tr><td class="muted">No scans yet today.</td></tr>')+'</table></div>'; }
+
+if(pin) load(); else lock("");
+})();
+</script></body></html>

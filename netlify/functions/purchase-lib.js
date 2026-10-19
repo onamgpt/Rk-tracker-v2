@@ -192,6 +192,13 @@ function purchaseIntel(D, payRows) {
     payOverdue: Math.round(pr.filter((r) => (r.over || 0) > 0).reduce((s, r) => s + r.amt, 0)), dueSoon: Math.round(dueSoon), bills: bills.slice(-60).reverse() };
 }
 
+// consumption recorded by inventory scans (issued − returned) over the last 60 days, per day
+async function scanConsumption() {
+  const lots = (await kvGet("inv_lots")) || []; if (!lots.length) return {};
+  const from = addDays(todayIST(), -60), c = {};
+  lots.forEach((l) => (l.ev || []).forEach((e) => { if (e.d < from) return; if (e.t === "issue") c[l.item] = (c[l.item] || 0) + e.q; if (e.t === "return") c[l.item] = (c[l.item] || 0) - e.q; }));
+  Object.keys(c).forEach((k) => (c[k] = Math.max(0, c[k]) / 60)); return c;
+}
 async function settings() { return Object.assign({}, SDEF, (await kvGet("purchase_settings")) || {}); }
 
 async function checkPin(user, pin) {
@@ -247,7 +254,7 @@ async function load() {
   const vouchers = (vch && vch.list) || [];
   return { s, items: items || {}, counts: counts || {}, hist: hist || [], boms: boms || {}, pos: (pos && pos.list) ? pos : { list: [] },
     stock: stock || { rows: [] }, vouchers, prod: (prod && prod.orders) || [], snooze: snooze || {},
-    units: units || {}, alias: alias || {}, pt: deriveProduction(vouchers) };
+    units: units || {}, alias: alias || {}, pt: deriveProduction(vouchers), scanUse: await scanConsumption() };
 }
 
 // Purchase bills in the Day Book close orders automatically.
@@ -309,7 +316,8 @@ function plan(D) {
     let qty = tr ? tr.qty : null, src = tr ? "Tally " + (asof || "") : "", unit = cfg.unit || (tr && tr.unit) || "";
     if (cnt && (!tr || !asof || cnt.d >= asof)) { qty = cnt.qty; src = "Count by " + (NAMES[cnt.by] || cnt.by) + " " + cnt.d; }
     const consDay = D.pt && D.pt.consumed && D.pt.consumed[name] ? D.pt.consumed[name] / 60 : 0;
-    const use = consDay > 0 ? consDay : usage(D.hist, name);   // real consumption from Tally journals beats stock-drop guesses
+    const scanDay = D.scanUse && D.scanUse[name] ? D.scanUse[name] : 0;
+    const use = consDay > 0 ? consDay : scanDay > 0 ? scanDay : usage(D.hist, name);   // Tally journals, then gate/store scans, then stock drops   // real consumption from Tally journals beats stock-drop guesses
     const lead = +cfg.leadDays || s.defaultLead, cover = s.coverDays;
     const min = +cfg.min || 0, need = prodNeed[name] || 0, oo = onOrder[name] || 0;
     const lp = lastPurchase(D.vouchers, name);
