@@ -58,6 +58,10 @@
 [functions."logistics-daily"]
   schedule = "0 4 * * *"
 
+# Gate attendance weekly summary — Monday 08:00 IST (02:30 UTC), to owner only
+[functions."gate-cron"]
+  schedule = "30 2 * * 1"
+
 # CSD mail — POs from mgrgp2@gmail.com and payment advices from pafa@csdindia.gov.in — every 2 h, 09:00–19:00 IST
 [functions."csd-cron"]
   schedule = "30 3-13/2 * * *"

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Gate — Onam Agarbathi</title>
+<style>
+:root{--ink:#16181c;--muted:#6a6f76;--rule:#dcdad4;--paper:#f4f3ef;--navy:#1d3557;--ok:#1F7A4D;--okBg:#e6f4ec;--red:#b42318;--redBg:#fdecea;--blue:#1d3557;--blueBg:#e7edf7}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.4 -apple-system,Segoe UI,Roboto,Arial,sans-serif;padding-bottom:env(safe-area-inset-bottom,0px)}
+header{padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 8px;border-bottom:1px solid var(--rule);background:var(--paper);position:sticky;top:0;z-index:5}
+h1{font-size:19px;margin:0}.sub{font-size:13px;color:var(--muted)}
+main{max-width:720px;margin:0 auto;padding:12px}
+.card{background:#fff;border:1px solid var(--rule);border-radius:12px;padding:14px;margin-bottom:12px}
+input{font:inherit;padding:11px 12px;border:1px solid var(--rule);border-radius:9px;width:100%}
+button{font:inherit;padding:11px 16px;border-radius:9px;border:1px solid var(--navy);background:var(--navy);color:#fff}
+button.g{background:#fff;color:var(--navy)}button.r{background:#fff;color:var(--red);border-color:var(--red)}
+.tabs{display:flex;gap:6px;margin-top:8px}.tab{background:#fff;color:var(--ink);border-color:var(--rule);padding:8px 13px;border-radius:999px;font-size:14px}.tab.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+#video{width:100%;border-radius:12px;background:#000;max-height:52vh;object-fit:cover}
+#banner{margin-top:10px;border-radius:12px;padding:18px;text-align:center;font-size:22px;font-weight:700;display:none}
+.IN{background:var(--okBg);color:var(--ok)}.OUT{background:var(--blueBg);color:var(--blue)}.ERR{background:var(--redBg);color:var(--red)}.WARN{background:#fbf3dd;color:#5c4a15}
+table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-bottom:1px solid var(--rule);text-align:left;font-size:14px}
+.muted{color:var(--muted);font-size:13px}.row{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.pin{max-width:320px;margin:16vh auto;text-align:center}.pin input{font-size:28px;text-align:center;letter-spacing:10px;margin:14px 0}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.idcard{border:1.5px solid #222;border-radius:10px;padding:10px;text-align:center;break-inside:avoid;background:#fff}
+.idcard .qr img,.idcard .qr canvas{width:150px!important;height:150px!important}.idcard .nm{font-weight:700;font-size:17px;margin-top:4px}.idcard .co{font-size:11px;color:#444}
+@media print{header,.tabs,.noprint{display:none!important}body{background:#fff}main{max-width:none;padding:0}.cards{grid-template-columns:1fr 1fr 1fr}.card{border:0;padding:0}}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#16181c;color:#fff;padding:10px 16px;border-radius:999px;display:none;font-size:14px}
+</style></head><body>
+<div id="pinBox" class="pin" style="display:none">
+  <h1>Gate attendance</h1><div class="sub" id="pinWho"></div>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN">
+  <button id="pinGo" style="width:100%;margin-top:6px">Open</button>
+  <div id="pinErr" style="color:var(--red);margin-top:10px"></div>
+</div>
+<div id="app" style="display:none">
+<header><div class="row"><div><h1>🛂 Gate attendance</h1><div class="sub" id="hsub"></div></div></div>
+  <div class="tabs" id="tabs"></div></header>
+<main id="view"></main>
+</div>
+<div class="toast" id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script>
+(function(){
+var API="/.netlify/functions/gate";
+var qs=new URLSearchParams(location.search), USER=(qs.get("user")||"gate").toLowerCase();
+if(USER!=="gate"&&USER!=="main") USER="gate";
+var PK="gate_pin_"+USER, pin=localStorage.getItem(PK)||"";
+var D=null, tab="scan", stream=null, scanning=false, lastTok="", lastAt=0, detector=null;
+var PREFIX="ONAMG:";
+function $(i){return document.getElementById(i);}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+function api(action,extra){ return fetch(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action:action,user:USER,pin:pin},extra||{}))}).then(function(r){return r.json();}); }
+function toast(t){ var e=$("toast"); e.textContent=t; e.style.display="block"; clearTimeout(e._t); e._t=setTimeout(function(){e.style.display="none";},2000); }
+function lock(err){ stopCam(); $("app").style.display="none"; $("pinBox").style.display=""; $("pinWho").textContent=USER==="main"?"Ravi":"Security"; $("pinErr").textContent=err||""; $("pin").value=""; $("pin").focus(); }
+$("pinGo").onclick=function(){ pin=$("pin").value.trim(); load(); };
+$("pin").onkeydown=function(e){ if(e.key==="Enter") $("pinGo").click(); };
+function load(){ return api("state").then(function(r){
+  if(r.error==="pin"){ localStorage.removeItem(PK); lock(pin?"Wrong PIN":""); return; }
+  if(r.error){ toast(r.error); return; }
+  localStorage.setItem(PK,pin); D=r; $("pinBox").style.display="none"; $("app").style.display="";
+  var inNow=(D.scans||[]).filter(function(s){return s.dir==="IN";}).length, outNow=(D.scans||[]).filter(function(s){return s.dir==="OUT";}).length;
+  $("hsub").textContent=D.today+" · in "+inNow+" · out "+outNow+" · workers "+D.workers.filter(function(w){return w.active!==false;}).length;
+  tabs(); render();
+}).catch(function(){ toast("No connection"); }); }
+function tabs(){
+  var T=[["scan","Scan"],["today","Today"]]; if(D.owner) T.push(["workers","Workers & cards"],["report","Report"]);
+  $("tabs").innerHTML=T.map(function(t){return '<button class="tab'+(tab===t[0]?" on":"")+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join("");
+  Array.prototype.forEach.call($("tabs").querySelectorAll(".tab"),function(b){ b.onclick=function(){ tab=b.getAttribute("data-t"); render(); }; });
+}
+function render(){ if(tab!=="scan") stopCam(); tabs();
+  if(tab==="scan") return scanView(); if(tab==="today") return todayView(); if(tab==="workers") return workersView(); if(tab==="report") return reportView(); }
+
+// ---------- scanning ----------
+function scanView(){
+  $("view").innerHTML='<div class="card"><video id="video" playsinline muted></video><canvas id="cv" style="display:none"></canvas>'+
+    '<div id="banner"></div>'+
+    '<div class="muted" style="margin-top:10px">Hold the card to the camera. IN and OUT alternate automatically.</div>'+
+    '<div style="margin-top:10px;display:flex;gap:8px"><input id="manual" placeholder="Card code (if camera fails)"><button class="g" id="manGo">Enter</button></div></div>';
+  $("manGo").onclick=function(){ var v=$("manual").value.trim(); if(v){ $("manual").value=""; submit(v.replace(PREFIX,"")); } };
+  startCam();
+}
+function startCam(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ showBanner("WARN","Camera not available here — type the card code below"); return; }
+  navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:false}).then(function(s){
+    stream=s; var v=$("video"); if(!v) return; v.srcObject=s; v.play(); scanning=true;
+    if("BarcodeDetector" in window){ try{ detector=new BarcodeDetector({formats:["qr_code"]}); }catch(e){ detector=null; } }
+    if(!detector){ loadJsQR(); }
+    loop();
+  }).catch(function(){ showBanner("WARN","Allow camera access for this site, or type the card code below"); });
+}
+function loadJsQR(){ if(window.jsQR||document.getElementById("jsqr")) return; var s=document.createElement("script"); s.id="jsqr"; s.src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"; document.head.appendChild(s); }
+function loop(){
+  if(!scanning||tab!=="scan") return;
+  var v=$("video"); if(!v||v.readyState<2){ return setTimeout(loop,150); }
+  if(detector){
+    detector.detect(v).then(function(codes){ if(codes.length) onCode(codes[0].rawValue); setTimeout(loop,250); }).catch(function(){ setTimeout(loop,400); });
+  } else if(window.jsQR){
+    var c=$("cv"), ctx=c.getContext("2d"); c.width=v.videoWidth/2; c.height=v.videoHeight/2; ctx.drawImage(v,0,0,c.width,c.height);
+    var img=ctx.getImageData(0,0,c.width,c.height), r=jsQR(img.data,img.width,img.height);
+    if(r&&r.data) onCode(r.data); setTimeout(loop,200);
+  } else setTimeout(loop,300);
+}
+function onCode(raw){
+  var tok=String(raw||""); if(tok.indexOf(PREFIX)!==0) return; tok=tok.slice(PREFIX.length);
+  var now=Date.now(); if(tok===lastTok&&now-lastAt<3000) return; lastTok=tok; lastAt=now; submit(tok);
+}
+function submit(tok){
+  api("scan",{token:tok}).then(function(r){
+    if(r.error==="pin"){ lock("Session ended — enter PIN"); return; }
+    if(r.result==="IN"||r.result==="OUT") { showBanner(r.result, r.name+"  —  "+r.result+"  "+r.t); beep(); }
+    else if(r.result==="duplicate") showBanner("WARN", r.msg);
+    else showBanner("ERR", r.msg||"Not recognised");
+  }).catch(function(){ showBanner("ERR","No connection — scan again"); });
+}
+var bannerT=null;
+function showBanner(kind,text){ var b=$("banner"); if(!b) return; b.className=kind; b.textContent=text; b.style.display="block";
+  clearTimeout(bannerT); bannerT=setTimeout(function(){ if(b) b.style.display="none"; },3500); }
+function beep(){ try{ var a=new (window.AudioContext||window.webkitAudioContext)(); var o=a.createOscillator(); o.frequency.value=880; o.connect(a.destination); o.start(); o.stop(a.currentTime+0.12); }catch(e){} }
+function stopCam(){ scanning=false; if(stream){ stream.getTracks().forEach(function(t){t.stop();}); stream=null; } }
+
+// ---------- today ----------
+function todayView(){
+  var S=D.scans||[];
+  $("view").innerHTML='<div class="card"><div class="row"><b>Today — '+esc(D.today)+'</b><span class="muted">'+S.length+' entries</span></div><table>'+
+    (S.length?S.map(function(s){ return '<tr><td>'+esc(s.t)+'</td><td>'+esc(s.name)+'</td><td><span class="'+(s.dir==="IN"||s.dir==="OUT"?s.dir:"WARN")+'" style="padding:2px 8px;border-radius:99px;font-size:12px">'+esc(s.dir==="DUP"?"repeat":s.dir==="BAD"?"not valid":s.dir)+'</span></td></tr>'; }).join(""):'<tr><td class="muted">No scans yet today.</td></tr>')+'</table></div>';
+}
+
+// ---------- owner: workers and cards ----------
+function workersView(){
+  var h='<div class="card"><b>Add a worker</b><div style="display:flex;gap:8px;margin-top:8px"><input id="nm" placeholder="Full name"><button id="add">Add</button></div>'+
+    '<div class="muted" style="margin-top:6px">Then print the card. A new card is created with the name; the code on it is random.</div></div>';
+  h+='<div class="card"><div class="row"><b>Workers ('+D.workers.length+')</b><button class="g" id="printAll">Print all cards</button></div><table style="margin-top:8px">'+
+    D.workers.map(function(w){ return '<tr><td>'+esc(w.name)+(w.active?"":' <span class="muted">(cancelled)</span>')+'</td><td style="text-align:right;white-space:nowrap">'+
+      (w.active?'<button class="g" data-cx="'+w.id+'">Cancel</button> <button class="g" data-rs="'+w.id+'">Reissue</button>':'<button class="g" data-ac="'+w.id+'">Reactivate</button>')+'</td></tr>'; }).join("")+'</table></div>';
+  h+='<div class="card" id="cards" style="display:none"></div>';
+  $("view").innerHTML=h;
+  $("add").onclick=function(){ var n=$("nm").value.trim(); if(!n) return; api("workerAdd",{name:n}).then(function(r){ if(r.error) return toast(r.error); toast("Added"); load(); }); };
+  $("printAll").onclick=function(){ printCards(D.workers.filter(function(w){return w.active;})); };
+  Array.prototype.forEach.call($("view").querySelectorAll("[data-cx]"),function(b){ b.onclick=function(){ if(confirm("Cancel this card? It will stop working at the gate.")) api("workerCancel",{id:b.getAttribute("data-cx")}).then(function(){toast("Cancelled");load();}); }; });
+  Array.prototype.forEach.call($("view").querySelectorAll("[data-ac]"),function(b){ b.onclick=function(){ api("workerActivate",{id:b.getAttribute("data-ac")}).then(function(){toast("Active");load();}); }; });
+  Array.prototype.forEach.call($("view").querySelectorAll("[data-rs]"),function(b){ b.onclick=function(){ if(confirm("Reissue? The old card stops working.")) api("workerReissue",{id:b.getAttribute("data-rs")}).then(function(r){ toast("Reissued"); printCards([r.worker]); }); }; });
+}
+function printCards(list){
+  var box=$("cards"); box.style.display="";
+  box.innerHTML='<div class="row noprint"><b>Cards to print</b><button onclick="window.print()">Print</button></div><div class="cards" style="margin-top:10px">'+
+    list.map(function(w){ var q=qrcode(0,"M"); q.addData("ONAMG:"+w.token); q.make();
+      return '<div class="idcard"><div class="qr">'+q.createImgTag(4,0)+'</div><div class="nm">'+esc(w.name)+'</div><div class="co">Onam Agarbathi Pvt. Ltd.</div></div>'; }).join("")+'</div>';
+  box.scrollIntoView({behavior:"smooth"});
+}
+
+// ---------- owner: report ----------
+function reportView(){
+  $("view").innerHTML='<div class="card"><b>Weekly summary</b><div class="muted" style="margin:6px 0 10px">Sent to you every Monday at 8:00 am, covering the last 7 days. You can also send it now.</div><button id="send">Send now to me</button></div>';
+  $("send").onclick=function(){ api("reportNow").then(function(r){ toast(r.error?r.error:"Sent"); }); };
+}
+
+if(pin) load(); else lock("");
+})();
+</script></body></html>
