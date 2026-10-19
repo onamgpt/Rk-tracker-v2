@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="robots" content="noindex">
+<title>Dispatch loading — Onam Agarbathi</title>
+<style>
+:root{--ink:#16181c;--muted:#6a6f76;--rule:#dcdad4;--paper:#f4f3ef;--navy:#1d3557;--ok:#1F7A4D;--okBg:#e6f4ec;--red:#b42318;--redBg:#fdecea;--warnBg:#fbf3dd}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.4 -apple-system,Segoe UI,Roboto,Arial,sans-serif;padding-bottom:env(safe-area-inset-bottom,0px)}
+header{padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 8px;border-bottom:1px solid var(--rule);background:var(--paper);position:sticky;top:0;z-index:5}
+h1{font-size:19px;margin:0}.sub{font-size:13px;color:var(--muted)}main{max-width:720px;margin:0 auto;padding:12px}
+.card{background:#fff;border:1px solid var(--rule);border-radius:12px;padding:14px;margin-bottom:12px}
+input{font:inherit;padding:11px 12px;border:1px solid var(--rule);border-radius:9px;width:100%}
+button{font:inherit;padding:10px 14px;border-radius:9px;border:1px solid var(--navy);background:var(--navy);color:#fff}
+button.g{background:#fff;color:var(--navy)}
+.tabs{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.tab{background:#fff;color:var(--ink);border-color:var(--rule);padding:8px 13px;border-radius:999px;font-size:14px}.tab.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+#video{width:100%;border-radius:12px;background:#000;max-height:50vh;object-fit:cover}
+#banner{margin-top:10px;border-radius:12px;padding:16px;text-align:center;font-size:20px;font-weight:700;display:none}
+.LOADED{background:var(--okBg);color:var(--ok)}.ERR{background:var(--redBg);color:var(--red)}.WARN{background:var(--warnBg);color:#5c4a15}
+table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-bottom:1px solid var(--rule);text-align:left;font-size:14px}
+.muted{color:var(--muted);font-size:13px}.row{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.pin{max-width:320px;margin:16vh auto;text-align:center}.pin input{font-size:28px;text-align:center;letter-spacing:10px;margin:14px 0}
+.labels{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.lbl{border:1.5px solid #222;border-radius:8px;padding:8px;text-align:center;break-inside:avoid;background:#fff;font-size:12px}
+.lbl .qr img,.lbl .qr canvas{width:120px!important;height:120px!important}.lbl .big{font-size:18px;font-weight:800;margin-top:2px}.lbl .cust{font-size:11px;color:#333}
+@media print{header,.tabs,.noprint{display:none!important}body{background:#fff}main{max-width:none;padding:0}.card{border:0;padding:0}.labels{grid-template-columns:1fr 1fr 1fr}}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#16181c;color:#fff;padding:10px 16px;border-radius:999px;display:none;font-size:14px}
+</style></head><body>
+<div id="pinBox" class="pin" style="display:none"><h1>Dispatch loading</h1><div class="sub" id="pinWho"></div>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN"><button id="pinGo" style="width:100%">Open</button>
+  <div id="pinErr" style="color:var(--red);margin-top:10px"></div></div>
+<div id="app" style="display:none"><header><h1>🚚 Dispatch loading</h1><div class="sub" id="hsub"></div><div class="tabs" id="tabs"></div></header><main id="view"></main></div>
+<div class="toast" id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script>
+(function(){
+var API="/.netlify/functions/dispatch";
+var qs=new URLSearchParams(location.search), USER=(qs.get("user")||"gate").toLowerCase();
+if(["gate","prakash","main"].indexOf(USER)<0) USER="gate";
+var PK="disp_pin_"+USER, pin=localStorage.getItem(PK)||"";
+var D=null, tab="scan", stream=null, scanning=false, detector=null, lastCode="", lastAt=0, current=null;
+function $(i){return document.getElementById(i);}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+function api(a,x){ return fetch(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action:a,user:USER,pin:pin},x||{}))}).then(function(r){return r.json();}); }
+function toast(t){ var e=$("toast"); e.textContent=t; e.style.display="block"; clearTimeout(e._t); e._t=setTimeout(function(){e.style.display="none";},2000); }
+function lock(err){ stopCam(); $("app").style.display="none"; $("pinBox").style.display=""; $("pinWho").textContent=USER==="main"?"Ravi":USER==="prakash"?"Prakash":"Security"; $("pinErr").textContent=err||""; $("pin").value=""; $("pin").focus(); }
+$("pinGo").onclick=function(){ pin=$("pin").value.trim(); load(); };
+$("pin").onkeydown=function(e){ if(e.key==="Enter") $("pinGo").click(); };
+function load(){ return api("state").then(function(r){
+  if(r.error==="pin"){ localStorage.removeItem(PK); lock(pin?"Wrong PIN":""); return; }
+  if(r.error){ toast(r.error); return; }
+  localStorage.setItem(PK,pin); D=r; $("pinBox").style.display="none"; $("app").style.display="";
+  $("hsub").textContent=D.today+" · scans today "+D.scans.length; tabs(); render();
+}).catch(function(){ toast("No connection"); }); }
+function tabs(){ var T=[["scan","Scan cartons"],["today","Today"]]; if(D.manager) T.push(["orders","Orders & labels"]);
+  $("tabs").innerHTML=T.map(function(t){return '<button class="tab'+(tab===t[0]?" on":"")+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join("");
+  Array.prototype.forEach.call($("tabs").querySelectorAll(".tab"),function(b){ b.onclick=function(){ tab=b.getAttribute("data-t"); render(); }; }); }
+function render(){ if(tab!=="scan") stopCam(); tabs();
+  if(tab==="scan") return scanView(); if(tab==="today") return todayView(); if(tab==="orders") return ordersView(); }
+
+// ---------- scanning ----------
+function scanView(){
+  $("view").innerHTML='<div class="card"><video id="video" playsinline muted></video><canvas id="cv" style="display:none"></canvas><div id="banner"></div>'+
+    '<div class="muted" style="margin-top:10px">Scan each carton label as it goes into the truck. Each carton counts once.</div>'+
+    '<div style="margin-top:10px;display:flex;gap:8px"><input id="manual" placeholder="Label code (if camera fails)"><button class="g" id="manGo">Enter</button></div></div>';
+  $("manGo").onclick=function(){ var v=$("manual").value.trim(); if(v){ $("manual").value=""; submit(v); } };
+  startCam();
+}
+function startCam(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ showBanner("WARN","Camera not available — type the label code below"); return; }
+  navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:false}).then(function(s){
+    stream=s; var v=$("video"); if(!v) return; v.srcObject=s; v.play(); scanning=true;
+    if("BarcodeDetector" in window){ try{ detector=new BarcodeDetector({formats:["qr_code"]}); }catch(e){ detector=null; } }
+    if(!detector && !document.getElementById("jsqr")){ var j=document.createElement("script"); j.id="jsqr"; j.src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"; document.head.appendChild(j); }
+    loop();
+  }).catch(function(){ showBanner("WARN","Allow camera access for this site, or type the label code below"); });
+}
+function loop(){
+  if(!scanning||tab!=="scan") return;
+  var v=$("video"); if(!v||v.readyState<2) return setTimeout(loop,150);
+  if(detector){ detector.detect(v).then(function(c){ if(c.length) onCode(c[0].rawValue); setTimeout(loop,250); }).catch(function(){ setTimeout(loop,400); }); }
+  else if(window.jsQR){ var cv=$("cv"),ctx=cv.getContext("2d"); cv.width=v.videoWidth/2; cv.height=v.videoHeight/2; ctx.drawImage(v,0,0,cv.width,cv.height);
+    var im=ctx.getImageData(0,0,cv.width,cv.height), r=jsQR(im.data,im.width,im.height); if(r&&r.data) onCode(r.data); setTimeout(loop,200); }
+  else setTimeout(loop,300);
+}
+function onCode(raw){ var c=String(raw||""); if(c.indexOf("ONAMC:")!==0) return; var now=Date.now(); if(c===lastCode&&now-lastAt<3000) return; lastCode=c; lastAt=now; submit(c); }
+function submit(code){
+  api("scan",{code:code}).then(function(r){
+    if(r.error==="pin"){ lock("Session ended — enter PIN"); return; }
+    if(r.ok){ showBanner("LOADED", r.msg+"  ·  "+r.loaded+" of "+r.total+(r.done?"  ✔ COMPLETE":"")); beep(); }
+    else if(r.result==="dup") showBanner("WARN", r.msg);
+    else showBanner("ERR", r.msg||"Not recognised");
+  }).catch(function(){ showBanner("ERR","No connection — scan again"); });
+}
+var bt=null;
+function showBanner(k,t){ var b=$("banner"); if(!b) return; b.className=k; b.textContent=t; b.style.display="block"; clearTimeout(bt); bt=setTimeout(function(){ if(b) b.style.display="none"; },4000); }
+function beep(){ try{ var a=new (window.AudioContext||window.webkitAudioContext)(); var o=a.createOscillator(); o.connect(a.destination); o.frequency.value=900; o.start(); o.stop(a.currentTime+0.12); }catch(e){} }
+function stopCam(){ scanning=false; if(stream){ stream.getTracks().forEach(function(t){t.stop();}); stream=null; } }
+
+// ---------- today ----------
+function todayView(){ var S=D.scans||[];
+  $("view").innerHTML='<div class="card"><div class="row"><b>Today — '+esc(D.today)+'</b><span class="muted">'+S.length+' cartons</span></div><table>'+
+    (S.length?S.map(function(s){ return '<tr><td>'+esc(s.t)+'</td><td>'+esc(s.customer.slice(0,36))+'<div class="muted">'+esc(s.invoice||"")+'</div></td><td style="text-align:right"><b>'+s.n+'/'+s.total+'</b>'+(D.manager?' <button class="g" data-un="'+s.orderId+'|'+s.n+'">Remove</button>':'')+'</td></tr>'; }).join(""):'<tr><td class="muted">Nothing loaded today.</td></tr>')+'</table></div>';
+  Array.prototype.forEach.call($("view").querySelectorAll("[data-un]"),function(b){ b.onclick=function(){ var p=b.getAttribute("data-un").split("|"); if(!confirm("Remove carton "+p[1]+" from the count?")) return; api("unload",{orderId:p[0],n:+p[1]}).then(function(r){ if(r.error) return toast(r.error); toast("Removed"); load(); }); }; }); }
+
+// ---------- owner / Prakash: orders, set carton count, print labels ----------
+function ordersView(){
+  var h='<div class="card"><b>Orders</b><div class="muted">Set the number of master cartons for an order, then print one label per carton. Orders already loaded show their progress.</div><div style="margin-top:8px"><input id="q" placeholder="Search customer or order no."></div></div>';
+  h+='<div class="card"><table id="ot"></table></div>';
+  $("view").innerHTML=h;
+  function paint(){ var q=($("q").value||"").toLowerCase();
+    var R=D.rows.filter(function(r){ return !q||(r.customer+" "+r.orderNo+" "+r.invoice).toLowerCase().indexOf(q)>=0; }).slice(0,80);
+    $("ot").innerHTML=R.map(function(r){ var st=r.total==null?'<span class="muted">not set</span>':(r.done?'<span style="color:var(--ok)">✔ loaded</span>':r.loaded+' of '+r.total);
+      return '<tr><td><b>'+esc(r.customer.slice(0,44))+'</b><div class="muted">'+esc(r.orderNo)+(r.invoice?' · inv '+esc(r.invoice):'')+(r.suggested?' · items say '+r.suggested+' ctn':'')+'</div></td><td style="text-align:right;white-space:nowrap">'+st+'<div><button class="g" data-set="'+r.id+'">'+(r.total==null?'Set cartons':'Edit')+'</button>'+(r.total?' <button class="g" data-lbl="'+r.id+'">Labels</button>':'')+'</div></td></tr>'; }).join("")||'<tr><td class="muted">No orders found.</td></tr>';
+    Array.prototype.forEach.call($("ot").querySelectorAll("[data-set]"),function(b){ b.onclick=function(){ setCartons(b.getAttribute("data-set")); }; });
+    Array.prototype.forEach.call($("ot").querySelectorAll("[data-lbl]"),function(b){ b.onclick=function(){ labels(b.getAttribute("data-lbl")); }; });
+  }
+  $("q").oninput=paint; paint();
+}
+function setCartons(id){
+  var r=D.rows.find(function(x){return x.id===id;}); if(!r) return;
+  var n=prompt("Master cartons for "+r.customer.slice(0,50)+"\n(items say: "+(r.suggested||"?")+")", String(r.total||r.suggested||""));
+  if(!n) return; var inv=prompt("Invoice number", r.invoice||"");
+  api("setup",{orderId:id,total:n,invoice:inv||""}).then(function(x){ if(x.error) return toast(x.error); toast("Saved — "+x.load.total+" cartons"); load().then(function(){ labels(id); }); });
+}
+function labels(id){
+  api("labels",{orderId:id}).then(function(x){ if(x.error) return toast(x.error);
+    var L=x.load, loaded=L.loaded||[], html='<div class="card noprint"><div class="row"><b>Labels — '+esc(L.customer.slice(0,50))+'</b><button onclick="window.print()">Print</button></div><div class="muted">'+L.total+' labels · invoice '+esc(L.invoice||"—")+'</div></div><div class="labels">';
+    for(var n=1;n<=L.total;n++){ var q=qrcode(0,"M"); q.addData("ONAMC:"+L.token+"|"+n+"|"+L.total); q.make();
+      html+='<div class="lbl"><div class="qr">'+q.createImgTag(3,0)+'</div><div class="big">'+n+' / '+L.total+'</div><div class="cust">'+esc(L.customer.slice(0,46))+'</div><div>Inv '+esc(L.invoice||"—")+' · '+esc(L.orderNo||"")+'</div></div>'; }
+    html+='</div>';
+    $("view").innerHTML=html; window.scrollTo(0,0); });
+}
+if(pin) load(); else lock("");
+})();
+</script></body></html>
