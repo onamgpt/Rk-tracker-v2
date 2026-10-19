@@ -40,7 +40,7 @@ function classify(name) {
 // Same item on both sides in equal quantity = a godown transfer, ignored.
 const JOURNAL = /journal|manufactur|production|assembl/i;
 function deriveProduction(vouchers) {
-  const days = {}, fg = {}; let seen = 0;
+  const days = {}, fg = {}, entries = []; let seen = 0;
   const cut = addDays(todayIST(), -120);
   (vouchers || []).forEach((v) => {
     if (v.c || v.o || !v.i || !v.i.length || v.d < cut) return;
@@ -53,6 +53,7 @@ function deriveProduction(vouchers) {
     const prods = Object.keys(innM), mats = Object.keys(outM);
     if (!prods.length || !mats.length) return;
     seen++;
+    entries.push({ d: v.d, vno: v.n || "", type: v.t || "", made: Object.assign({}, innM), used: Object.assign({}, outM) });
     const tot = prods.reduce((s, k) => s + innM[k], 0);
     const unitOf = {}; v.i.forEach((x) => { if (x.u) unitOf[x.i] = x.u; });
     prods.forEach((k) => {
@@ -74,7 +75,8 @@ function deriveProduction(vouchers) {
     if (!Object.keys(iM).length) return;
     Object.keys(oM).forEach((k) => (consumed[k] = (consumed[k] || 0) + oM[k])); });
   const recent = Object.keys(days).sort().slice(-30).reverse().map((d) => ({ d, items: Object.keys(days[d]).map((k) => ({ item: k, qty: Math.round(days[d][k] * 100) / 100, unit: (fg[k] || {}).unit || "" })) }));
-  return { boms, recent, consumed, vouchers: seen,
+  entries.sort((a, b) => (a.d < b.d ? -1 : 1));
+  return { boms, recent, consumed, entries, vouchers: seen,
     itemLevel: (vouchers || []).some((v) => v.i && v.i.length), hasOut: (vouchers || []).some((v) => v.i && v.i.some((x) => x.o === 1)) };
 }
 const STOP = /\b(box|boxes|pack|packs|pcs|nos|no|of|the|and|sticks?|stick|agarbat\w*|incense|case|cases|gm|gms|g)\b/g;
@@ -87,6 +89,57 @@ function matchProduct(name, list, alias) {
     else { const a = toks(name), b = toks(k); if (a.length && b.length) { const c = a.filter((x) => b.indexOf(x) >= 0).length; const f = c / Math.max(a.length, b.length); if (f >= 0.6) s = 1 + f / 2; } }
     if (s > score) { score = s; best = k; } });
   return best;
+}
+
+
+// ---- Fill the Production page from Tally: each journal that produced a linked finished item becomes a log
+// on the oldest open production order for that product (cases = Tally qty ÷ units per case). Never double-counts a voucher.
+function syncProduction(D) {
+  const pt = D.pt || {}, added = [];
+  (pt.entries || []).forEach((e) => {
+    Object.keys(e.made).forEach((fg) => {
+      const upc = +D.units[fg] || 0; if (!upc) return;
+      const key = e.d + "|" + e.vno + "|" + fg;
+      if (D.prod.some((o) => (o.logs || []).some((l) => l.tallyKey === key))) return;
+      const open = D.prod.filter((o) => {
+        const made = (o.logs || []).reduce((s, l) => s + (+l.qty || 0), 0);
+        return made < (+o.targetCases || 0) && (!o.startDate || o.startDate <= e.d) && matchProduct(o.product || "", [fg], D.alias) === fg;
+      }).sort((a, b) => ((a.promisedDate || "9") < (b.promisedDate || "9") ? -1 : 1));
+      let cases = Math.round(e.made[fg] / upc * 100) / 100;
+      for (const o of open) { if (cases <= 0) break;
+        const made = (o.logs || []).reduce((s, l) => s + (+l.qty || 0), 0), bal = (+o.targetCases || 0) - made;
+        const q = Math.min(bal, cases); if (q <= 0) continue;
+        o.logs = (o.logs || []).concat({ d: e.d, qty: Math.round(q * 100) / 100, note: "From Tally " + (e.type || "") + " " + e.vno, src: "tally", tallyKey: key });
+        added.push({ d: e.d, order: o.customer || o.product, cases: q, fg }); cases -= q; }
+    });
+  });
+  return added;
+}
+// ---- Production report: yesterday's output, open orders at risk, unusual material use
+function productionReport(D) {
+  const pt = D.pt || {}, today = todayIST(), E = pt.entries || [];
+  const lastDay = E.length ? E[E.length - 1].d : null;
+  const day = lastDay ? E.filter((e) => e.d === lastDay) : [];
+  const madeDay = {}; day.forEach((e) => Object.keys(e.made).forEach((k) => (madeDay[k] = (madeDay[k] || 0) + e.made[k])));
+  const unitOf = {}; (pt.boms || []).forEach((b) => (unitOf[b.item] = b.unit));
+  const output = Object.keys(madeDay).map((k) => ({ item: k, qty: madeDay[k], unit: unitOf[k] || "", cases: D.units[k] ? Math.round(madeDay[k] / D.units[k] * 10) / 10 : null }));
+  // open orders: needed per day vs last-7-days pace
+  const orders = D.prod.map((o) => {
+    const logs = o.logs || [], made = logs.reduce((s, l) => s + (+l.qty || 0), 0), target = +o.targetCases || 0, bal = Math.max(0, target - made);
+    if (!bal) return null;
+    const since = addDays(today, -7), pace = logs.filter((l) => l.d >= since).reduce((s, l) => s + (+l.qty || 0), 0) / 7;
+    const left = o.promisedDate ? Math.max(1, daysBetween(today, o.promisedDate)) : null;
+    const need = left ? bal / left : null;
+    const risk = o.promisedDate && (o.promisedDate < today || (need && pace < need * 0.9));
+    return { name: o.customer || "", product: o.product || "", made, target, bal, promised: o.promisedDate || "", need: need ? Math.round(need * 10) / 10 : null, pace: Math.round(pace * 10) / 10, risk: !!risk };
+  }).filter(Boolean).sort((a, b) => (b.risk - a.risk) || ((a.promised || "9") < (b.promised || "9") ? -1 : 1));
+  // material variance: a batch in the last 7 days using >15% more per unit than this product's average
+  const avg = {}; (pt.boms || []).forEach((b) => { if (b.batches >= 3) b.lines.forEach((l) => (avg[b.item + "|" + l.item] = l.perUnit)); });
+  const variance = [], since7 = addDays(today, -7);
+  E.filter((e) => e.d >= since7).forEach((e) => { const fgs = Object.keys(e.made); if (fgs.length !== 1) return; const fg = fgs[0], q = e.made[fg];
+    Object.keys(e.used).forEach((m) => { const a = avg[fg + "|" + m]; if (!a) return; const per = e.used[m] / q;
+      if (per > a * 1.15) variance.push({ d: e.d, vno: e.vno, fg, item: m, per, avg: a, pct: Math.round((per / a - 1) * 100) }); }); });
+  return { lastDay, output, orders, variance: variance.sort((a, b) => b.pct - a.pct).slice(0, 15) };
 }
 
 async function settings() { return Object.assign({}, SDEF, (await kvGet("purchase_settings")) || {}); }
@@ -248,5 +301,5 @@ function syncSuggestions(D, P) {
   D.pos.list = keep.filter((p) => p.status === "suggested" || p.status === "ordered" || (p.receivedOn || p.cancelledOn || p.created || P.today) >= cut);
 }
 
-module.exports = { deriveProduction, matchProduct, kvGet, kvSet, hash, todayIST, addDays, daysBetween, norm, classify, settings, checkPin, recordStock, load, plan, autoReceive,
+module.exports = { deriveProduction, matchProduct, syncProduction, productionReport, kvGet, kvSet, hash, todayIST, addDays, daysBetween, norm, classify, settings, checkPin, recordStock, load, plan, autoReceive,
   syncSuggestions, USERS, NAMES, CATS, OWNER_OF, SITE };

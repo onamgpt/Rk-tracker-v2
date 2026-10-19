@@ -42,6 +42,10 @@ async function run(opt) {
   const s = D.s, today = L.todayIST();
   if (!opt.force && s.lastRun === today) return { skipped: "already ran today" };
   L.autoReceive(D);
+  // Production page fills itself from Virupaksha's Tally entries (before planning, so balances are current)
+  const synced = L.syncProduction(D);
+  if (synced.length) { const pv = (await L.kvGet("production_v1")) || {}; pv.orders = D.prod; await L.kvSet("production_v1", pv); }
+  const PR = L.productionReport(D);
   const P = L.plan(D);
   L.syncSuggestions(D, P);
   await L.kvSet("purchase_pos", D.pos);
@@ -65,8 +69,21 @@ async function run(opt) {
     !D.pt.vouchers ? "No production entries found in the Day Book yet — Virupaksha should enter each day's production in Tally as a Stock Journal." : "");
   const setupNote = P.setup.length ? "<p style='background:#fbf3dd;padding:10px;border-radius:6px'>Running production not yet counted in the purchase list: " + P.setup.map((s) => esc(s.product) + " (" + esc(s.why) + ")").join("; ") +
     ". Fix it on the Production tab.</p>" : "";
+  const prodHtml = (() => {
+    let h = "";
+    if (PR.lastDay) h += "<h3 style='margin:18px 0 8px'>Production " + esc(PR.lastDay) + " (from Tally)</h3><table style='border-collapse:collapse;width:100%'><tr><th " + TH + ">Item</th><th " + TH + ">Made</th><th " + TH + ">Cases</th></tr>" +
+      PR.output.map((o) => "<tr><td " + TD + ">" + esc(o.item) + "</td><td " + TD + ">" + fmt(o.qty) + " " + esc(o.unit) + "</td><td " + TD + ">" + (o.cases != null ? fmt(o.cases) : "—") + "</td></tr>").join("") + "</table>";
+    if (synced.length) h += "<p style='color:#555'>" + synced.length + " Tally production entr" + (synced.length > 1 ? "ies were" : "y was") + " added to the Production page automatically.</p>";
+    const ord = PR.orders.slice(0, 12);
+    if (ord.length) h += "<h3 style='margin:18px 0 8px'>Open production orders</h3><table style='border-collapse:collapse;width:100%'><tr><th " + TH + ">Order</th><th " + TH + ">Made / target</th><th " + TH + ">Promised</th><th " + TH + ">Need / day vs last 7 days</th></tr>" +
+      ord.map((o) => "<tr><td " + TD + ">" + (o.risk ? "⚠️ " : "") + "<b>" + esc(o.name) + "</b><br><span style='color:#666'>" + esc(o.product) + "</span></td><td " + TD + ">" + fmt(o.made) + " / " + fmt(o.target) + " cs</td><td " + TD + ">" + esc(o.promised || "—") +
+        "</td><td " + TD + ">" + (o.need != null ? fmt(o.need) + " vs " + fmt(o.pace) : "—") + "</td></tr>").join("") + "</table>";
+    if (PR.variance.length) h += "<h3 style='margin:18px 0 8px'>Material used above normal (last 7 days)</h3><table style='border-collapse:collapse;width:100%'><tr><th " + TH + ">Date / entry</th><th " + TH + ">Product</th><th " + TH + ">Material</th><th " + TH + ">Above normal</th></tr>" +
+      PR.variance.map((x) => "<tr><td " + TD + ">" + esc(x.d) + " " + esc(x.vno) + "</td><td " + TD + ">" + esc(x.fg) + "</td><td " + TD + ">" + esc(x.item) + "</td><td " + TD + "><b style='color:#b42318'>+" + x.pct + "%</b></td></tr>").join("") + "</table><p style='color:#555'>Check for wastage or a wrong quantity in the Tally entry.</p>";
+    return h;
+  })();
   const recips = [["main", s.ownerEmail, s.emailOwner !== false], ["prakash", s.prakashEmail, s.emailStaff !== false], ["viru", s.viruEmail, s.emailStaff !== false]];
-  const any = all.length || P.overdue.length;
+  const any = all.length || P.overdue.length || PR.output.length || PR.orders.some((o) => o.risk) || PR.variance.length;
   for (const [who, addr, on] of recips) {
     if (opt.only && opt.only !== who) continue;
     if (!on || !addr) continue;
@@ -76,13 +93,14 @@ async function run(opt) {
     if (staleNote) h += "<p style='background:#fbf3dd;padding:10px;border-radius:6px'>" + esc(staleNote) + "</p>";
     if (prodNote) h += "<p style='background:#fbf3dd;padding:10px;border-radius:6px'>" + prodNote + "</p>";
     h += setupNote;
+    h += prodHtml;
     order.forEach((w) => { h += section(w, w === who); });
     if (!any) h += "<p>Nothing to order today.</p>";
     if (who === "main" && setupN) h += "<p style='color:#555'>" + setupN + " item(s) need a person or category set on the Stock tab.</p>";
     if (who !== "main") h += "<p style='color:#555'>After placing an order tap <b>Ordered</b> on the page and enter the supplier's delivery date. If an item isn't needed, tap <b>Not now</b>.</p>";
     h += btn(link(who), "Open Purchase & Stock");
     const mine = all.filter((r) => r.owner === who).length, late = P.overdue.filter((p) => p.owner === who).length;
-    const subj = "Purchase & Stock " + today + ": " + (who === "main" ? all.length + " to order, " + P.overdue.length + " late" : mine + " yours to order" + (late ? ", " + late + " late" : "") + " (" + all.length + " in total)");
+    const subj = "Production & Purchase " + today + ": " + (who === "main" ? all.length + " to order, " + P.overdue.length + " late" : mine + " yours to order" + (late ? ", " + late + " late" : "") + " (" + all.length + " in total)");
     const r = await mail(addr, subj, wrap(h)); sent.push(L.NAMES[who] + ": " + (r.ok ? "emailed" : "email failed"));
   }
   for (const who of ["prakash", "viru"]) {
