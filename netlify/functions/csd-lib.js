@@ -112,4 +112,4 @@ async function reconcile() {
   return out;
 }
 
-module.exports = { kvGet, kvSet, todayIST, days, addDays, inr, isCSD, readPO, poRecord, readAdvice, reconcile };
+module.exports = { kvGet, kvSet, todayIST, days, addDays, inr, isCSD, readPO, poRecord, readAdvice, reconcile, claudePdfs };

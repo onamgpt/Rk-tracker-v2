@@ -58,6 +58,10 @@
 [functions."logistics-daily"]
   schedule = "0 4 * * *"
 
+# Maadhu invoice PDFs → carton count per order — every 2 h, 09:15–19:15 IST
+[functions."dispatch-invoices-cron"]
+  schedule = "45 3-13/2 * * *"
+
 # Dispatch cartons loaded today — 18:00 IST (12:30 UTC), to Prakash and Ravi
 [functions."dispatch-cron"]
   schedule = "30 12 * * *"
