@@ -20,11 +20,12 @@ exports.handler = async (event) => {
       if (L.autoReceive(D)) await savePos();
       const P = L.plan(D);
       L.syncSuggestions(D, P); await savePos();
-      const mine = (r) => owner || r.owner === me;
+      const mine = () => true;   // everyone sees the full list; writes are still limited to the owner of each item
       return OK({ ok: true, me, name: L.NAMES[me], owner, today, asof: P.asof, stale: P.stale, hasStock: P.hasStock,
         rows: P.rows.filter(mine), pos: D.pos.list.filter(mine), boms: D.boms, cats: L.CATS,
         prod: D.prod.map((o) => ({ customer: o.customer, product: o.product, target: o.targetCases, made: (o.logs || []).reduce((t, l) => t + (+l.qty || 0), 0), promised: o.promisedDate })),
-        settings: owner ? D.s : null });
+        settings: owner ? D.s : null,
+        tallyProd: { recent: D.pt.recent, boms: D.pt.boms.slice(0, 40), vouchers: D.pt.vouchers, itemLevel: D.pt.itemLevel, hasOut: D.pt.hasOut, units: D.units, alias: D.alias, setup: P.setup } });
     }
     if (b.action === "count") {          // physical stock count
       const name = clip(b.item, 120); if (!name) return OK({ error: "item?" });
@@ -82,6 +83,20 @@ exports.handler = async (event) => {
       await L.kvSet("purchase_items", D.items);
       if (b.qty != null && b.qty !== "") { D.counts[name] = { qty: num(b.qty), d: today, by: me }; await L.kvSet("purchase_counts", D.counts); }
       return OK({ ok: true });
+    }
+    if (b.action === "unitsSave") {      // finished item from Tally → units per production case (Ravi or Virupaksha)
+      if (me === "prakash") return OK({ error: "not allowed" });
+      const k = clip(b.fg, 120); if (!k) return OK({ error: "item?" });
+      const n = num(b.units); if (n > 0) D.units[k] = n; else delete D.units[k];
+      await L.kvSet("purchase_units", D.units);
+      if (b.product) { D.alias[clip(b.product)] = k; await L.kvSet("purchase_alias", D.alias); }
+      return OK({ ok: true });
+    }
+    if (b.action === "aliasSave") {      // link a production-page product name to its Tally finished item
+      if (me === "prakash") return OK({ error: "not allowed" });
+      const pn = clip(b.product, 120); if (!pn) return OK({ error: "product?" });
+      if (b.fg) D.alias[pn] = clip(b.fg, 120); else delete D.alias[pn];
+      await L.kvSet("purchase_alias", D.alias); return OK({ ok: true });
     }
     if (!owner) return OK({ error: "owner only" });
     if (b.action === "bomSave") {

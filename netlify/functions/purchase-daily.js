@@ -51,49 +51,55 @@ async function run(opt) {
   const staleNote = !P.hasStock ? "No Stock Summary from Tally has arrived yet — the list below uses physical counts and production needs only."
     : (P.stale > 2 ? "Tally stock is from " + P.asof + " (" + P.stale + " days old) — check the actual stock before ordering." : "");
 
-  for (const who of ["prakash", "viru"]) {
-    if (opt.only && opt.only !== who) continue;
-    const todo = P.rows.filter((r) => r.order && r.owner === who);
-    const late = P.overdue.filter((p) => p.owner === who);
-    if (!todo.length && !late.length) continue;
-    const link = L.SITE + "/purchase/?user=" + who;
-    let h = "<p>Good morning " + L.NAMES[who] + ",</p>";
-    if (staleNote) h += "<p style='background:#fbf3dd;padding:10px;border-radius:6px'>" + esc(staleNote) + "</p>";
-    if (todo.length) h += "<h3 style='margin:18px 0 8px'>To order today (" + todo.length + ")</h3>" + orderTable(todo) +
-      "<p style='color:#555'>After placing an order, tap <b>Ordered</b> on the page and enter the supplier's delivery date. If something isn't needed, tap <b>Not now</b>.</p>";
-    if (late.length) h += "<h3 style='margin:18px 0 8px'>Late from supplier (" + late.length + ")</h3>" + lateTable(late) +
-      "<p style='color:#555'>Please call the supplier, then update the new date on the page — or mark it received.</p>";
-    h += btn(link, "Open Purchase & Stock");
-    if (s.emailStaff !== false) { const r = await mail(s[who + "Email"], "Purchase list — " + (todo.length ? todo.length + " to order" : "") + (todo.length && late.length ? ", " : "") + (late.length ? late.length + " late" : "") + " (" + today + ")", wrap(h)); sent.push(who + ": " + (r.ok ? "emailed" : "email failed")); }
-    if (chats[who]) await tg([chats[who]], "🧾 <b>Purchase list " + today + "</b>\n" + todo.map((r) => "• " + r.item + " — order " + fmt(r.order) + " " + r.unit).join("\n") +
-      (late.length ? "\n\n⏰ Late: " + late.map((p) => p.item + " (" + (p.supplier || "?") + ")").join(", ") : "") + "\n\n" + link);
-  }
-
-  // Ravi
+  // One shared email: Ravi, Prakash and Virupaksha all get the full picture, their own items first.
   const all = P.rows.filter((r) => r.order);
-  const setup = P.rows.filter((r) => r.cat === "other" || (r.track && !r.owner)).length;
-  if (s.emailOwner !== false && (!opt.only || opt.only === "main") && (all.length || P.overdue.length || opt.force)) {
-    let h = "<p>Purchase & Stock — " + today + "</p>";
-    h += "<p><b>Tally stock:</b> " + (P.hasStock ? "as of " + esc(P.asof) + (P.stale > 2 ? " <span style='color:#b42318'>(" + P.stale + " days old)</span>" : "") : "<span style='color:#b42318'>not received yet from Maadhu</span>") + "</p>";
-    ["prakash", "viru"].forEach((who) => {
-      const t = all.filter((r) => r.owner === who), l = P.overdue.filter((p) => p.owner === who);
-      h += "<h3 style='margin:18px 0 8px'>" + L.NAMES[who] + " — " + t.length + " to order, " + l.length + " late</h3>" + (t.length ? orderTable(t) : "") + (l.length ? "<br>" + lateTable(l) : "");
-    });
-    if (setup) h += "<p style='color:#555'>" + setup + " item(s) need a person or category set on the Stock tab.</p>";
-    h += btn(L.SITE + "/purchase/?user=main", "Open Purchase & Stock");
-    const r = await mail(s.ownerEmail, "Purchase & Stock: " + all.length + " to order, " + P.overdue.length + " late (" + today + ")", wrap(h));
-    sent.push("Ravi: " + (r.ok ? "emailed" : "email failed"));
-    if (all.length || P.overdue.length) await tg([OWNER_CHAT], "🧾 <b>Purchase " + today + "</b>: " + all.length + " to order, " + P.overdue.length + " late from supplier.\n" + L.SITE + "/purchase/?user=main");
+  const setupN = P.rows.filter((r) => r.cat === "other" || (r.track && !r.owner)).length;
+  const link = (u) => L.SITE + "/purchase/?user=" + u;
+  const section = (who, mineFlag) => {
+    const t2 = all.filter((r) => r.owner === who), l2 = P.overdue.filter((p) => p.owner === who);
+    if (!t2.length && !l2.length) return "";
+    return "<h3 style='margin:20px 0 8px'>" + L.NAMES[who] + (mineFlag ? " (yours)" : "") + " — " + t2.length + " to order" + (l2.length ? ", " + l2.length + " late" : "") + "</h3>" +
+      (t2.length ? orderTable(t2) : "") + (l2.length ? "<br><b style='color:#b42318'>Late from supplier</b>" + lateTable(l2) : "");
+  };
+  const prodNote = (!D.pt.itemLevel ? "Production is not reaching the tracker yet: Maadhu must send the Day Book as <b>XML</b> (not Excel)." :
+    !D.pt.vouchers ? "No production entries found in the Day Book yet — Virupaksha should enter each day's production in Tally as a Stock Journal." : "");
+  const setupNote = P.setup.length ? "<p style='background:#fbf3dd;padding:10px;border-radius:6px'>Running production not yet counted in the purchase list: " + P.setup.map((s) => esc(s.product) + " (" + esc(s.why) + ")").join("; ") +
+    ". Fix it on the Production tab.</p>" : "";
+  const recips = [["main", s.ownerEmail, s.emailOwner !== false], ["prakash", s.prakashEmail, s.emailStaff !== false], ["viru", s.viruEmail, s.emailStaff !== false]];
+  const any = all.length || P.overdue.length;
+  for (const [who, addr, on] of recips) {
+    if (opt.only && opt.only !== who) continue;
+    if (!on || !addr) continue;
+    if (!any && !opt.force) continue;
+    const order = ["prakash", "viru"].sort((a, c) => (a === who ? -1 : c === who ? 1 : 0));
+    let h = "<p>Good morning " + L.NAMES[who] + ",</p><p>Purchase & Stock — " + today + ". <b>Tally stock:</b> " + (P.hasStock ? "as of " + esc(P.asof) + (P.stale > 2 ? " <span style='color:#b42318'>(" + P.stale + " days old)</span>" : "") : "<span style='color:#b42318'>not received yet</span>") + "</p>";
+    if (staleNote) h += "<p style='background:#fbf3dd;padding:10px;border-radius:6px'>" + esc(staleNote) + "</p>";
+    if (prodNote) h += "<p style='background:#fbf3dd;padding:10px;border-radius:6px'>" + prodNote + "</p>";
+    h += setupNote;
+    order.forEach((w) => { h += section(w, w === who); });
+    if (!any) h += "<p>Nothing to order today.</p>";
+    if (who === "main" && setupN) h += "<p style='color:#555'>" + setupN + " item(s) need a person or category set on the Stock tab.</p>";
+    if (who !== "main") h += "<p style='color:#555'>After placing an order tap <b>Ordered</b> on the page and enter the supplier's delivery date. If an item isn't needed, tap <b>Not now</b>.</p>";
+    h += btn(link(who), "Open Purchase & Stock");
+    const mine = all.filter((r) => r.owner === who).length, late = P.overdue.filter((p) => p.owner === who).length;
+    const subj = "Purchase & Stock " + today + ": " + (who === "main" ? all.length + " to order, " + P.overdue.length + " late" : mine + " yours to order" + (late ? ", " + late + " late" : "") + " (" + all.length + " in total)");
+    const r = await mail(addr, subj, wrap(h)); sent.push(L.NAMES[who] + ": " + (r.ok ? "emailed" : "email failed"));
   }
+  for (const who of ["prakash", "viru"]) {
+    const todo = all.filter((r) => r.owner === who), late = P.overdue.filter((p) => p.owner === who);
+    if (opt.only && opt.only !== who) continue;
+    if ((todo.length || late.length) && chats[who]) await tg([chats[who]], "🧾 <b>Purchase list " + today + "</b>\n" + todo.map((r) => "• " + r.item + " — order " + fmt(r.order) + " " + r.unit).join("\n") +
+      (late.length ? "\n\n⏰ Late: " + late.map((p) => p.item + " (" + (p.supplier || "?") + ")").join(", ") : "") + "\n\n" + link(who));
+  }
+  if (any && !opt.only) await tg([OWNER_CHAT], "🧾 <b>Purchase " + today + "</b>: " + all.length + " to order, " + P.overdue.length + " late from supplier.\n" + L.SITE + "/purchase/?user=main");
 
   // Maadhu: Stock Summary missing / old → how-to, at most every 3 days
-  if ((!P.hasStock || P.stale > 2) && (!s.lastMaadhu || L.daysBetween(s.lastMaadhu, today) >= 3) && !opt.only) {
-    const h = "<p>Hello Maadhu,</p><p>Please include the <b>Stock Summary</b> in the daily Tally backup email" + (P.hasStock ? " (the last one we have is from " + esc(P.asof) + ")" : "") + ". It is used to plan raw material, perfume, box and carton purchases.</p>" +
-      "<ol><li>TallyPrime → <b>Display More Reports → Stock Summary</b> (or Gateway → Stock Summary).</li>" +
-      "<li>Press <b>Alt+F5</b> (Detailed) so every <b>item</b> shows, not just the groups. Keep the date as today.</li>" +
-      "<li>Press <b>Ctrl+E</b> (Export) → Format: <b>XML (Data Interchange)</b> → Export.</li>" +
-      "<li>Attach the file to the usual email to onamagarbathi@gmail.com with <b>backup</b> in the subject, together with the Day Book.</li></ol>" +
-      "<p>Also: please make sure the <b>Day Book export includes inventory details</b> (item, quantity) for purchase bills — the tracker uses them to close purchase orders automatically.</p><p>Thank you.</p>";
+  const needXml = !D.pt.itemLevel || (!D.pt.vouchers && !D.pt.hasOut);
+  if ((!P.hasStock || P.stale > 2 || needXml) && (!s.lastMaadhu || L.daysBetween(s.lastMaadhu, today) >= 3) && !opt.only) {
+    const h = "<p>Hello Maadhu,</p><p>Two things are needed in the daily Tally backup email so purchases and production can be planned automatically:</p>" +
+      (!P.hasStock || P.stale > 2 ? "<h3>1. Stock Summary (item-wise)" + (P.hasStock ? " — last one we have is from " + esc(P.asof) : "") + "</h3><ol><li>Gateway of Tally → <b>Stock Summary</b>, press <b>Alt+F5</b> (Detailed) so every item shows, date = today.</li><li><b>Ctrl+E</b> (Export) → Format <b>XML (Data Interchange)</b> → Export.</li></ol>" : "") +
+      (needXml ? "<h3>" + (!P.hasStock || P.stale > 2 ? "2" : "1") + ". Day Book as XML, not Excel</h3><p>The Excel Day Book has no item or quantity lines, so Virupaksha's production entries and the purchase bills' items cannot be read.</p><ol><li>Gateway of Tally → <b>Day Book</b>, set the period (yesterday to today is enough).</li><li><b>Ctrl+E</b> (Export) → Format <b>XML (Data Interchange)</b>. In the export settings set <b>Show Inventory details / Include inventory entries = Yes</b>.</li></ol>" : "") +
+      "<p>Attach the files to the usual email to onamagarbathi@gmail.com with <b>backup</b> in the subject. Please send the Day Book XML of a day when Virupaksha entered production, so the tracker can learn the voucher type name.</p><p>Thank you.</p>";
     const r = await mail(s.maadhuEmail, "Please add the Stock Summary to the daily Tally backup", wrap(h));
     s.lastMaadhu = today; sent.push("Maadhu: " + (r.ok ? "stock how-to emailed" : "email failed"));
   }

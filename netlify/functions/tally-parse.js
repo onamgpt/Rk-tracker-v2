@@ -76,7 +76,9 @@ function voucherFromEl(v, anyEW) {
     if (name && le.length < 10) le.push({ l: name.slice(0, 50), a: Math.round(raw * 100) / 100 });
   });
   const items = all(v, "ALLINVENTORYENTRIES.LIST").concat(all(v, "INVENTORYENTRIES.LIST")).slice(0, 30)
-    .map((ie) => ({ i: xt(ie, "STOCKITEMNAME"), q: num(xt(ie, "BILLEDQTY") || xt(ie, "ACTUALQTY")), a: Math.abs(num(xt(ie, "AMOUNT"))) }));
+    .map((ie) => { const qt = xt(ie, "BILLEDQTY") || xt(ie, "ACTUALQTY");
+      // o = 1 when Tally marks the line as outward / consumed (ISDEEMEDPOSITIVE = Yes). Used for Stock / Manufacturing Journals.
+      return { i: xt(ie, "STOCKITEMNAME"), q: num(qt), a: Math.abs(num(xt(ie, "AMOUNT"))), u: ((qt.match(/[A-Za-z][A-Za-z.]*/) || [""])[0] || "").slice(0, 12), o: /^yes$/i.test(xt(ie, "ISDEEMEDPOSITIVE")) ? 1 : 0 }; });
   const o = { d: tdate(own(v, "DATE") || xt(v, "DATE")), t: (v.getAttribute && v.getAttribute("VCHTYPE")) || xt(v, "VOUCHERTYPENAME"), n: own(v, "VOUCHERNUMBER") || xt(v, "VOUCHERNUMBER"),
     p: party, a: amt || best, r: xt(v, "NARRATION").slice(0, 160), _xml: 1 };
   if (items.length) o.i = items;

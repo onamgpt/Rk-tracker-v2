@@ -81,7 +81,7 @@ function load(){
 }
 
 function tabs(){
-  var T=[["todo","To order"],["on","On order"],["stock","Stock"]];
+  var T=[["todo","To order"],["on","On order"],["stock","Stock"],["prod","Production"]];
   if(D.owner) T.push(["bom","Production needs"],["set","Settings"]);
   $("tabs").innerHTML=T.map(function(t){ return '<button class="tab'+(tab===t[0]?" on":"")+'" data-t="'+t[0]+'">'+t[1]+cnt(t[0])+'</button>'; }).join("");
   Array.prototype.forEach.call($("tabs").querySelectorAll(".tab"),function(b){ b.onclick=function(){ tab=b.getAttribute("data-t"); openItem=null; render(); scrollTo(0,0); }; });
@@ -89,7 +89,8 @@ function tabs(){
 function cnt(t){ if(t==="todo"){ var n=D.pos.filter(function(p){return p.status==="suggested";}).length; return n?" ("+n+")":""; }
   if(t==="on"){ var m=D.pos.filter(function(p){return p.status==="ordered";}).length; return m?" ("+m+")":""; } return ""; }
 function render(){ tabs(); var v=$("view");
-  if(tab==="todo") return todo(v); if(tab==="on") return onOrder(v); if(tab==="stock") return stock(v); if(tab==="bom") return bom(v); if(tab==="set") return sets(v); }
+  if(tab==="todo") return todo(v); if(tab==="on") return onOrder(v); if(tab==="stock") return stock(v); if(tab==="prod") return prodTab(v); if(tab==="bom") return bom(v); if(tab==="set") return sets(v); }
+function canAct(p){ return D.owner||p.owner===USER; }
 function rowOf(item){ return D.rows.find(function(r){return r.item===item;})||{}; }
 
 function stale(){ if(!D.hasStock) return '<div class="note">No Stock Summary from Tally yet. Until Maadhu sends it, enter a physical count on the <b>Stock</b> tab for the materials that matter.</div>';
@@ -99,20 +100,22 @@ function todo(v){
   var list=D.pos.filter(function(p){return p.status==="suggested";});
   var h=stale();
   if(!list.length) h+='<div class="empty">Nothing to order today. ✅</div>';
-  var groups=D.owner?["prakash","viru",""]:[USER];
+  var groups=["prakash","viru",""]; if(!D.owner){ groups=[USER].concat(groups.filter(function(g){return g!==USER;})); }
+  var su=(D.tallyProd&&D.tallyProd.setup)||[];
+  if(su.length) h='<div class="note">Production needs to be linked for '+su.length+' running product(s) — open the <b>Production</b> tab.</div>'+h;
   groups.forEach(function(g){
     var L=list.filter(function(p){return (p.owner||"")===g;}); if(!L.length) return;
-    if(D.owner) h+='<div class="h2">'+WHO[g]+' — '+L.length+'</div>';
+    h+='<div class="h2">'+WHO[g]+(g===USER?' (yours)':'')+' — '+L.length+'</div>';
     L.forEach(function(p){ var r=rowOf(p.item);
       h+='<div class="card sug"><div class="row"><div><div class="name">'+esc(p.item)+'</div><div class="muted">'+esc((D.cats[p.cat]||""))+'</div></div>'+
       '<div style="text-align:right"><div class="muted">In stock</div><b>'+fmt(r.qty)+' '+esc(r.unit||"")+'</b>'+(r.daysLeft!=null?'<div class="badge red">~'+r.daysLeft+' days</div>':'')+'</div></div>'+
       (p.why?'<div class="why">'+esc(p.why)+'</div>':'')+
       (r.lastPurchase?'<div class="muted">Last bought '+esc(r.lastPurchase.d)+' from '+esc(r.lastPurchase.supplier)+(r.lastPurchase.rate?' @ ₹'+fmt(r.lastPurchase.rate):'')+'</div>':'')+
-      '<div class="grid"><div><label>Order qty ('+esc(p.unit||"")+')</label><input id="q_'+p.id+'" inputmode="decimal" value="'+esc(p.qty)+'"></div>'+
+      (canAct(p)?'<div class="grid"><div><label>Order qty ('+esc(p.unit||"")+')</label><input id="q_'+p.id+'" inputmode="decimal" value="'+esc(p.qty)+'"></div>'+
       '<div><label>Supplier</label><input id="s_'+p.id+'" value="'+esc(p.supplier||"")+'"></div>'+
       '<div><label>Delivery expected</label><input type="date" id="e_'+p.id+'" value="'+plus(D.today,r.lead||7)+'"></div>'+
-      '<div><label>Rate ₹ (optional)</label><input id="r_'+p.id+'" inputmode="decimal"></div></div>'+
-      '<div class="btns"><button class="b" data-ord="'+p.id+'">✓ Ordered</button><button class="b g" data-share="'+p.id+'">Send to supplier</button><button class="b r" data-snz="'+esc(p.item)+'">Not now</button></div></div>';
+      '<div><label>Rate ₹ (optional)</label><input id="r_'+p.id+'" inputmode="decimal"></div></div>':'<div class="muted" style="margin-top:6px">Suggested: <b>'+fmt(p.qty)+' '+esc(p.unit||"")+'</b>'+(p.supplier?' · '+esc(p.supplier):'')+'</div>')+
+      (canAct(p)?'<div class="btns"><button class="b" data-ord="'+p.id+'">✓ Ordered</button><button class="b g" data-share="'+p.id+'">Send to supplier</button><button class="b r" data-snz="'+esc(p.item)+'">Not now</button></div>':'<div class="muted" style="margin-top:8px">'+WHO[p.owner||""]+' orders this</div>')+'</div>';
     });
   });
   v.innerHTML=h;
@@ -135,7 +138,7 @@ function onOrder(v){
     '<div style="text-align:right"><b>'+fmt(p.orderedQty)+' '+esc(p.unit||"")+'</b>'+((p.receivedQty||0)>0?'<div class="muted">got '+fmt(p.receivedQty)+'</div>':'')+'</div></div>'+
     '<div style="margin-top:6px"><span class="badge'+(late?" red":"")+'">'+(late?"Late — was due ":"Due ")+esc(p.expected||"?")+'</span><span class="badge">Ordered '+esc(p.orderedOn)+'</span></div>'+
     (p.note?'<div class="muted" style="margin-top:6px">'+esc(p.note)+'</div>':'')+
-    '<div class="btns"><button class="b" data-rcv="'+p.id+'">Received</button><button class="b g" data-dt="'+p.id+'">New date</button><button class="b g" data-sh="'+p.id+'">Share PO</button><button class="b r" data-cx="'+p.id+'">Cancel</button></div></div>';
+    (canAct(p)?'<div class="btns"><button class="b" data-rcv="'+p.id+'">Received</button><button class="b g" data-dt="'+p.id+'">New date</button><button class="b g" data-sh="'+p.id+'">Share PO</button><button class="b r" data-cx="'+p.id+'">Cancel</button></div>':'')+'</div>';
   });
   if(done.length) h+='<div class="h2">Recently received</div><div class="card"><table>'+done.map(function(p){ return '<tr><td>'+esc(p.item)+(p.autoReceived?' <span class="badge ok">from Tally bill</span>':'')+'</td><td>'+fmt(p.receivedQty)+' '+esc(p.unit||"")+'</td><td class="muted">'+esc(p.receivedOn||"")+'</td></tr>'; }).join("")+'</table></div>';
   v.innerHTML=h;
@@ -182,6 +185,34 @@ function stock(v){
       api("itemSave",{item:openItem,patch:p}).then(function(r){ if(r.error) return toast(r.error); toast("Saved"); load(); }); };
     $("itClose").onclick=function(){ openItem=null; stock(v); };
   }
+}
+function prodTab(v){
+  var P=D.tallyProd||{}, B=P.boms||[], su=P.setup||[], h="";
+  if(!P.itemLevel) h+='<div class="note"><b>Day Book has no item lines.</b> Maadhu must export the Day Book as <b>XML</b> (Day Book → Ctrl+E → Format: XML (Data Interchange)) — the Excel version cannot show production. He will be reminded in tomorrow\'s email.</div>';
+  else if(!P.vouchers) h+='<div class="note">No production found in the Day Book yet. Virupaksha enters it in Tally as a <b>Stock Journal</b> (materials used = Source / Consumption, finished goods = Destination / Production) or a <b>Manufacturing Journal</b>. It appears here after the next Day Book XML.</div>';
+  else h+='<div class="card"><b>'+P.vouchers+'</b> production entries read from Tally in the last 120 days.</div>';
+  if(su.length){
+    h+='<div class="h2">Link running production to Tally</div><div class="muted" style="margin:0 2px 8px">Production page counts <b>cases</b>; Tally counts its own unit. Say how many Tally units make one case.</div>';
+    su.forEach(function(s,i){
+      h+='<div class="card"><div class="name">'+esc(s.product||"")+'</div><div class="muted">'+fmt(s.cases)+' cases left · '+esc(s.why)+'</div><div class="grid">'+
+        '<div><label>Tally finished item</label><select id="su_f'+i+'"><option value="">— choose —</option>'+B.map(function(b){return '<option value="'+esc(b.item)+'"'+(s.fg===b.item?" selected":"")+'>'+esc(b.item)+' ('+esc(b.unit||"")+')</option>';}).join("")+'</select></div>'+
+        '<div><label>Tally units per case</label><input id="su_u'+i+'" inputmode="decimal" placeholder="e.g. 144"></div></div>'+
+        '<div class="btns"><button class="b" data-su="'+i+'">Save</button></div></div>';
+    });
+  }
+  var R=P.recent||[];
+  if(R.length) h+='<div class="h2">Produced recently (from Tally)</div><div class="card"><table>'+R.slice(0,14).map(function(d){ return d.items.map(function(it,j){ return '<tr><td class="muted">'+(j?'':esc(d.d))+'</td><td>'+esc(it.item)+'</td><td style="text-align:right"><b>'+fmt(it.qty)+'</b> '+esc(it.unit||"")+'</td></tr>'; }).join(""); }).join("")+'</table></div>';
+  if(B.length){ h+='<div class="h2">Materials per finished unit (learned from Virupaksha\'s entries)</div>';
+    B.slice(0,15).forEach(function(b,i){ var u=(P.units||{})[b.item]||"";
+      h+='<div class="card"><div class="row"><div><div class="name">'+esc(b.item)+'</div><div class="muted">'+fmt(b.made)+' '+esc(b.unit||"")+' made in '+b.batches+' entries · last '+esc(b.last)+'</div></div></div>'+
+        '<table style="margin-top:6px">'+b.lines.slice(0,12).map(function(l){ return '<tr><td>'+esc(l.item)+'</td><td style="text-align:right">'+fmt(l.perUnit)+' '+esc(l.unit||"")+' / '+esc(b.unit||"unit")+(u?' <span class="muted">('+fmt(l.perUnit*u)+' / case)</span>':'')+'</td></tr>'; }).join("")+'</table>'+
+        '<div class="grid"><div><label>Tally units per case</label><input id="bu_'+i+'" inputmode="decimal" value="'+esc(u)+'"></div><div><label>&nbsp;</label><button class="b g" data-bu="'+i+'" style="width:100%">Save</button></div></div></div>'; }); }
+  if(!B.length&&P.itemLevel) h+='<div class="empty">No production entries yet.</div>';
+  v.innerHTML=h;
+  each(v,"[data-su]",function(b){ b.onclick=function(){ var i=+b.getAttribute("data-su"), s=su[i], fg=$("su_f"+i).value, u=$("su_u"+i).value;
+    if(!fg||!u) return toast("Choose the item and enter units per case");
+    api("unitsSave",{fg:fg,units:u,product:s.product}).then(function(r){ if(r.error) return toast(r.error); toast("Saved"); load(); }); }; });
+  each(v,"[data-bu]",function(b){ b.onclick=function(){ var i=+b.getAttribute("data-bu"); api("unitsSave",{fg:B[i].item,units:$("bu_"+i).value}).then(function(r){ if(r.error) return toast(r.error); toast("Saved"); load(); }); }; });
 }
 function bom(v){
   var names=D.rows.map(function(r){return r.item;});

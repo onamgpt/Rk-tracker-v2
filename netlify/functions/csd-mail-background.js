@@ -51,6 +51,18 @@ exports.handler = async (event) => {
         csd.orders.unshift(o); have.add(po);
         csd.forecasts.unshift({ id: "fc_" + Date.now(), period: o.poDate || C.todayIST(), fromPO: po, added: C.todayIST(), rows: o.depots.map((d) => ({ depot: d.depot, cases: d.cases })) });
         for (let i = 0; i < pdfs.length && i < bufs.length; i++) { try { await T.vaultSaveFile("CSD PO " + po + " - " + pdfs[i].name, "application/pdf", bufs[i], { kind: "csd_po", data: [], by: "email", source: "email", from: m.from }); } catch (e) {} }
+        // production orders for the shop floor (same list Virupaksha sees on the Production page); skipped if already created
+        try {
+          const prod = (await C.kvGet("production_v1")) || { orders: [] }; prod.orders = prod.orders || [];
+          const NAMES = { "13094": 'ONAM Agarbatti Sandal 7.5" (100 Sticks)', "13095": "ONAM A/Batti 15 Sticks", "13130": 'ONAM Agarbatti Rose 7.5" (100 Sticks)', "13132": 'ONAM Agarbatti 3 Fragrance 7.5" (100 Sticks)' };
+          let added = 0;
+          (o.lines || []).forEach((l) => { const cs = +l.cases || 0; if (!cs) return;
+            if (prod.orders.some((x) => x.csdPo === po && x.csdIndex === String(l.index))) return;
+            prod.orders.unshift({ id: "p_" + Math.random().toString(36).slice(2, 9), logs: [], unit: "cases", notes: "Auto from CSD PO " + po + " (email)", entryId: null,
+              product: NAMES[String(l.index)] || l.name || String(l.index), customer: "CSD PO " + po, startDate: C.todayIST(), targetCases: cs, promisedDate: o.deliveryTo || "", csdPo: po, csdIndex: String(l.index) });
+            added++; });
+          if (added) { await C.kvSet("production_v1", prod); log.pos.push("→ " + added + " production order(s) created"); }
+        } catch (e) { log.errors.push("production orders: " + e.message); }
         const cases = (o.lines || []).reduce((t, l) => t + (+l.cases || 0), 0);
         log.pos.push(po + ": " + cases + " cases, " + o.depots.length + " depots");
         await T.tg("🛡️ <b>New CSD PO " + esc(po) + "</b> added to the CSD desk\n" + cases + " cases · " + o.depots.length + " depots" + (o.deliveryTo ? " · deliver by " + o.deliveryTo : "") + "\n" + (o.lines || []).map((l) => "• " + l.index + ": " + l.cases + " cs").join("\n"));

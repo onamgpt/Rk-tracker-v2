@@ -34,6 +34,61 @@ function classify(name) {
   return "other";
 }
 
+
+// ---- Production read from Tally (Stock Journal / Manufacturing Journal in the Day Book XML) ----
+// A voucher counts as production when it has both consumed (outward) and produced (inward) stock lines.
+// Same item on both sides in equal quantity = a godown transfer, ignored.
+const JOURNAL = /journal|manufactur|production|assembl/i;
+function deriveProduction(vouchers) {
+  const days = {}, fg = {}; let seen = 0;
+  const cut = addDays(todayIST(), -120);
+  (vouchers || []).forEach((v) => {
+    if (v.c || v.o || !v.i || !v.i.length || v.d < cut) return;
+    if (!JOURNAL.test(v.t || "") && v.p) return;
+    const out = v.i.filter((x) => x.o === 1 && x.q > 0), inn = v.i.filter((x) => x.o === 0 && x.q > 0);
+    if (!out.length || !inn.length) return;
+    const outM = {}; out.forEach((x) => (outM[x.i] = (outM[x.i] || 0) + x.q));
+    const innM = {}; inn.forEach((x) => (innM[x.i] = (innM[x.i] || 0) + x.q));
+    Object.keys(innM).forEach((k) => { if (outM[k] != null && Math.abs(outM[k] - innM[k]) < 0.5) { delete outM[k]; delete innM[k]; } });
+    const prods = Object.keys(innM), mats = Object.keys(outM);
+    if (!prods.length || !mats.length) return;
+    seen++;
+    const tot = prods.reduce((s, k) => s + innM[k], 0);
+    const unitOf = {}; v.i.forEach((x) => { if (x.u) unitOf[x.i] = x.u; });
+    prods.forEach((k) => {
+      const share = innM[k] / tot, f = fg[k] = fg[k] || { item: k, unit: unitOf[k] || "", made: 0, batches: 0, last: "", use: {} };
+      f.made += innM[k]; f.batches++; if (v.d > f.last) f.last = v.d;
+      mats.forEach((m) => { const e = f.use[m] = f.use[m] || { q: 0, u: unitOf[m] || "" }; e.q += outM[m] * share; });
+      const dd = days[v.d] = days[v.d] || {}; dd[k] = (dd[k] || 0) + innM[k];
+    });
+  });
+  const boms = Object.keys(fg).map((k) => { const f = fg[k];
+    return { item: k, unit: f.unit, made: Math.round(f.made * 100) / 100, batches: f.batches, last: f.last,
+      lines: Object.keys(f.use).map((m) => ({ item: m, unit: f.use[m].u, perUnit: f.use[m].q / f.made })).sort((a, b) => b.perUnit - a.perUnit) }; })
+    .sort((a, b) => (a.last < b.last ? 1 : -1));
+  // materials consumed per day over the last 60 days → daily use
+  const consumed = {}, since = addDays(todayIST(), -60);
+  (vouchers || []).forEach((v) => { if (v.c || v.o || !v.i || v.d < since || !(JOURNAL.test(v.t || "") || !v.p)) return;
+    const oM = {}, iM = {}; v.i.forEach((x) => { if (!(x.q > 0)) return; (x.o === 1 ? oM : iM)[x.i] = ((x.o === 1 ? oM : iM)[x.i] || 0) + x.q; });
+    Object.keys(iM).forEach((k) => { if (oM[k] != null && Math.abs(oM[k] - iM[k]) < 0.5) { delete oM[k]; delete iM[k]; } });
+    if (!Object.keys(iM).length) return;
+    Object.keys(oM).forEach((k) => (consumed[k] = (consumed[k] || 0) + oM[k])); });
+  const recent = Object.keys(days).sort().slice(-30).reverse().map((d) => ({ d, items: Object.keys(days[d]).map((k) => ({ item: k, qty: Math.round(days[d][k] * 100) / 100, unit: (fg[k] || {}).unit || "" })) }));
+  return { boms, recent, consumed, vouchers: seen,
+    itemLevel: (vouchers || []).some((v) => v.i && v.i.length), hasOut: (vouchers || []).some((v) => v.i && v.i.some((x) => x.o === 1)) };
+}
+const STOP = /\b(box|boxes|pack|packs|pcs|nos|no|of|the|and|sticks?|stick|agarbat\w*|incense|case|cases|gm|gms|g)\b/g;
+const toks = (s) => norm(s).replace(STOP, " ").replace(/[^a-z0-9 ]/g, " ").split(" ").filter((x) => x.length > 1);
+function matchProduct(name, list, alias) {
+  if (alias && alias[name] && list.indexOf(alias[name]) >= 0) return alias[name];
+  const n = norm(name); let best = null, score = 0;
+  list.forEach((k) => { const kn = norm(k); let s = 0;
+    if (kn === n) s = 3; else if (kn.indexOf(n) >= 0 || n.indexOf(kn) >= 0) s = 2;
+    else { const a = toks(name), b = toks(k); if (a.length && b.length) { const c = a.filter((x) => b.indexOf(x) >= 0).length; const f = c / Math.max(a.length, b.length); if (f >= 0.6) s = 1 + f / 2; } }
+    if (s > score) { score = s; best = k; } });
+  return best;
+}
+
 async function settings() { return Object.assign({}, SDEF, (await kvGet("purchase_settings")) || {}); }
 
 async function checkPin(user, pin) {
@@ -82,11 +137,14 @@ function lastPurchase(vouchers, name) {
 }
 
 async function load() {
-  const [s, items, counts, hist, boms, pos, stock, vch, prod, snooze] = await Promise.all([
+  const [s, items, counts, hist, boms, pos, stock, vch, prod, snooze, units, alias] = await Promise.all([
     settings(), kvGet("purchase_items"), kvGet("purchase_counts"), kvGet("purchase_stock_hist"), kvGet("purchase_boms"),
-    kvGet("purchase_pos"), kvGet("tally_stock"), kvGet("tally_vouchers"), kvGet("production_v1"), kvGet("purchase_snooze")]);
+    kvGet("purchase_pos"), kvGet("tally_stock"), kvGet("tally_vouchers"), kvGet("production_v1"), kvGet("purchase_snooze"),
+    kvGet("purchase_units"), kvGet("purchase_alias")]);
+  const vouchers = (vch && vch.list) || [];
   return { s, items: items || {}, counts: counts || {}, hist: hist || [], boms: boms || {}, pos: (pos && pos.list) ? pos : { list: [] },
-    stock: stock || { rows: [] }, vouchers: ((vch && vch.list) || []), prod: (prod && prod.orders) || [], snooze: snooze || {} };
+    stock: stock || { rows: [] }, vouchers, prod: (prod && prod.orders) || [], snooze: snooze || {},
+    units: units || {}, alias: alias || {}, pt: deriveProduction(vouchers) };
 }
 
 // Purchase bills in the Day Book close orders automatically.
@@ -117,12 +175,21 @@ function plan(D) {
   Object.keys(D.counts).forEach((k) => names.add(k));
   // production need: balance cases × BOM per case
   const bomBy = {}; Object.keys(D.boms).forEach((k) => (bomBy[norm(k)] = D.boms[k]));
+  const autoBy = {}; ((D.pt && D.pt.boms) || []).forEach((b) => (autoBy[b.item] = b));
+  const setup = [];      // production products whose BOM exists in Tally but units-per-case isn't set
   const prodNeed = {}, prodFor = {};
   D.prod.forEach((o) => {
     const made = (o.logs || []).reduce((t, l) => t + (+l.qty || 0), 0);
     const bal = Math.max(0, (+o.targetCases || 0) - made); if (!bal) return;
-    const bom = bomBy[norm(o.product)]; if (!bom) return;
-    bom.forEach((l) => { if (!l.item) return; names.add(l.item);
+    let lines = bomBy[norm(o.product)];            // 1) BOM typed by Ravi wins
+    if (!lines) {                                   // 2) BOM learned from Virupaksha's Tally entries
+      const fgKey = matchProduct(o.product || "", Object.keys(autoBy), D.alias);
+      if (!fgKey) { setup.push({ product: o.product, why: "no matching finished item in Tally production yet", cases: bal }); return; }
+      const upc = +D.units[fgKey] || 0;
+      if (!upc) { setup.push({ product: o.product, fg: fgKey, why: "set units per case", cases: bal }); return; }
+      lines = autoBy[fgKey].lines.map((l) => ({ item: l.item, perCase: l.perUnit * upc }));
+    }
+    lines.forEach((l) => { if (!l.item) return; names.add(l.item);
       prodNeed[l.item] = (prodNeed[l.item] || 0) + bal * (+l.perCase || 0);
       (prodFor[l.item] = prodFor[l.item] || []).push((o.customer || o.product) + " (" + bal + " cs)"); });
   });
@@ -138,7 +205,8 @@ function plan(D) {
     const cnt = D.counts[name];
     let qty = tr ? tr.qty : null, src = tr ? "Tally " + (asof || "") : "", unit = cfg.unit || (tr && tr.unit) || "";
     if (cnt && (!tr || !asof || cnt.d >= asof)) { qty = cnt.qty; src = "Count by " + (NAMES[cnt.by] || cnt.by) + " " + cnt.d; }
-    const use = usage(D.hist, name);
+    const consDay = D.pt && D.pt.consumed && D.pt.consumed[name] ? D.pt.consumed[name] / 60 : 0;
+    const use = consDay > 0 ? consDay : usage(D.hist, name);   // real consumption from Tally journals beats stock-drop guesses
     const lead = +cfg.leadDays || s.defaultLead, cover = s.coverDays;
     const min = +cfg.min || 0, need = prodNeed[name] || 0, oo = onOrder[name] || 0;
     const lp = lastPurchase(D.vouchers, name);
@@ -164,7 +232,7 @@ function plan(D) {
   });
   out.sort((a, b) => (b.order ? 1 : 0) - (a.order ? 1 : 0) || (a.daysLeft == null ? 1e9 : a.daysLeft) - (b.daysLeft == null ? 1e9 : b.daysLeft) || a.item.localeCompare(b.item));
   const overdue = D.pos.list.filter((p) => p.status === "ordered" && p.expected && p.expected < today);
-  return { today, asof, stale: asof ? daysBetween(asof, today) : null, rows: out, overdue, hasStock: stockRows.length > 0 };
+  return { today, asof, stale: asof ? daysBetween(asof, today) : null, rows: out, overdue, setup, hasStock: stockRows.length > 0 };
 }
 
 // Turn today's suggestions into PO lines (status "suggested"), keeping ids stable per item.
@@ -180,5 +248,5 @@ function syncSuggestions(D, P) {
   D.pos.list = keep.filter((p) => p.status === "suggested" || p.status === "ordered" || (p.receivedOn || p.cancelledOn || p.created || P.today) >= cut);
 }
 
-module.exports = { kvGet, kvSet, hash, todayIST, addDays, daysBetween, norm, classify, settings, checkPin, recordStock, load, plan, autoReceive,
+module.exports = { deriveProduction, matchProduct, kvGet, kvSet, hash, todayIST, addDays, daysBetween, norm, classify, settings, checkPin, recordStock, load, plan, autoReceive,
   syncSuggestions, USERS, NAMES, CATS, OWNER_OF, SITE };
