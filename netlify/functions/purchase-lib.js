@@ -323,7 +323,7 @@ function plan(D) {
     const lp = lastPurchase(D.vouchers, name);
     const row = { item: name, cat, owner, track, unit, qty, src, use: Math.round(use * 100) / 100,
       daysLeft: use > 0 && qty != null ? Math.floor(qty / use) : null, min, lead, prodNeed: need, prodFor: prodFor[name] || [],
-      onOrder: oo, supplier: cfg.supplier || (lp && lp.supplier) || "", lastPurchase: lp, reorderQty: +cfg.reorderQty || 0, note: cfg.note || "" };
+      onOrder: oo, supplier: cfg.supplier || (lp && lp.supplier) || "", lastPurchase: lp, reorderQty: +cfg.reorderQty || 0, packSize: +cfg.packSize || 0, note: cfg.note || "" };
     if (track && owner && qty != null) {
       const have = qty + oo;
       const point = Math.max(min, use * lead) + need;

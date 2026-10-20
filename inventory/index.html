@@ -55,11 +55,11 @@ function load(){ return api("state").then(function(r){
   localStorage.setItem(PK,pin); D=r; $("pinBox").style.display="none"; $("app").style.display="";
   $("hsub").textContent=D.name+" · "+D.today+" · "+D.today_ev.length+" scans today"; tabs(); render();
 }).catch(function(){ toast("No connection"); }); }
-function tabs(){ var T=[["scan","Scan"]]; if(USER==="gate"||USER==="main") T.push(["in","Inward"]); T.push(["stock","Stock"],["today","Today"]);
+function tabs(){ var T=[["scan","Scan"]]; if(USER==="gate"||USER==="main") T.push(["exp","Expected"],["in","Manual inward"]); T.push(["stock","Stock"],["today","Today"]);
   $("tabs").innerHTML=T.map(function(t){return '<button class="tab'+(tab===t[0]?" on":"")+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join("");
   Array.prototype.forEach.call($("tabs").querySelectorAll(".tab"),function(b){ b.onclick=function(){ tab=b.getAttribute("data-t"); cur=null; render(); }; }); }
 function render(){ if(tab!=="scan") stopCam(); tabs();
-  if(tab==="scan") return scanView(); if(tab==="in") return inView(); if(tab==="stock") return stockView(); if(tab==="today") return todayView(); }
+  if(tab==="scan") return scanView(); if(tab==="exp") return expView(); if(tab==="in") return inView(); if(tab==="stock") return stockView(); if(tab==="today") return todayView(); }
 
 // ---------- scan ----------
 function scanView(){
@@ -83,24 +83,52 @@ function loop(){ if(!scanning||tab!=="scan") return; var v=$("video"); if(!v||v.
     var im=ctx.getImageData(0,0,cv.width,cv.height), r=jsQR(im.data,im.width,im.height); if(r&&r.data) onCode(r.data); setTimeout(loop,200); } else setTimeout(loop,300); }
 function onCode(raw){ var c=String(raw||""); if(c.indexOf("ONAMI:")!==0) return; var n=Date.now(); if(c===lastCode&&n-lastAt<4000) return; lastCode=c; lastAt=n; lookup(c); }
 function stopCam(){ scanning=false; if(stream){ stream.getTracks().forEach(function(t){t.stop();}); stream=null; } }
-function lookup(code){ api("scan",{code:code}).then(function(r){ if(r.error==="pin") return lock("Session ended"); if(!r.ok){ toast(r.msg||"Not recognised"); return; } cur=r; showLot(r); beep(); }); }
+function lookup(code){ api("scan",{code:code}).then(function(r){ if(r.error==="pin") return lock("Session ended"); if(!r.ok){ toast(r.msg||"Not recognised"); return; } cur=r; beep();
+  if(r.lot.status==="expected"&&r.can){ api("act",{id:r.lot.id,what:"receive"}).then(function(x){ if(x.error){ showLot(r); return toast(x.error); } toast("Received · "+r.lot.item+(x.progress?" · "+x.progress:"")); r.lot.status="store"; showLot(r); }); return; }
+  showLot(r); }); }
 function beep(){ try{ var a=new (window.AudioContext||window.webkitAudioContext)(); var o=a.createOscillator(); o.connect(a.destination); o.frequency.value=900; o.start(); o.stop(a.currentTime+0.1); }catch(e){} }
 function showLot(r){
-  var l=r.lot, st={store:'<span class="badge ok">In store</span>',issued:'<span class="badge w">Issued to '+esc(l.dept||"")+'</span>',used:'<span class="badge red">Fully used</span>'}[l.status];
-  var h='<div class="card"><div class="big">'+esc(l.item)+'</div><div class="muted">'+esc(l.supplier||"")+' · received '+esc(l.recvd)+' · package '+l.no+' of '+l.of+'</div>'+
+  var l=r.lot, st={expected:'<span class="badge">Expected — not yet received</span>',store:'<span class="badge ok">In store</span>',issued:'<span class="badge w">Issued to '+esc(l.dept||"")+'</span>',used:'<span class="badge red">Fully used</span>'}[l.status];
+  var h='<div class="card"><div class="big">'+esc(l.item)+'</div><div class="muted">'+esc(l.supplier||"")+(l.bill?' · bill '+esc(l.bill):'')+(l.recvd?' · received '+esc(l.recvd):'')+' · package '+l.no+' of '+l.of+(l.batch?' · batch '+esc(l.batch):'')+(l.expiry?' · expiry '+esc(l.expiry):'')+'</div>'+
     '<div style="margin:10px 0" class="row"><span>'+st+'</span><b>'+fmt(l.qty)+' '+esc(l.unit)+(l.qty!==l.orig?' <span class="muted">(of '+fmt(l.orig)+')</span>':'')+'</b></div>';
   if(!r.can) h+='<div class="muted">'+esc(r.who)+' handles this material.</div>';
+  else if(l.status==="expected") h+='<button id="aRecv" style="width:100%">✓ Received at gate</button>';
   else if(l.status==="store") h+='<button id="aIssue" style="width:100%">Issue to '+esc(l.toDept)+'</button>';
   else if(l.status==="issued") h+='<label>Quantity left to return ('+esc(l.unit)+')</label><input id="retQ" inputmode="decimal" placeholder="e.g. 12.5">'+
      '<div class="row" style="margin-top:10px"><button id="aRet">Return to store</button><button class="r" id="aUsed">Fully used</button></div>';
   h+='</div>'; $("lot").innerHTML=h;
+  if($("aRecv")) $("aRecv").onclick=function(){ doAct("receive"); };
   if($("aIssue")) $("aIssue").onclick=function(){ doAct("issue"); };
   if($("aRet")) $("aRet").onclick=function(){ var q=$("retQ").value; if(!q) return toast("Enter the quantity left"); doAct("return",q); };
   if($("aUsed")) $("aUsed").onclick=function(){ if(confirm("Mark this package fully used?")) doAct("used"); };
 }
 function doAct(what,q){ api("act",{id:cur.lot.id,what:what,qty:q}).then(function(r){ if(r.error) return toast(r.error);
-  toast(what==="issue"?"Issued":what==="return"?"Returned to store":"Closed — fully used"); cur=null; $("lot").innerHTML=""; load(); }); }
+  toast(what==="receive"?"Received"+(r.progress?" · "+r.progress:""):what==="issue"?"Issued":what==="return"?"Returned to store":"Closed — fully used"); cur=null; $("lot").innerHTML=""; load(); }); }
 
+var EXP=null;
+function expView(){
+  $("view").innerHTML='<div class="card">Loading…</div>';
+  api("expected").then(function(r){ if(r.error) return toast(r.error); EXP=r;
+    var h='<div class="card"><div class="row"><b>Deliveries billed, not yet fully received</b><button class="g" id="chk">Check bills now</button></div><div class="muted">Bills arrive by email and from the Telegram Purchase group every 2 hours. Print the labels when a bill appears and keep them with the bill at the gate. Scanning a label at the gate marks that package received.</div></div>';
+    if(!r.open.length) h+='<div class="card muted">Nothing expected right now.</div>';
+    r.open.forEach(function(e){
+      h+='<div class="card"><div class="row"><div><b>'+esc(e.supplier||"Supplier?")+'</b><div class="muted">Bill '+esc(e.billNo||"—")+' · '+esc(e.billDate||"")+' · from '+esc(e.source)+'</div></div><div style="text-align:right">'+
+        '<span class="badge'+(e.late?' red':(e.got?' w':''))+'">'+e.got+' of '+e.total+' received</span><div class="muted">'+(e.late?'late — was due ':'due by ')+esc(e.due)+'</div></div></div><table style="margin-top:6px">'+
+        e.lines.map(function(l){ return '<tr><td>'+esc(l.item)+(l.batch?'<div class="muted">batch '+esc(l.batch)+(l.expiry?' · exp '+esc(l.expiry):'')+'</div>':'')+'</td><td style="text-align:right">'+fmt(l.qty)+' '+esc(l.unit)+'<div class="muted">'+l.packages+' × '+fmt(l.per)+(l.checkPackages?' <span class="badge w">check count</span>':'')+'</div></td></tr>'; }).join("")+'</table>'+
+        (e.photos&&e.photos.length?'<div class="muted" style="margin-top:6px">Photos: '+e.photos.map(function(u,i){return '<a href="'+esc(u)+'" target="_blank">'+(i+1)+'</a>';}).join(" · ")+'</div>':'')+
+        '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button data-pl="'+e.id+'">'+(e.printed?'Reprint labels':'Print labels')+'</button>'+(USER==="main"?'<button class="r" data-cx="'+e.id+'">Remove</button>':'')+'</div></div>';
+    });
+    if(USER==="main"&&r.suppliers.length) h+='<div class="card"><b>Suppliers</b><div class="muted">Days from bill to arrival are learned automatically; type a number to fix it (e.g. 15 for Kelkar). Add bill e-mail addresses so their bills are read.</div><table>'+
+      r.suppliers.map(function(s,i){ var t=(s.transits||[]).slice().sort(function(a,b){return a-b;}); var lr=t.length?t[Math.floor(t.length/2)]:null;
+        return '<tr><td>'+esc(s.name)+'<input id="se'+i+'" value="'+esc((s.emails||[]).join(", "))+'" placeholder="bill email(s)" style="margin-top:4px"></td><td style="width:120px"><input id="st'+i+'" inputmode="numeric" value="'+esc(s.transitSet||"")+'" placeholder="'+(lr!=null?lr+' (learned)':'days')+'"><button class="g" data-ss="'+i+'" style="margin-top:4px;width:100%">Save</button></td></tr>'; }).join("")+'</table></div>';
+    if(USER==="main"&&r.log&&r.log.length) h+='<div class="card"><b>Recent bill reading</b>'+r.log.map(function(x){return '<div class="muted" style="margin-top:4px">'+esc(x.at.slice(0,16).replace("T"," "))+' — '+esc((x.log||[]).join(" · ")||"nothing new")+'</div>';}).join("")+'</div>';
+    $("view").innerHTML=h;
+    $("chk").onclick=function(){ api("checkNow").then(function(){ toast("Checking — reopen this tab in a few minutes"); }); };
+    Array.prototype.forEach.call($("view").querySelectorAll("[data-pl]"),function(b){ b.onclick=function(){ var id=b.getAttribute("data-pl"); api("expLabels",{id:id}).then(function(x){ if(x.error) return toast(x.error); printLabels(x.labels); api("expLabels",{id:id,done:true}); }); }; });
+    Array.prototype.forEach.call($("view").querySelectorAll("[data-cx]"),function(b){ b.onclick=function(){ if(confirm("Remove this expected delivery and its unused labels?")) api("expCancel",{id:b.getAttribute("data-cx")}).then(function(){ toast("Removed"); expView(); }); }; });
+    Array.prototype.forEach.call($("view").querySelectorAll("[data-ss]"),function(b){ b.onclick=function(){ var i=+b.getAttribute("data-ss"); api("supplierSave",{name:r.suppliers[i].name,emails:$("se"+i).value,transit:$("st"+i).value}).then(function(x){ toast(x.error||"Saved"); }); }; });
+  });
+}
 // ---------- inward (security) ----------
 function inView(){
   var h='<div class="card"><b>Goods received at the gate</b><div class="muted">One entry per material on the supplier\'s bill. A label is printed for every package.</div>'+
@@ -123,7 +151,7 @@ function inView(){
 }
 function printLabels(L){
   $("labels").innerHTML=L.map(function(l){ var q=qrcode(0,"M"); q.addData("ONAMI:"+l.token); q.make();
-    return '<div class="lab"><div class="qr">'+q.createImgTag(4,0)+'</div><div><div class="t">'+esc(l.item)+'</div><div class="n">'+l.no+' / '+l.of+' · '+fmt(l.qty)+' '+esc(l.unit)+'</div><div class="s">'+esc(l.supplier||"")+'<br>Bill '+esc(l.bill||"—")+' · '+esc(l.recvd)+'<br>Onam Agarbathi</div></div></div>'; }).join("");
+    return '<div class="lab"><div class="qr">'+q.createImgTag(4,0)+'</div><div><div class="t">'+esc(l.item)+'</div><div class="n">'+l.no+' / '+l.of+' · '+fmt(l.qty)+' '+esc(l.unit)+'</div><div class="s">'+esc(l.supplier||"")+'<br>Bill '+esc(l.bill||"—")+(l.recvd&&l.recvd!=="expected"?' · '+esc(l.recvd):'')+(l.batch?'<br>Batch '+esc(l.batch)+(l.expiry?' · Exp '+esc(l.expiry):''):'')+'<br>Onam Agarbathi</div></div></div>'; }).join("");
   setTimeout(function(){ window.print(); },300);
 }
 

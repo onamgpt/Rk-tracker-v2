@@ -165,6 +165,7 @@ function stock(v){
       '<div><label>Usual order qty</label><input id="i_rq" inputmode="decimal" value="'+esc(r.reorderQty||"")+'"></div>'+
       '<div><label>Supplier takes (days)</label><input id="i_ld" inputmode="numeric" value="'+esc(r.lead||"")+'"></div>'+
       '<div><label>Supplier</label><input id="i_sup" value="'+esc(r.supplier||"")+'"></div>'+
+      '<div><label>Pack size (per bag/drum)</label><input id="i_pk" inputmode="decimal" value="'+esc((r.packSize)||"")+'" placeholder="e.g. 25"></div>'+
       '<div><label>Category</label><select id="i_cat">'+Object.keys(D.cats).map(function(k){return '<option value="'+k+'"'+(k===r.cat?" selected":"")+'>'+esc(D.cats[k])+'</option>';}).join("")+'</select></div>'+
       (D.owner?'<div><label>Who orders it</label><select id="i_own">'+["prakash","viru","main",""].map(function(k){return '<option value="'+k+'"'+(k===(r.owner||"")?" selected":"")+'>'+WHO[k]+'</option>';}).join("")+'</select></div>':'')+
       '<div><label>Unit</label><input id="i_unit" value="'+esc(r.unit||"")+'"></div>'+
@@ -180,7 +181,7 @@ function stock(v){
   each(v,"[data-it]",function(c){ c.onclick=function(e){ if(e.target.closest("input,select,button")) return; var it=c.getAttribute("data-it"); openItem=openItem===it?null:it; stock(v); }; });
   if(openItem){
     $("cntGo").onclick=function(){ var q=$("cnt").value; if(q==="") return; api("count",{item:openItem,qty:q}).then(function(r){ if(r.error) return toast(r.error); toast("Count saved"); load(); }); };
-    $("itSave").onclick=function(){ var p={min:$("i_min").value,reorderQty:$("i_rq").value,leadDays:$("i_ld").value,supplier:$("i_sup").value,cat:$("i_cat").value,unit:$("i_unit").value,track:$("i_tr").value==="1"};
+    $("itSave").onclick=function(){ var p={min:$("i_min").value,reorderQty:$("i_rq").value,leadDays:$("i_ld").value,packSize:$("i_pk").value,supplier:$("i_sup").value,cat:$("i_cat").value,unit:$("i_unit").value,track:$("i_tr").value==="1"};
       if($("i_own")) p.owner=$("i_own").value;
       api("itemSave",{item:openItem,patch:p}).then(function(r){ if(r.error) return toast(r.error); toast("Saved"); load(); }); };
     $("itClose").onclick=function(){ openItem=null; stock(v); };

@@ -37,7 +37,7 @@ exports.handler = async (event) => {
       const name = clip(b.item, 120); if (!name) return OK({ error: "item?" });
       const cur = D.items[name] || {}, p = b.patch || {};
       if (!owner && cur.owner && cur.owner !== me) return OK({ error: "not your item" });
-      ["min", "reorderQty", "leadDays"].forEach((k) => { if (p[k] != null) cur[k] = num(p[k]); });
+      ["min", "reorderQty", "leadDays", "packSize"].forEach((k) => { if (p[k] != null) cur[k] = num(p[k]); });
       ["supplier", "unit", "note", "supplierPhone"].forEach((k) => { if (p[k] != null) cur[k] = clip(p[k], 120); });
       if (p.cat != null && L.CATS[p.cat]) cur.cat = p.cat;
       if (p.track != null) cur.track = !!p.track;
@@ -54,7 +54,9 @@ exports.handler = async (event) => {
         expected: b.expected || L.addDays(today, num(b.lead) || (D.items[p.item] || {}).leadDays || D.s.defaultLead), rate: num(b.rate) || null,
         note: clip(b.note, 200), poNo: "ONAM/PO/" + fy + "-" + String(fy + 1).slice(2) + "/" + String(D.s.poSeq).padStart(4, "0"), receivedQty: 0 });
       if (b.supplier) { const it = D.items[p.item] || {}; it.supplier = clip(b.supplier); D.items[p.item] = it; await L.kvSet("purchase_items", D.items); }
-      await savePos(); return OK({ ok: true, po: p });
+      await savePos();
+      try { await require("./inward.js").fromPO(p); } catch (e) {}   // labels ready for the gate when the pack size is known
+      return OK({ ok: true, po: p });
     }
     if (b.action === "receive") {
       const p = D.pos.list.find((x) => x.id === b.id); if (!p) return OK({ error: "not found" });

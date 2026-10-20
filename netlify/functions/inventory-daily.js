@@ -13,7 +13,8 @@ async function run(opt) {
   const s = await L.settings(), items = (await L.kvGet("purchase_items")) || {};
   const today = L.todayIST();
   const ev = []; lots.forEach((l) => l.ev.forEach((e) => { if (e.d === today) ev.push(Object.assign({ item: l.item, unit: l.unit, supplier: l.supplier }, e)); }));
-  if (!ev.length && !opt.force && new Date(Date.now() + 5.5 * 3600e3).getUTCDay() !== 1) return { skipped: "no scans today" };
+  const anyExp = ((await L.kvGet("inv_expected")) || []).some((e) => !e.done);
+  if (!ev.length && !anyExp && !opt.force && new Date(Date.now() + 5.5 * 3600e3).getUTCDay() !== 1) return { skipped: "no scans today" };
   const agg = (t) => { const o = {}; ev.filter((e) => e.t === t).forEach((e) => { const k = e.item + "|" + e.unit; const a = o[k] = o[k] || { item: e.item, unit: e.unit, q: 0, n: 0, sup: new Set(), by: new Set() }; a.q += e.q; a.n++; if (e.supplier) a.sup.add(e.supplier); a.by.add(I.NAMES[e.by] || e.by); }); return Object.values(o); };
   const inw = agg("in"), iss = agg("issue"), ret = agg("return"), used = ev.filter((e) => e.t === "used");
   const st = I.stock(lots);
@@ -24,6 +25,15 @@ async function run(opt) {
   h += "<h3>Issued to departments (counted as consumed)</h3>" + (iss.length ? tbl(["Material", "Quantity", "Packages", "By"], iss.map((a) => [esc(a.item), f(a.q) + " " + esc(a.unit), a.n, esc(Array.from(a.by).join(", "))])) : "<p>Nothing issued today.</p>");
   if (ret.length) h += "<h3>Returned to store</h3>" + tbl(["Material", "Quantity back", "Packages"], ret.map((a) => [esc(a.item), f(a.q) + " " + esc(a.unit), a.n]));
   if (used.length) h += "<p>" + used.length + " drum(s)/package(s) marked fully used today.</p>";
+  const exps = ((await L.kvGet("inv_expected")) || []).filter((e) => !e.done), S = (await L.kvGet("inv_suppliers")) || {}, IW = require("./inward.js");
+  const lateRows = [], shortRows = [];
+  exps.forEach((e) => { const mine = lots.filter((l) => l.expId === e.id), got = mine.filter((l) => l.status !== "expected").length, due = L.addDays(e.billDate || e.created, IW.transitFor(S, e.supplier));
+    if (got > 0 && got < mine.length && e.firstIn && e.firstIn < today) shortRows.push([esc(e.supplier), esc(e.billNo || "—"), got + " of " + mine.length, esc(e.firstIn)]);
+    else if (got === 0 && due < today) lateRows.push([esc(e.supplier), esc(e.billNo || "—"), esc(e.billDate || ""), "<b style='color:#b42318'>" + esc(due) + "</b>"]); });
+  if (shortRows.length) h += "<h3 style='color:#b42318'>Short deliveries — fewer packages arrived than billed</h3>" + tbl(["Supplier", "Bill", "Received", "Since"], shortRows);
+  if (lateRows.length) h += "<h3>Late — billed but not arrived</h3>" + tbl(["Supplier", "Bill", "Billed", "Was due"], lateRows);
+  const waiting = exps.filter((e) => !e.printed).length;
+  if (waiting) h += "<p>" + waiting + " delivery bill(s) have labels waiting to be printed (Inventory → Expected).</p>";
   if (low.length) h += "<h3 style='color:#b42318'>Store stock below minimum</h3>" + tbl(["Material", "In store", "Minimum"], low.map((x) => [esc(x.item), f(x.store) + " " + esc(x.unit), f(+items[x.item].min)]));
   if (oldDrums.length) h += "<h3>Perfume / chemical drums open over 30 days</h3>" + tbl(["Material", "Left", "Issued on"], oldDrums.map((l) => [esc(l.item), f(l.qty) + " " + esc(l.unit), esc(l.ev[l.ev.length - 1].d)]));
   // Mondays: scanned stock vs Tally
