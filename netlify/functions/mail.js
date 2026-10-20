@@ -26,9 +26,27 @@ exports.handler = async (event) => {
 
   let body = {};
   try { body = JSON.parse(event.body || "{}"); } catch (e) {}
-  const { to, subject, html, text } = body;
+  let { to, subject, html, text } = body;
   if (!to || !subject) {
     return { statusCode: 400, headers: h, body: JSON.stringify({ ok: false, error: "to and subject required" }) };
+  }
+  // Owner digest (Ravi, Oct 2026): every email meant for the owner from the tracker's own jobs is held and sent once a day
+  // as one summary (owner-digest.js, 19:30 IST). Only internal calls (no HTTP headers) are held; body.direct bypasses it.
+  if (!event.headers && !body.direct) {
+    const OWNER = ["onamagarbathi@gmail.com"];
+    const list = (Array.isArray(to) ? to : [to]).map((x) => String(x).trim()).filter(Boolean);
+    const forOwner = list.filter((x) => OWNER.indexOf(x.toLowerCase()) >= 0);
+    if (forOwner.length) {
+      try {
+        const db = require("./db.js");
+        const call = async (b) => JSON.parse((await db.handler({ httpMethod: "POST", body: JSON.stringify(b) })).body || "{}");
+        const cur = (await call({ action: "getPortfolio", user: "main", key: "owner_digest" })).data || { items: [] };
+        cur.items = (cur.items || []).concat({ at: new Date().toISOString(), subject, html: html || "", text: text || "" }).slice(-80);
+        await call({ action: "savePortfolio", user: "main", key: "owner_digest", data: cur });
+        to = list.filter((x) => forOwner.indexOf(x) < 0);
+        if (!to.length) return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, digested: true }) };
+      } catch (e) { /* holding failed: send normally to everyone */ }
+    }
   }
 
   const payload = JSON.stringify({
