@@ -71,14 +71,31 @@ function tabs(){
 function render(){ if(tab!=="scan") stopCam(); tabs();
   if(tab==="scan") return scanView(); if(tab==="today") return todayView(); if(tab==="workers") return workersView(); if(tab==="report") return reportView(); }
 
+// ---------- 2D barcode scanner (USB / Bluetooth, types like a keyboard) ----------
+// Keystrokes arriving quickly and ending in Enter are treated as one scan. Typing in a box is left alone.
+function onScanner(handler){
+  var buf="", last=0;
+  document.addEventListener("keydown",function(e){
+    var el=document.activeElement, typing=el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA"||el.tagName==="SELECT")&&el.id!=="pin";
+    if(typing||$("app").style.display==="none") return;
+    var now=Date.now(); if(now-last>80) buf=""; last=now;
+    if(e.key==="Enter"){ if(buf.length>=8){ var s=buf; buf=""; e.preventDefault(); handler(s.trim()); } buf=""; return; }
+    if(e.key&&e.key.length===1) buf+=e.key;
+  });
+}
+var SCANNER=localStorage.getItem("scanner_mode")==="1";
+function scannerToggle(){ return '<label style="display:flex;gap:8px;align-items:center;font-size:14px;color:var(--muted);margin-top:8px"><input type="checkbox" id="scMode" style="width:auto"'+(SCANNER?" checked":"")+'> Barcode scanner connected (camera off)</label>'; }
+function bindScannerToggle(after){ var c=$("scMode"); if(!c) return; c.onchange=function(){ SCANNER=c.checked; localStorage.setItem("scanner_mode",SCANNER?"1":"0"); after(); }; }
 // ---------- scanning ----------
 function scanView(){
   $("view").innerHTML='<div class="card"><video id="video" playsinline muted></video><canvas id="cv" style="display:none"></canvas>'+
     '<div id="banner"></div>'+
     '<div class="muted" style="margin-top:10px">Hold the card to the camera. IN and OUT alternate automatically.</div>'+
     '<div style="margin-top:10px;display:flex;gap:8px"><input id="manual" placeholder="Card code (if camera fails)"><button class="g" id="manGo">Enter</button></div></div>';
-  $("manGo").onclick=function(){ var v=$("manual").value.trim(); if(v){ $("manual").value=""; submit(v.replace(PREFIX,"")); } };
-  startCam();
+  $("manGo").onclick=function(){ var v=$("manual").value.trim(); if(v){ $("manual").value=""; anyScan(v); } };
+  $("manual").onkeydown=function(e){ if(e.key==="Enter"){ e.preventDefault(); $("manGo").click(); } };
+  $("manGo").parentNode.insertAdjacentHTML("afterend", scannerToggle()); bindScannerToggle(scanView);
+  if(SCANNER){ var vd=$("video"); if(vd) vd.style.display="none"; stopCam(); showBanner("WARN","Ready — scan a card or label"); } else startCam();
 }
 function startCam(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ showBanner("WARN","Camera not available here — type the card code below"); return; }
@@ -102,9 +119,31 @@ function loop(){
   } else setTimeout(loop,300);
 }
 function onCode(raw){
-  var tok=String(raw||""); if(tok.indexOf(PREFIX)!==0) return; tok=tok.slice(PREFIX.length);
-  var now=Date.now(); if(tok===lastTok&&now-lastAt<3000) return; lastTok=tok; lastAt=now; submit(tok);
+  var c=String(raw||""); if(!/^ONAM[GCI]:/.test(c)) return;
+  var now=Date.now(); if(c===lastTok&&now-lastAt<3000) return; lastTok=c; lastAt=now; anyScan(c);
 }
+// Security's single screen: worker card → attendance, carton label → dispatch loading, inward label → received
+function anyScan(raw){
+  var c=String(raw||"").trim();
+  if(tab!=="scan"){ tab="scan"; render(); }
+  if(c.indexOf("ONAMC:")===0){
+    fetch("/.netlify/functions/dispatch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"scan",code:c,user:USER,pin:pin})}).then(function(r){return r.json();}).then(function(r){
+      if(r.ok){ showBanner("OUT","🚚 "+r.msg+" · "+r.loaded+" of "+r.total+(r.done?" ✔ COMPLETE":"")); beep(); } else showBanner(r.result==="dup"?"WARN":"ERR", r.msg||r.error||"Not recognised"); }).catch(function(){ showBanner("ERR","No connection — scan again"); });
+    return;
+  }
+  if(c.indexOf("ONAMI:")===0){
+    var IAPI="/.netlify/functions/inventory", post=function(b){ return fetch(IAPI,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({user:USER,pin:pin},b))}).then(function(r){return r.json();}); };
+    post({action:"scan",code:c}).then(function(r){
+      if(!r.ok) return showBanner("ERR", r.msg||r.error||"Label not recognised");
+      var l=r.lot;
+      if(l.status==="expected"&&r.can) return post({action:"act",id:l.id,what:"receive"}).then(function(x){ if(x.error) return showBanner("ERR",x.error); showBanner("IN","📦 Received: "+l.item+" · "+l.no+"/"+l.of+(x.progress?" · "+x.progress+" of bill":"")); beep(); });
+      showBanner("WARN","📦 "+l.item+" — "+({store:"in store",issued:"issued to "+(l.dept||"department"),used:"fully used",expected:"expected"}[l.status]||l.status)+(r.can?"":" · "+r.who+" handles it"));
+    }).catch(function(){ showBanner("ERR","No connection — scan again"); });
+    return;
+  }
+  var tok=c.indexOf(PREFIX)===0?c.slice(PREFIX.length):c; submit(tok);
+}
+onScanner(anyScan);
 function submit(tok){
   api("scan",{token:tok}).then(function(r){
     if(r.error==="pin"){ lock("Session ended — enter PIN"); return; }

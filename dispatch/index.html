@@ -56,13 +56,30 @@ function tabs(){ var T=[["scan","Scan cartons"],["today","Today"]]; if(D.manager
 function render(){ if(tab!=="scan") stopCam(); tabs();
   if(tab==="scan") return scanView(); if(tab==="today") return todayView(); if(tab==="orders") return ordersView(); }
 
+// ---------- 2D barcode scanner (USB / Bluetooth, types like a keyboard) ----------
+// Keystrokes arriving quickly and ending in Enter are treated as one scan. Typing in a box is left alone.
+function onScanner(handler){
+  var buf="", last=0;
+  document.addEventListener("keydown",function(e){
+    var el=document.activeElement, typing=el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA"||el.tagName==="SELECT")&&el.id!=="pin";
+    if(typing||$("app").style.display==="none") return;
+    var now=Date.now(); if(now-last>80) buf=""; last=now;
+    if(e.key==="Enter"){ if(buf.length>=8){ var s=buf; buf=""; e.preventDefault(); handler(s.trim()); } buf=""; return; }
+    if(e.key&&e.key.length===1) buf+=e.key;
+  });
+}
+var SCANNER=localStorage.getItem("scanner_mode")==="1";
+function scannerToggle(){ return '<label style="display:flex;gap:8px;align-items:center;font-size:14px;color:var(--muted);margin-top:8px"><input type="checkbox" id="scMode" style="width:auto"'+(SCANNER?" checked":"")+'> Barcode scanner connected (camera off)</label>'; }
+function bindScannerToggle(after){ var c=$("scMode"); if(!c) return; c.onchange=function(){ SCANNER=c.checked; localStorage.setItem("scanner_mode",SCANNER?"1":"0"); after(); }; }
 // ---------- scanning ----------
 function scanView(){
   $("view").innerHTML='<div class="card"><video id="video" playsinline muted></video><canvas id="cv" style="display:none"></canvas><div id="banner"></div>'+
     '<div class="muted" style="margin-top:10px">Scan each carton label as it goes into the truck. Each carton counts once.</div>'+
     '<div style="margin-top:10px;display:flex;gap:8px"><input id="manual" placeholder="Label code (if camera fails)"><button class="g" id="manGo">Enter</button></div></div>';
   $("manGo").onclick=function(){ var v=$("manual").value.trim(); if(v){ $("manual").value=""; submit(v); } };
-  startCam();
+  $("manual").onkeydown=function(e){ if(e.key==="Enter"){ e.preventDefault(); $("manGo").click(); } };
+  $("manGo").parentNode.insertAdjacentHTML("afterend", scannerToggle()); bindScannerToggle(scanView);
+  if(SCANNER){ var vd=$("video"); if(vd) vd.style.display="none"; stopCam(); } else startCam();
 }
 function startCam(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ showBanner("WARN","Camera not available — type the label code below"); return; }
@@ -129,6 +146,7 @@ function labels(id){
     html+='</div>';
     $("view").innerHTML=html; window.scrollTo(0,0); });
 }
+onScanner(function(c){ if(c.indexOf("ONAMC:")!==0) return toast("Not a carton label"); if(tab!=="scan"){ tab="scan"; render(); } submit(c); });
 if(pin) load(); else lock("");
 })();
 </script></body></html>
