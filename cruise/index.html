@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cruise Watch</title>
+<style>
+body{font-family:-apple-system,Arial,sans-serif;margin:0;background:#f5f6f8;color:#222}
+header{background:#12355b;color:#fff;padding:14px 16px}
+header h1{margin:0;font-size:18px}header p{margin:4px 0 0;font-size:12px;opacity:.85}
+main{padding:12px;max-width:760px;margin:0 auto}
+button{background:#12355b;color:#fff;border:0;border-radius:8px;padding:10px 14px;font-size:15px}
+button:disabled{opacity:.5}
+.card{background:#fff;border-radius:10px;padding:12px;margin:10px 0;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.row{display:flex;justify-content:space-between;gap:10px}
+.price{font-size:20px;font-weight:700;color:#0a7d2c;white-space:nowrap}
+small{color:#666}.st{font-size:13px;color:#555;margin:6px 0}
+a.b{display:inline-block;margin-top:6px;color:#12355b;font-weight:600}
+</style></head><body>
+<header><h1>🚢 Cruise Watch</h1><p>Europe · up to $1,000 per person · 9 nights or fewer · checked every 15 days</p></header>
+<main>
+<button id="run">Check now</button>
+<div class="st" id="st">Loading…</div>
+<div id="list"></div>
+<div class="st" id="lines"></div>
+</main>
+<script>
+var API='/.netlify/functions/cruise-watch';
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+async function call(b){var r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json();}
+async function load(){
+  var d=(await call({action:'get'})).data||{};
+  var deals=(d.deals||[]).slice().sort(function(a,b){return a.price_usd_pp-b.price_usd_pp;});
+  document.getElementById('st').textContent=d.last_run?('Last checked '+new Date(d.last_run).toLocaleString()+' · '+deals.length+' deals'):'No scan yet. Tap Check now (takes about 5 minutes).';
+  document.getElementById('list').innerHTML=deals.map(function(x){
+    return '<div class="card"><div class="row"><div><b>'+esc(x.ship)+'</b> <small>'+esc(x.line)+'</small><br><small>'+esc(x.itinerary)+' · from '+esc(x.departure_port)+'</small><br><small>'+esc(x.start_date)+' · '+x.nights+' nights</small></div><div class="price">$'+x.price_usd_pp+'</div></div>'+(x.url?'<a class="b" target="_blank" rel="noopener" href="'+esc(x.url)+'">Open on cruise site</a>':'')+'</div>';}).join('');
+  document.getElementById('lines').innerHTML=(d.lines||[]).map(function(l){return esc(l.line)+': '+(l.error?'could not read':l.count+' deals'+(!l.count&&l.cheapest?' (cheapest seen $'+esc(l.cheapest)+')':''));}).join('<br>');
+  return d;
+}
+document.getElementById('run').onclick=async function(){
+  var b=this;b.disabled=true;var r=await call({action:'run'});
+  document.getElementById('st').textContent=r.started?'Scan started. Refreshing in a few minutes…':'A scan is already running.';
+  var before=(await load()).last_run,n=0;
+  var t=setInterval(async function(){n++;var d=await load();if(d.last_run!==before||n>40){clearInterval(t);b.disabled=false;}},15000);
+};
+load();
+</script></body></html>
