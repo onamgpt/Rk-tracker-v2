@@ -88,7 +88,7 @@ function emailHtml(results, all, prevMap) {
     "<p style='margin:0 0 10px;color:#555'>" + MAX_NIGHTS + " nights or fewer, any date. Fares rise as sailings fill, so earlier is usually cheaper. Prices are as shown on each site today; check the page before booking.</p>" +
     (rows ? "<table cellpadding='6' style='border-collapse:collapse;width:100%;font-size:14px' border='1' bordercolor='#ddd'><tr style='background:#f4f4f4'><th>Line</th><th>Ship / route</th><th>Sails</th><th>Price</th><th>Change</th><th></th></tr>" + rows + "</table>" : "<p><b>No sailings at or under $" + MAX_PRICE + " found this time.</b></p>") +
     "<p style='margin-top:14px'><b>Per cruise line</b></p><ul>" + status + "</ul>" +
-    "<p style='color:#777;font-size:12px'>Next check in 15 days. Full list: https://rk-tracker-v2.netlify.app/cruise/</p></div>";
+    "<p style='color:#777;font-size:12px'>Next check in 15 days. Full list: https://rk-tracker-v2.netlify.app/travel/ (Cruises tab)</p></div>";
 }
 
 exports.handler = async () => {
