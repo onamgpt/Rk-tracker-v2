@@ -109,3 +109,7 @@
 # Cruise Deals Watch — checks daily 09:45 IST (04:15 UTC); runs a scan only when 15 days have passed since the last one
 [functions."cruise-cron"]
   schedule = "15 4 * * *"
+
+# Daily printed work sheets — 09:25 IST (03:55 UTC), so the Mac Mini prints them by 9:45
+[functions."print-daily"]
+  schedule = "55 3 * * 1-6"
