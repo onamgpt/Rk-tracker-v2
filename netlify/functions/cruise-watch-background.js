@@ -40,22 +40,25 @@ function parseJson(text) {
   try { return JSON.parse(text.slice(a, b + 1)); } catch (e) { return null; }
 }
 
+const AGG = ["cruisebound.com", "cruiseweb.com", "cruisewatch.com", "affordabletours.com", "taoticket.com", "globaljourneys.com"];
+
 async function searchLine(line) {
   const today = new Date().toISOString().slice(0, 10);
   const prompt =
-    "Today is " + today + ". Using web search on " + line.domain + " pages only, find current " + line.name +
-    " cruises in EUROPE (Mediterranean, Northern Europe, Baltic, Norway fjords, British Isles, Atlantic Europe) that are " +
+    "Today is " + today + ". Find current " + line.name + " cruises in EUROPE (Mediterranean, Northern Europe, Baltic, Norway, British Isles, Atlantic Europe) that are " +
     MAX_NIGHTS + " nights or shorter, any sailing date from now on, with a published lowest fare of USD " + MAX_PRICE +
-    " or less PER PERSON (cheapest cabin, 2 sharing, as shown on the site). Check the line's deals, offers and Europe cruise pages.\n" +
-    "Only include a sailing if the page you read actually shows its price. Never guess prices.\n" +
-    "Reply with ONLY JSON: {\"deals\":[{\"ship\":\"\",\"itinerary\":\"\",\"departure_port\":\"\",\"start_date\":\"YYYY-MM-DD\",\"nights\":0," +
-    "\"price_usd_pp\":0,\"cabin\":\"\",\"url\":\"\"}],\"cheapest_seen_usd_pp\":null,\"note\":\"\"}. " +
+    " or less PER PERSON (cheapest cabin, 2 sharing). Use the cruise line's own site (" + line.domain + ") first, then the agent/aggregator sites you are allowed to search for prices the line's site does not show.\n" +
+    "Rules: only include a sailing if a page you read shows its price; never guess. For every deal give the DIRECT link to the exact page where you saw that sailing and price (not a homepage). " +
+    "Capture everything useful for a fast decision: ship, route and main ports, departure port, start date, nights, price per person, cabin type, whether taxes and port fees are included, " +
+    "and any inclusions or promotions shown (free drinks or beverage package, free Wi-Fi, onboard credit, free gratuities, free shore excursion credit, kids sail free, free hotel night, free breakfast, flights included, etc.).\n" +
+    "Reply with ONLY JSON: {\"deals\":[{\"ship\":\"\",\"itinerary\":\"\",\"ports\":\"\",\"departure_port\":\"\",\"start_date\":\"YYYY-MM-DD\",\"nights\":0," +
+    "\"price_usd_pp\":0,\"cabin\":\"\",\"taxes_included\":null,\"inclusions\":[\"\"],\"offer\":\"\",\"url\":\"\",\"source\":\"\"}],\"cheapest_seen_usd_pp\":null,\"note\":\"\"}. " +
     "Use an empty deals array if none qualify, and put the cheapest Europe fare you did see (any length) in cheapest_seen_usd_pp.";
   let messages = [{ role: "user", content: prompt }];
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 6; i++) {
     const r = await anthropic({
-      model: "claude-sonnet-4-6", max_tokens: 4000, messages,
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 8, allowed_domains: [line.domain] }]
+      model: "claude-sonnet-4-6", max_tokens: 6000, messages,
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 10, allowed_domains: [line.domain].concat(AGG) }]
     });
     if (r.error) return { line: line.name, error: r.error.message || "API error", deals: [] };
     if (r.stop_reason === "pause_turn") { messages = messages.concat({ role: "assistant", content: r.content }); continue; }
@@ -63,7 +66,11 @@ async function searchLine(line) {
     const j = parseJson(text);
     if (!j) return { line: line.name, error: "could not read result", deals: [] };
     const deals = (j.deals || []).filter(d => d && Number(d.price_usd_pp) > 0 && Number(d.price_usd_pp) <= MAX_PRICE && Number(d.nights) > 0 && Number(d.nights) <= MAX_NIGHTS)
-      .map(d => Object.assign({ line: line.name }, d, { price_usd_pp: Number(d.price_usd_pp), nights: Number(d.nights) }));
+      .map(d => {
+        const price = Number(d.price_usd_pp), nights = Number(d.nights);
+        return Object.assign({ line: line.name }, d, { price_usd_pp: price, nights, per_night: Math.round(price / nights),
+          inclusions: Array.isArray(d.inclusions) ? d.inclusions.filter(Boolean) : [] });
+      });
     return { line: line.name, deals, cheapest: j.cheapest_seen_usd_pp || null, note: j.note || "" };
   }
   return { line: line.name, error: "search did not finish", deals: [] };
@@ -80,15 +87,22 @@ function emailHtml(results, all, prevMap) {
   let rows = "";
   all.sort((a, b) => a.price_usd_pp - b.price_usd_pp).forEach(d => {
     const p = prevMap[dealKey(d)];
-    const chg = p == null ? "<b style='color:#0a7d2c'>NEW</b>" : (d.price_usd_pp > p ? "<span style='color:#c0392b'>▲ $" + (d.price_usd_pp - p) + "</span>" : d.price_usd_pp < p ? "<span style='color:#0a7d2c'>▼ $" + (p - d.price_usd_pp) + "</span>" : "same");
-    rows += "<tr><td>" + esc(d.line) + "</td><td>" + esc(d.ship) + "<br><small>" + esc(d.itinerary) + " · from " + esc(d.departure_port) + "</small></td><td>" + esc(d.start_date) + "<br>" + d.nights + " nights</td><td><b>$" + d.price_usd_pp + "</b><br><small>" + esc(d.cabin || "per person") + "</small></td><td>" + chg + "</td><td>" + (d.url ? "<a href='" + esc(d.url) + "'>Book</a>" : "") + "</td></tr>";
+    const chg = p == null ? "<b style='color:#0a7d2c'>NEW</b>" : (d.price_usd_pp > p ? "<span style='color:#c0392b'>&#9650; $" + (d.price_usd_pp - p) + "</span>" : d.price_usd_pp < p ? "<span style='color:#0a7d2c'>&#9660; $" + (p - d.price_usd_pp) + "</span>" : "same");
+    const inc = (d.inclusions || []).map(esc).join(", ") + (d.offer ? (d.inclusions && d.inclusions.length ? "<br>" : "") + "<i>" + esc(d.offer) + "</i>" : "");
+    const tax = d.taxes_included === true ? "taxes incl." : d.taxes_included === false ? "+ taxes/fees" : "taxes: check";
+    rows += "<tr style='vertical-align:top'><td><b>" + esc(d.ship) + "</b><br><small>" + esc(d.line) + "</small></td>" +
+      "<td>" + esc(d.itinerary) + "<br><small>" + esc(d.ports) + "<br>from " + esc(d.departure_port) + "</small></td>" +
+      "<td>" + esc(d.start_date) + "<br>" + d.nights + " nights</td>" +
+      "<td><b>$" + d.price_usd_pp + "</b><br><small>$" + d.per_night + "/night<br>" + esc(d.cabin || "") + "<br>" + tax + "</small></td>" +
+      "<td><small>" + (inc || "&mdash;") + "</small></td><td>" + chg + "</td>" +
+      "<td>" + (d.url ? "<a href='" + esc(d.url) + "'>Open</a>" + (d.source ? "<br><small>" + esc(d.source) + "</small>" : "") : "") + "</td></tr>";
   });
-  const status = results.map(r => "<li>" + esc(r.line) + ": " + (r.error ? "<span style='color:#c0392b'>could not read (" + esc(r.error) + ")</span>" : r.deals.length + " deal" + (r.deals.length === 1 ? "" : "s") + (!r.deals.length && r.cheapest ? " — cheapest Europe fare seen $" + esc(r.cheapest) : "")) + "</li>").join("");
-  return "<div style='font-family:Arial,sans-serif;max-width:720px'><h2 style='margin:0 0 6px'>Cruise deals — Europe, up to $" + MAX_PRICE + " per person</h2>" +
-    "<p style='margin:0 0 10px;color:#555'>" + MAX_NIGHTS + " nights or fewer, any date. Fares rise as sailings fill, so earlier is usually cheaper. Prices are as shown on each site today; check the page before booking.</p>" +
-    (rows ? "<table cellpadding='6' style='border-collapse:collapse;width:100%;font-size:14px' border='1' bordercolor='#ddd'><tr style='background:#f4f4f4'><th>Line</th><th>Ship / route</th><th>Sails</th><th>Price</th><th>Change</th><th></th></tr>" + rows + "</table>" : "<p><b>No sailings at or under $" + MAX_PRICE + " found this time.</b></p>") +
+  const status = results.map(r => "<li>" + esc(r.line) + ": " + (r.error ? "<span style='color:#c0392b'>could not read (" + esc(r.error) + ")</span>" : r.deals.length + " deal" + (r.deals.length === 1 ? "" : "s") + (!r.deals.length && r.cheapest ? " &mdash; cheapest Europe fare seen $" + esc(r.cheapest) : "")) + "</li>").join("");
+  return "<div style='font-family:Arial,sans-serif;max-width:900px'><h2 style='margin:0 0 6px'>Cruise deals &mdash; Europe, up to $" + MAX_PRICE + " per person</h2>" +
+    "<p style='margin:0 0 10px;color:#555'>" + MAX_NIGHTS + " nights or fewer, any date, cheapest cabin, 2 sharing. Fares rise as sailings fill. Prices are as shown on the linked page today; check it before booking.</p>" +
+    (rows ? "<table cellpadding='6' style='border-collapse:collapse;width:100%;font-size:13px' border='1' bordercolor='#ddd'><tr style='background:#f4f4f4'><th>Ship</th><th>Route / ports</th><th>Sails</th><th>Price pp</th><th>Included / offers</th><th>Change</th><th>Link</th></tr>" + rows + "</table>" : "<p><b>No sailings at or under $" + MAX_PRICE + " found this time.</b></p>") +
     "<p style='margin-top:14px'><b>Per cruise line</b></p><ul>" + status + "</ul>" +
-    "<p style='color:#777;font-size:12px'>Next check in 15 days. Full list: https://rk-tracker-v2.netlify.app/travel/ (Cruises tab)</p></div>";
+    "<p style='color:#777;font-size:12px'>Next check in 15 days. Full sortable table: https://rk-tracker-v2.netlify.app/travel/ (Cruises tab)</p></div>";
 }
 
 exports.handler = async () => {
