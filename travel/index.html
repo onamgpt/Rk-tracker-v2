@@ -163,6 +163,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     <button class="tab" data-tab="money">Money</button>
     <button class="tab" data-tab="nearby">📍 Nearby</button>
     <button class="tab" data-tab="cruise">🚢 Cruises</button>
+    <button class="tab" data-tab="seacruise">🌏 SE Asia Cruises</button>
   </div>
   <div class="saved" id="saved"></div>
 
@@ -286,17 +287,8 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     <div id="expList"></div>
   </div>
 
-  <div id="cruise" style="display:none">
-    <div class="card">
-      <div style="font-family:'Newsreader',serif;font-size:20px">🚢 Cruise deals — Europe</div>
-      <div class="meta" style="margin:4px 0 10px">Up to $1,000 per person · 9 nights or fewer · any date · checked automatically every 15 days (Royal Caribbean, MSC, Costa, Celebrity, Norwegian). Emailed to you too.</div>
-      <button class="nb-go" id="crRun">🔄 Check now</button>
-      <div class="meta" style="margin-top:8px">Sort by <select id="crSort"><option value="price">Price</option><option value="night">Price per night</option><option value="date">Sail date</option></select></div>
-      <div class="meta" id="crStatus" style="margin-top:8px"></div>
-    </div>
-    <div id="crList"></div>
-    <div class="meta" id="crLines" style="margin:8px 4px"></div>
-  </div>
+  <div id="cruise" style="display:none"></div>
+  <div id="seacruise" style="display:none"></div>
 
   <div id="nearby" style="display:none">
     <div class="card">
@@ -582,7 +574,7 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
   });
 
   /* ---------- tabs ---------- */
-  var PANES = ['board','book','binder','vault','packing','money','nearby','cruise'];
+  var PANES = ['board','book','binder','vault','packing','money','nearby','cruise','seacruise'];
   Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(btn){
     btn.addEventListener('click', function(){
       tab = btn.getAttribute('data-tab');
@@ -593,7 +585,8 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
       if(tab==='vault') renderVault();
       if(tab==='packing') renderPacking();
       if(tab==='money') renderMoney();
-      if(tab==='cruise') loadCruise();
+      if(tab==='cruise') loadCruise('cruise');
+      if(tab==='seacruise') loadCruise('seacruise');
     });
   });
   document.getElementById('btnPrint').addEventListener('click', function(){ window.print(); });
@@ -1296,17 +1289,41 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
     if(tab==='money') renderMoney();
   }
 
-  /* ---------- cruise watch ---------- */
+  /* ---------- cruise watch (Europe + Southeast Asia) ---------- */
+  var CR = {
+    cruise:    {region:'europe', title:'🚢 Cruise deals — Europe', blurb:'Europe sailings'},
+    seacruise: {region:'sea', title:'🌏 Cruise deals — Southeast Asia', blurb:'Southeast Asia sailings from Singapore, Thailand, Malaysia, Vietnam and more (fly in and board)'}
+  };
   function cEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-  async function crCall(b){ var r = await fetch('/.netlify/functions/cruise-watch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); return r.json(); }
-  async function loadCruise(){
+  async function crCall(pane, b){ b.region = CR[pane].region; var r = await fetch('/.netlify/functions/cruise-watch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); return r.json(); }
+  function mountCruise(pane){
+    var el = document.getElementById(pane), c = CR[pane];
+    el.innerHTML = '<div class="card"><div style="font-family:\'Newsreader\',serif;font-size:20px">'+c.title+'</div>'+
+      '<div class="meta" style="margin:4px 0 10px">'+c.blurb+' · up to $1,000 per person · 9 nights or fewer · any date · checked automatically every 15 days and emailed to you.</div>'+
+      '<button class="nb-go" data-cr="run">🔄 Check now</button>'+
+      '<div class="meta" style="margin-top:8px">Sort by <select data-cr="sort"><option value="price">Price</option><option value="night">Price per night</option><option value="date">Sail date</option></select></div>'+
+      '<div class="meta" data-cr="status" style="margin-top:8px"></div></div>'+
+      '<div data-cr="list"></div><div class="meta" data-cr="lines" style="margin:8px 4px"></div>';
+    var q = function(n){ return el.querySelector('[data-cr="'+n+'"]'); };
+    q('sort').addEventListener('change', function(){ loadCruise(pane); });
+    q('run').addEventListener('click', async function(){
+      var b = this; b.disabled = true;
+      var r = await crCall(pane, {action:'run'});
+      q('status').textContent = r.started ? 'Scan started. This page refreshes itself in a few minutes…' : 'A scan is already running.';
+      var before = ((await loadCruise(pane))||{}).last_run, n = 0;
+      var t = setInterval(async function(){ n++; var d = (await loadCruise(pane))||{}; if(d.last_run!==before || n>60){ clearInterval(t); b.disabled=false; } }, 15000);
+    });
+  }
+  async function loadCruise(pane){
+    var el = document.getElementById(pane);
+    if(!el.firstChild) mountCruise(pane);
+    var q = function(n){ return el.querySelector('[data-cr="'+n+'"]'); };
     var d = {};
-    try { d = (await crCall({action:'get'})).data || {}; } catch(e){ document.getElementById('crStatus').textContent = 'Could not load. Try again.'; return d; }
-    var deals = (d.deals||[]).slice().sort(function(a,b){ return a.price_usd_pp-b.price_usd_pp; });
-    document.getElementById('crStatus').textContent = d.last_run ? ('Last checked '+new Date(d.last_run).toLocaleString()+' · '+deals.length+' deals') : 'No scan yet. Tap Check now (takes about 5 minutes).';
-    var sortBy = document.getElementById('crSort').value;
+    try { d = (await crCall(pane, {action:'get'})).data || {}; } catch(e){ q('status').textContent = 'Could not load. Try again.'; return d; }
+    var deals = (d.deals||[]).slice();
+    var sortBy = q('sort').value;
     deals.sort(function(a,b){ return sortBy==='night' ? (a.per_night||9999)-(b.per_night||9999) : sortBy==='date' ? String(a.start_date).localeCompare(String(b.start_date)) : a.price_usd_pp-b.price_usd_pp; });
-    window.__crDeals = d;
+    q('status').textContent = d.last_run ? ('Last checked '+new Date(d.last_run).toLocaleString()+' · '+deals.length+' deals') : 'No scan yet. Tap Check now (takes about 5–10 minutes).';
     var rows = deals.map(function(x){
       var inc = (x.inclusions||[]).map(cEsc).join(', ') + (x.offer ? ((x.inclusions&&x.inclusions.length)?'<br>':'')+'<i>'+cEsc(x.offer)+'</i>' : '');
       var tax = x.taxes_included===true ? 'taxes incl.' : x.taxes_included===false ? '+ taxes/fees' : 'taxes: check';
@@ -1318,18 +1335,10 @@ textarea{resize:vertical;min-height:44px;font-family:inherit}
         '<td style="padding:8px 6px;min-width:150px" class="meta">'+(inc||'—')+'</td>'+
         '<td style="padding:8px 6px;white-space:nowrap">'+(x.url?'<a href="'+cEsc(x.url)+'" target="_blank" rel="noopener"><b>Open ↗</b></a><div class="meta">'+cEsc(x.source||'')+'</div>':'')+'</td></tr>';
     }).join('');
-    document.getElementById('crList').innerHTML = deals.length ? '<div class="card" style="padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="border-collapse:collapse;font-size:13px;width:100%;min-width:760px"><tr style="text-align:left"><th style="padding:8px 6px">Ship</th><th style="padding:8px 6px">Route / ports</th><th style="padding:8px 6px">Sails</th><th style="padding:8px 6px">Price pp</th><th style="padding:8px 6px">Included / offers</th><th style="padding:8px 6px">Link</th></tr>'+rows+'</table></div><div class="meta" style="margin:6px 4px">Swipe the table sideways on your phone. Tap Open to go straight to that sailing.</div>' : '';
-    document.getElementById('crLines').innerHTML = (d.lines||[]).map(function(l){ return cEsc(l.line)+': '+(l.error?'could not read':l.count+' deals'+(!l.count&&l.cheapest?' (cheapest seen $'+cEsc(l.cheapest)+')':'')); }).join('<br>');
+    q('list').innerHTML = deals.length ? '<div class="card" style="padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="border-collapse:collapse;font-size:13px;width:100%;min-width:760px"><tr style="text-align:left"><th style="padding:8px 6px">Ship</th><th style="padding:8px 6px">Route / ports</th><th style="padding:8px 6px">Sails</th><th style="padding:8px 6px">Price pp</th><th style="padding:8px 6px">Included / offers</th><th style="padding:8px 6px">Link</th></tr>'+rows+'</table></div><div class="meta" style="margin:6px 4px">Swipe the table sideways on your phone. Tap Open to go straight to that sailing.</div>' : '';
+    q('lines').innerHTML = (d.lines||[]).map(function(l){ return cEsc(l.line)+': '+(l.error?'could not read':l.count+' deals'+(!l.count&&l.cheapest?' (cheapest seen $'+cEsc(l.cheapest)+')':'')); }).join('<br>');
     return d;
   }
-  document.getElementById('crSort').addEventListener('change', loadCruise);
-  document.getElementById('crRun').addEventListener('click', async function(){
-    var b = this; b.disabled = true;
-    var r = await crCall({action:'run'});
-    document.getElementById('crStatus').textContent = r.started ? 'Scan started. This page refreshes itself in a few minutes…' : 'A scan is already running.';
-    var before = ((await loadCruise())||{}).last_run, n = 0;
-    var t = setInterval(async function(){ n++; var d = (await loadCruise())||{}; if(d.last_run!==before || n>40){ clearInterval(t); b.disabled=false; } }, 15000);
-  });
 
   /* ---------- nearby now ---------- */
   var NB = {eat:[], shop:[], coffee:[], dessert:[], perfume:[], temple:[], see:[], famousId:null, picked:{}, where:null};
