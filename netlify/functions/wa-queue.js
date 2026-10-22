@@ -10,8 +10,8 @@ const PEOPLE = {
   tassmai:   { name: "Tassmai",   phone: "919900504401", owner: true },
   prakash:   { name: "Prakash",   phone: "919844725484", owner: false },
   virupaksha:{ name: "Virupaksha", phone: "919845807015", owner: false },
-  security:  { name: "Security Onam", phone: "919900537494", owner: false }
-  // maadhu: pending — full 10-digit number needed
+  security:  { name: "Security Onam", phone: "919900537494", owner: false },
+  maadhu:    { name: "Maadhu",    phone: "916364559047", owner: false }
 };
 
 async function call(x) {
