@@ -4,6 +4,19 @@ const db = require("./db.js");
 const call = async (b) => JSON.parse((await db.handler({ httpMethod: "POST", body: JSON.stringify(b) })).body || "{}");
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+// The email is the full record; WhatsApp is the nudge that makes him open it.
+// Queued, not sent — wa-scheduler drains the queue and the Mac Mini bridge
+// delivers it. Never let a WhatsApp failure affect the email result.
+async function wa(text) {
+  try {
+    const r = await require("./wa-queue.js").handler({
+      httpMethod: "POST",
+      body: JSON.stringify({ action: "add", to: "ravi", message: text })
+    });
+    return !!JSON.parse(r.body || "{}").ok;
+  } catch (e) { return false; }
+}
+
 async function run(opt) {
   opt = opt || {};
   const cur = (await call({ action: "getPortfolio", user: "main", key: "owner_digest" })).data || { items: [] };
@@ -26,7 +39,9 @@ async function run(opt) {
     const okb = JSON.parse(rb.body || "{}").ok;
     if (okb) await call({ action: "savePortfolio", user: "main", key: "owner_digest",
       data: { items: [], lastSent: new Date().toISOString() } });
-    return { sent: okb, items: 0, empty: true };
+    const wb = await wa("Onam daily summary " + day + "\nNothing was held for you today.\n" +
+      "https://rk-tracker-v2.netlify.app/");
+    return { sent: okb, whatsapp: wb, items: 0, empty: true };
   }
   const time = (iso) => new Date(new Date(iso).getTime() + 5.5 * 3600e3).toISOString().slice(11, 16);
   let h = "<div style='font-family:Arial,sans-serif;font-size:15px;color:#16181c;max-width:780px'>" +
@@ -40,7 +55,12 @@ async function run(opt) {
   const r = await require("./mail.js").handler({ httpMethod: "POST", body: JSON.stringify({ to: "onamagarbathi@gmail.com", subject: "Daily summary " + day + " — " + items.length + " update(s)", html: h, direct: true }) });
   const ok = JSON.parse(r.body || "{}").ok;
   if (ok) await call({ action: "savePortfolio", user: "main", key: "owner_digest", data: { items: [], lastSent: new Date().toISOString() } });
-  return { sent: ok, items: items.length };
+  // Headline list on WhatsApp, detail in the email.
+  const lines = items.slice(0, 12).map((x, i) => (i + 1) + ". " + String(x.subject || "").slice(0, 70));
+  const more = items.length > 12 ? "\n...and " + (items.length - 12) + " more" : "";
+  const w = await wa("Onam daily summary " + day + " \u2014 " + items.length + " update(s)\n\n" +
+    lines.join("\n") + more + "\n\nFull detail in your email.\nhttps://rk-tracker-v2.netlify.app/");
+  return { sent: ok, whatsapp: w, items: items.length };
 }
 exports.run = run;
 exports.handler = async () => { try { return { statusCode: 200, body: JSON.stringify(await run({})) }; } catch (e) { return { statusCode: 200, body: String(e) }; } };
