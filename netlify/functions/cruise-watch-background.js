@@ -8,15 +8,32 @@ const https = require("https");
 const MAX_PRICE = 1000;   // USD per person
 const MAX_NIGHTS = 9;
 const OWNER = "onamagarbathi@gmail.com";
-const KEY = "cruise_watch";
-const LINES = [
-  { name: "Royal Caribbean", domain: "royalcaribbean.com" },
-  { name: "MSC Cruises", domain: "msccruises.com" },
-  { name: "Costa Cruises", domain: "costacruises.com" },
-  { name: "Celebrity Cruises", domain: "celebritycruises.com" },
-  { name: "Norwegian Cruise Line", domain: "ncl.com" }
-];
-
+const REGIONS = {
+  europe: {
+    key: "cruise_watch", title: "Europe", tab: "Cruises",
+    where: "EUROPE (Mediterranean, Northern Europe, Baltic, Norway, British Isles, Atlantic Europe)",
+    perLine: "",
+    lines: [
+      { name: "Royal Caribbean", domain: "royalcaribbean.com" },
+      { name: "MSC Cruises", domain: "msccruises.com" },
+      { name: "Costa Cruises", domain: "costacruises.com" },
+      { name: "Celebrity Cruises", domain: "celebritycruises.com" },
+      { name: "Norwegian Cruise Line", domain: "ncl.com" }
+    ]
+  },
+  sea: {
+    key: "cruise_watch_sea", title: "Southeast Asia", tab: "SE Asia Cruises",
+    where: "SOUTHEAST ASIA, sailing from a Southeast Asian port such as Singapore, Bangkok (Laem Chabang), Phuket, Port Klang or Penang (Malaysia), Ho Chi Minh City (Phu My), Jakarta, Bali, Manila, or Sihanoukville, so he can simply fly there and board",
+    perLine: " List at most the 8 best-value sailings per line.",
+    lines: [
+      { name: "Royal Caribbean", domain: "royalcaribbean.com" },
+      { name: "Resorts World Cruises", domain: "rwcruises.com" },
+      { name: "Costa Cruises", domain: "costacruises.com" },
+      { name: "Princess Cruises", domain: "princess.com" },
+      { name: "Norwegian Cruise Line", domain: "ncl.com" }
+    ]
+  }
+};
 function anthropic(body) {
   const payload = JSON.stringify(body);
   return new Promise((resolve) => {
@@ -42,14 +59,14 @@ function parseJson(text) {
 
 const AGG = ["cruisebound.com", "cruiseweb.com", "cruisewatch.com", "affordabletours.com", "taoticket.com", "globaljourneys.com"];
 
-async function searchLine(line) {
+async function searchLine(line, R) {
   const today = new Date().toISOString().slice(0, 10);
   const prompt =
-    "Today is " + today + ". Find current " + line.name + " cruises in EUROPE (Mediterranean, Northern Europe, Baltic, Norway, British Isles, Atlantic Europe) that are " +
+    "Today is " + today + ". Find current " + line.name + " cruises in " + R.where + " that are " +
     MAX_NIGHTS + " nights or shorter, any sailing date from now on, with a published lowest fare of USD " + MAX_PRICE +
     " or less PER PERSON (cheapest cabin, 2 sharing). Use the cruise line's own site (" + line.domain + ") first, then the agent/aggregator sites you are allowed to search for prices the line's site does not show.\n" +
-    "Rules: only include a sailing if a page you read shows its price; never guess. For every deal give the DIRECT link to the exact page where you saw that sailing and price (not a homepage). " +
-    "Capture everything useful for a fast decision: ship, route and main ports, departure port, start date, nights, price per person, cabin type, whether taxes and port fees are included, " +
+    "Rules:" + R.perLine + " only include a sailing if a page you read shows its price; never guess. For every deal give the DIRECT link to the exact page where you saw that sailing and price (not a homepage). " +
+    "Always include the departure country in departure_port. Capture everything useful for a fast decision: ship, route and main ports, departure port, start date, nights, price per person, cabin type, whether taxes and port fees are included, " +
     "and any inclusions or promotions shown (free drinks or beverage package, free Wi-Fi, onboard credit, free gratuities, free shore excursion credit, kids sail free, free hotel night, free breakfast, flights included, etc.).\n" +
     "Reply with ONLY JSON: {\"deals\":[{\"ship\":\"\",\"itinerary\":\"\",\"ports\":\"\",\"departure_port\":\"\",\"start_date\":\"YYYY-MM-DD\",\"nights\":0," +
     "\"price_usd_pp\":0,\"cabin\":\"\",\"taxes_included\":null,\"inclusions\":[\"\"],\"offer\":\"\",\"url\":\"\",\"source\":\"\"}],\"cheapest_seen_usd_pp\":null,\"note\":\"\"}. " +
@@ -83,7 +100,7 @@ async function dbCall(b) {
 const dealKey = d => [d.line, d.ship, d.start_date, d.nights].join("|").toLowerCase();
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-function emailHtml(results, all, prevMap) {
+function emailHtml(results, all, prevMap, R) {
   let rows = "";
   all.sort((a, b) => a.price_usd_pp - b.price_usd_pp).forEach(d => {
     const p = prevMap[dealKey(d)];
@@ -102,15 +119,18 @@ function emailHtml(results, all, prevMap) {
     "<p style='margin:0 0 10px;color:#555'>" + MAX_NIGHTS + " nights or fewer, any date, cheapest cabin, 2 sharing. Fares rise as sailings fill. Prices are as shown on the linked page today; check it before booking.</p>" +
     (rows ? "<table cellpadding='6' style='border-collapse:collapse;width:100%;font-size:13px' border='1' bordercolor='#ddd'><tr style='background:#f4f4f4'><th>Ship</th><th>Route / ports</th><th>Sails</th><th>Price pp</th><th>Included / offers</th><th>Change</th><th>Link</th></tr>" + rows + "</table>" : "<p><b>No sailings at or under $" + MAX_PRICE + " found this time.</b></p>") +
     "<p style='margin-top:14px'><b>Per cruise line</b></p><ul>" + status + "</ul>" +
-    "<p style='color:#777;font-size:12px'>Next check in 15 days. Full sortable table: https://rk-tracker-v2.netlify.app/travel/ (Cruises tab)</p></div>";
+    "<p style='color:#777;font-size:12px'>Next check in 15 days. Full sortable table: https://rk-tracker-v2.netlify.app/travel/ (" + R.tab + " tab)</p></div>";
 }
 
-exports.handler = async () => {
+exports.handler = async (event) => {
   if (!process.env.ANTHROPIC_API_KEY) return { statusCode: 200, body: "no key" };
+  let b = {}; try { b = JSON.parse((event && event.body) || "{}"); } catch (e) {}
+  const R = REGIONS[b.region] || REGIONS.europe;
+  const KEY = R.key;
   const prev = ((await dbCall({ action: "getPortfolio", user: "main", key: KEY })).data) || {};
   await dbCall({ action: "savePortfolio", user: "main", key: KEY, data: Object.assign({}, prev, { running_since: new Date().toISOString() }) });
   const results = [];
-  for (const line of LINES) results.push(await searchLine(line));
+  for (const line of R.lines) results.push(await searchLine(line, R));
   const all = [].concat.apply([], results.map(r => r.deals));
   const prevMap = {};
   (prev.deals || []).forEach(d => { prevMap[dealKey(d)] = d.price_usd_pp; });
@@ -119,8 +139,8 @@ exports.handler = async () => {
   try {
     const mail = require("./mail.js");
     await mail.handler({ httpMethod: "POST", body: JSON.stringify({ to: OWNER,
-      subject: "Cruise deals ≤ $" + MAX_PRICE + " pp, Europe — " + all.length + " found",
-      html: emailHtml(results, all.slice(), prevMap) }) });
+      subject: "Cruise deals " + R.title + " \u2264 $" + MAX_PRICE + " pp \u2014 " + all.length + " found",
+      html: emailHtml(results, all.slice(), prevMap, R) }) });
   } catch (e) {}
   return { statusCode: 200, body: "done" };
 };
