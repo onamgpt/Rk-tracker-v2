@@ -5,12 +5,14 @@ exports.handler = async (event) => {
   let b = {}; try { b = JSON.parse(event.body || "{}"); } catch (e) {}
   const db = require("./db.js");
   const call = async (x) => JSON.parse((await db.handler({ httpMethod: "POST", body: JSON.stringify(x) })).body || "{}");
-  const cur = (await call({ action: "getPortfolio", user: "main", key: "cruise_watch" })).data || {};
+  const region = b.region === "sea" ? "sea" : "europe";
+  const KEY = region === "sea" ? "cruise_watch_sea" : "cruise_watch";
+  const cur = (await call({ action: "getPortfolio", user: "main", key: KEY })).data || {};
   if (b.action === "run") {
     const busy = cur.running_since && (!cur.last_run || cur.running_since > cur.last_run) && Date.now() - new Date(cur.running_since).getTime() < 20 * 60000;
     if (busy) return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, started: false, reason: "already running" }) };
     const site = (process.env.URL || "https://rk-tracker-v2.netlify.app").replace(/\/$/, "");
-    await fetch(site + "/.netlify/functions/cruise-watch-background", { method: "POST", body: "{}" });
+    await fetch(site + "/.netlify/functions/cruise-watch-background", { method: "POST", body: JSON.stringify({ region }) });
     return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, started: true }) };
   }
   return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, data: cur }) };
