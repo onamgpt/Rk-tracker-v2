@@ -163,6 +163,7 @@ function osmKind(t) {
   if (t.shop === "perfumery") return "perfume";
   if (t.shop && PERFUME_NAME.test(t.name || "")) return "perfume";
   if (/^(clothes|jewelry|boutique|gift|shoes|bag|fashion_accessories|mall|department_store|craft|antiques)$/.test(t.shop || "")) return "shop";
+  if ((t.amenity === "place_of_worship" || t.building === "temple" || t.historic === "temple") && (/hindu|buddhist|jain|sikh|shinto|taoist/.test(t.religion || "") || t.building === "temple" || /temple|mandir|mandira|koil|kovil|devalaya|tempio|templo/i.test(t.name || ""))) return "temple";
   return "see";
 }
 
@@ -184,13 +185,15 @@ function shapeOsm(el, here) {
   else if (kind === "shop") type = (t.shop || "shop").replace(/_/g, " ");
   else if (kind === "eat") type = t.cuisine ? t.cuisine.split(";")[0].replace(/_/g, " ") + " restaurant" : "Restaurant";
   else if (kind === "perfume") type = /perfum/.test(t.craft || "") ? "artisan perfumer" : /incens|incenso/i.test(t.name) ? "incense" : t.shop === "perfumery" ? "artisan perfumery" : (t.shop || "shop").replace(/_/g, " ");
+  else if (kind === "temple") type = "old temple";
   else type = (t.tourism || t.historic || (t.amenity === "place_of_worship" ? "place of worship" : "landmark")).replace(/_/g, " ");
   // Quality score stands in for ratings (OpenStreetMap has none). Higher = bigger / better known.
   let score;
   if (kind === "see") score = (t.wikipedia ? 2 : 0) + (t.wikidata ? 1 : 0) + (/attraction|museum/.test(t.tourism || "") ? 1 : 0) + (t.heritage ? 1 : 0);
+  else if (kind === "temple") score = (t.wikipedia ? 2 : 0) + (t.wikidata ? 1 : 0) + (t.heritage ? 1 : 0) + (t.historic ? 1 : 0) + (t.start_date ? 1 : 0) + (t.inscription ? 0.5 : 0);
   else if (kind === "perfume") score = (/incens|incenso/i.test(t.name) ? 2 : 0) + (/perfum/.test(t.craft || "") ? 2 : 0) + (t.website ? 1 : 0);
   else score = (t.wikidata ? 2 : 0) + (t.website || t["contact:website"] ? 1 : 0) + (t.opening_hours ? 1 : 0) + (t.cuisine ? 0.5 : 0) + (t.phone || t["contact:phone"] ? 0.5 : 0) + (dv || dg ? 0.5 : 0);
-  const small = kind === "see" ? score < 1 : kind === "perfume" ? false : score < 1.5;
+  const small = (kind === "see" || kind === "temple") ? score < 1 : kind === "perfume" ? false : score < 1.5;
   const addr = [t["addr:street"], t["addr:housenumber"], t["addr:city"]].filter(Boolean).join(" ");
   return {
     id: el.type + el.id, kind, name: t.name, address: addr, rating: null, reviews: 0, type,
@@ -223,6 +226,7 @@ async function osmSearch(here, radius) {
     // Sights: well-known landmarks (wikidata) first, so big ones like the Colosseum are never cut off.
     wrap("nwr" + a + '["name"]["wikidata"][!"highway"][!"railway"][!"public_transport"][!"place"][!"boundary"][!"route"][!"landuse"][!"natural"][!"shop"][!"office"]["amenity"!~"^(restaurant|cafe|ice_cream|school|university|college|hospital|bank|pharmacy|bar|pub|fast_food)$"];' +
          "nwr" + a + '["tourism"~"^(attraction|museum|gallery|viewpoint)$"]["name"];', 300),
+    wrap("nwr" + pr + '["name"]["amenity"="place_of_worship"]["religion"~"hindu|buddhist|jain|sikh"];' + "nwr" + pr + '["name"]["building"="temple"];' + "nwr" + pr + '["name"]["historic"="temple"];', 300),
     wrap("nwr" + pr + '["craft"~"perfum"]["name"];' +
          "nwr" + pr + '["shop"="perfumery"]["name"~"artistic|laborator|atelier|nicchia|niche|officina|essenz",i];' +
          "nwr" + pr + '["shop"]["name"~"incens|incenso",i];' +
@@ -245,10 +249,10 @@ async function osmSearch(here, radius) {
   }));
   const byScore = (a, b) => (b._score - a._score) || a.km - b.km;
   const cat = k => pickTop(items.filter(i => i.kind === k).sort(byScore));
-  const see = cat("see"), eat = cat("eat"), shop = cat("shop"), coffee = cat("coffee"), dessert = cat("dessert"), perfume = cat("perfume");
+  const see = cat("see"), eat = cat("eat"), shop = cat("shop"), coffee = cat("coffee"), dessert = cat("dessert"), perfume = cat("perfume"), temple = cat("temple");
   const famous = see[0] || null;
-  eat.concat(see, shop, coffee, dessert, perfume).forEach(i => { delete i._score; delete i._small; });
-  return { ok: true, partial, eat, shop, coffee, dessert, perfume, see, famousId: famous ? famous.id : null };
+  eat.concat(see, shop, coffee, dessert, perfume, temple).forEach(i => { delete i._score; delete i._small; });
+  return { ok: true, partial, eat, shop, coffee, dessert, perfume, temple, see, famousId: famous ? famous.id : null };
 }
 
 exports._osmTest = { shapeOsm, osmSearch, osmKind };
@@ -276,11 +280,11 @@ exports.handler = async (event) => {
     const O1 = await osmSearch(here, radius);
     if (O1.ok && (O1.eat.length || O1.see.length || O1.coffee.length || O1.dessert.length || O1.perfume.length)) {
       return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", partial: O1.partial,
-        famousId: O1.famousId, eat: O1.eat, shop: O1.shop, coffee: O1.coffee, dessert: O1.dessert, perfume: O1.perfume, see: O1.see }) };
+        famousId: O1.famousId, eat: O1.eat, shop: O1.shop, coffee: O1.coffee, dessert: O1.dessert, perfume: O1.perfume, temple: O1.temple, see: O1.see }) };
     }
   }
   const tbias = { circle: { center: { latitude: lat, longitude: lng }, radius: Math.max(radius, 3000) } };
-  const [food, veg, sights, coffeeR, dessertR, sights2, sights3, pf1, pf2, pf3, shopR] = await Promise.all([
+  const [food, veg, sights, coffeeR, dessertR, sights2, sights3, pf1, pf2, pf3, shopR, tp1, tp2, tp3] = await Promise.all([
     post({ includedTypes: ["restaurant"], maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
     post({ includedTypes: VEG_TYPES, maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
     post({ includedTypes: ["tourist_attraction"], maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
@@ -295,7 +299,10 @@ exports.handler = async (event) => {
     post({ textQuery: "incense wholesale", maxResultCount: 20, locationBias: tbias }, key, "/v1/places:searchText"),
     post({ textQuery: "profumeria artistica laboratorio", maxResultCount: 20, locationBias: tbias }, key, "/v1/places:searchText"),
     post({ includedTypes: ["clothing_store", "jewelry_store", "shoe_store", "gift_shop", "shopping_mall", "market", "department_store"],
-           maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key)
+           maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: area }, key),
+    post({ textQuery: "ancient old historic temple", maxResultCount: 20, locationBias: tbias }, key, "/v1/places:searchText"),
+    post({ textQuery: "old heritage temple mandir", maxResultCount: 20, locationBias: tbias }, key, "/v1/places:searchText"),
+    post({ includedTypes: ["hindu_temple"], maxResultCount: 20, rankPreference: "POPULARITY", locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius: Math.max(radius, 3000) } } }, key)
   ]);
 
   const bad = [food, veg, sights].find(r => r.status !== 200);
@@ -308,7 +315,7 @@ exports.handler = async (event) => {
         return { statusCode: 200, headers: H, body: JSON.stringify({ ok: false,
           error: "Google blocked (" + String(msg).slice(0, 80) + "). " + O.error }) };
       }
-      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", googleError: String(msg).slice(0, 220) + " | older API: " + String(L.error).slice(0, 160), keyTail: key.slice(-5) + " from " + keySource, partial: O.partial, famousId: O.famousId, eat: O.eat, shop: O.shop, coffee: O.coffee, dessert: O.dessert, perfume: O.perfume, see: O.see }) };
+      return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, via: "osm", googleError: String(msg).slice(0, 220) + " | older API: " + String(L.error).slice(0, 160), keyTail: key.slice(-5) + " from " + keySource, partial: O.partial, famousId: O.famousId, eat: O.eat, shop: O.shop, coffee: O.coffee, dessert: O.dessert, perfume: O.perfume, temple: O.temple, see: O.see }) };
     }
     const f = L.see.filter(p => (p.rating || 0) >= 4).sort((a, b) => b.reviews - a.reviews)[0]
       || L.see.slice().sort((a, b) => b.reviews - a.reviews)[0] || null;
@@ -319,6 +326,17 @@ exports.handler = async (event) => {
   const eat = [];
   [food, veg].forEach(r => ((r.body && r.body.places) || []).forEach(p => {
     if (seen.has(p.id)) return; seen.add(p.id); eat.push(shape(p, here, "eat"));
+  }));
+  const tMax = Math.max(radius, 3000) / 1000 * 1.5;
+  const templeAll = [];
+  [tp1, tp2, tp3].forEach(r => ((r && r.body && r.body.places) || []).forEach(p => {
+    if (seen.has(p.id)) return;
+    const ty = p.primaryType || "";
+    if (!/temple|place_of_worship|church|synagogue|historical|monument|cultural/.test(ty)) return;
+    const it = shape(p, here, "temple");
+    if (it.km != null && it.km > tMax) return;
+    it.type = it.type || "old temple";
+    seen.add(p.id); templeAll.push(it);
   }));
   const sMap = new Map();
   [sights, sights2, sights3].forEach(r => ((r && r.body && r.body.places) || []).forEach(p => {
@@ -360,6 +378,6 @@ exports.handler = async (event) => {
     statusCode: 200,
     headers: H,
     body: JSON.stringify({ ok: true, famousId: famous ? famous.id : null,
-      eat: top(eat, 100), shop: top(shop, 50), coffee: top(coffee, 50), dessert: top(dessert, 50), perfume: top(perfumeAll, 0), see: seeTop })
+      eat: top(eat, 100), shop: top(shop, 50), coffee: top(coffee, 50), dessert: top(dessert, 50), perfume: top(perfumeAll, 0), temple: top(templeAll, 100), see: seeTop })
   };
 };
