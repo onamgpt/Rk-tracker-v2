@@ -8,8 +8,26 @@ async function run(opt) {
   opt = opt || {};
   const cur = (await call({ action: "getPortfolio", user: "main", key: "owner_digest" })).data || { items: [] };
   const items = cur.items || [];
-  if (!items.length) return { skipped: "nothing held" };
   const day = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+  // Send even on an empty day. Silence is ambiguous — it looks identical to the
+  // job having failed — so a "nothing held" mail is itself the signal that the
+  // chain ran. Ravi asked for this explicitly.
+  if (!items.length) {
+    const hb = "<div style='font-family:Arial,sans-serif;font-size:15px;color:#16181c;max-width:780px'>" +
+      "<p style='font-size:18px'><b>Your daily summary \u2014 " + esc(day) + "</b></p>" +
+      "<p style='color:#555'>Nothing was held for you today \u2014 no purchase, production, CSD, invoice, " +
+      "dispatch, inventory or Tally items came through.</p>" +
+      "<p style='color:#888;font-size:13px'>This mail is sent every day whether or not there is anything " +
+      "in it, so that a silent evening means a problem rather than a quiet day.</p>" +
+      "<p style='margin-top:26px'><a href='https://rk-tracker-v2.netlify.app/'>Open the tracker</a></p></div>";
+    const rb = await require("./mail.js").handler({ httpMethod: "POST", body: JSON.stringify({
+      to: "onamagarbathi@gmail.com", subject: "Daily summary " + day + " \u2014 nothing held",
+      html: hb, direct: true }) });
+    const okb = JSON.parse(rb.body || "{}").ok;
+    if (okb) await call({ action: "savePortfolio", user: "main", key: "owner_digest",
+      data: { items: [], lastSent: new Date().toISOString() } });
+    return { sent: okb, items: 0, empty: true };
+  }
   const time = (iso) => new Date(new Date(iso).getTime() + 5.5 * 3600e3).toISOString().slice(11, 16);
   let h = "<div style='font-family:Arial,sans-serif;font-size:15px;color:#16181c;max-width:780px'>" +
     "<p style='font-size:18px'><b>Your daily summary — " + esc(day) + "</b></p>" +
