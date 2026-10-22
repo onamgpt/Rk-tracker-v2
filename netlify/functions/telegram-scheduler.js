@@ -13,6 +13,23 @@ const RESEND_KEY = process.env.RESEND_API_KEY || "";
 // and the Telegram leg still goes out.
 const MAIL_FROM = process.env.MAIL_FROM || "";
 
+// Puts a reminder into the WhatsApp queue the Mac Mini bridge drains.
+function queueWhatsApp(phone, text) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify({ action: "add", to: String(phone), message: String(text).replace(/<[^>]+>/g, "") });
+    const req = https.request({
+      hostname: "rk-tracker-v2.netlify.app",
+      path: "/.netlify/functions/wa-queue",
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }
+    }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => resolve(d)); });
+    req.on("error", reject);
+    req.setTimeout(8000, () => { req.destroy(); reject(new Error("timeout")); });
+    req.write(payload); req.end();
+  });
+}
+
+
 // Email leg of a reminder. Kept deliberately simple and best-effort: a failed
 // email must never stop the Telegram leg from going out.
 function sendMail(to, subject, body) {
@@ -140,6 +157,15 @@ exports.handler = async () => {
           await tg("sendMessage", { chat_id: String(id), text: m.text || "", parse_mode: "HTML" });
           sent++;
         }
+        // WhatsApp leg. Queued, not sent directly — the Mac Mini bridge drains
+        // the queue, so a reminder survives the Mac Mini being off and goes out
+        // when it next comes on.
+        for (const ph of (m.phones || [])) {
+          try {
+            await queueWhatsApp(ph, m.body || m.text || "");
+            sent++;
+          } catch (e) { mailFails.push("whatsapp " + ph + " — " + e.message); }
+        }
         for (const addr of (m.emails || [])) {
           const r = await sendMail(addr, m.subject || "Reminder", m.body || "");
           if (r && r.ok) sent++;
@@ -184,3 +210,4 @@ exports.handler = async () => {
     return { statusCode: 200, body: JSON.stringify({ ok: false, error: e.message }) };
   }
 };
+
