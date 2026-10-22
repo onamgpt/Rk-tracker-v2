@@ -105,3 +105,7 @@
 # Spread scanner — every 5 minutes, Mon–Fri (the function itself checks NSE hours, IST)
 [functions."spread-cron"]
   schedule = "*/5 3-10 * * 1-5"
+
+# Cruise Deals Watch — checks daily 09:45 IST (04:15 UTC); runs a scan only when 15 days have passed since the last one
+[functions."cruise-cron"]
+  schedule = "15 4 * * *"
