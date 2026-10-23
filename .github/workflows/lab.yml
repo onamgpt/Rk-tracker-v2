@@ -20,13 +20,21 @@ jobs:
         run: |
           mkdir -p /tmp/data out && cd /tmp/data
           ID=18KtQirmBkgixLznApjzUyNi8_1nXphZV
-          (gdown --fuzzy "https://drive.google.com/file/d/$ID/view" -O symbols.zip 2>&1 | tail -20) > $GITHUB_WORKSPACE/out/download_log.txt || true
-          if ! unzip -tq symbols.zip >/dev/null 2>&1; then
+          echo start > $GITHUB_WORKSPACE/out/download_log.txt
+          if true; then
             curl -sL -o symbols.zip "https://drive.usercontent.google.com/download?id=$ID&export=download&confirm=t" -w "curl http %{http_code} size %{size_download}\n" >> $GITHUB_WORKSPACE/out/download_log.txt
           fi
           ls -la >> $GITHUB_WORKSPACE/out/download_log.txt; file symbols.zip >> $GITHUB_WORKSPACE/out/download_log.txt
-          head -c 600 symbols.zip | strings | head -20 >> $GITHUB_WORKSPACE/out/download_log.txt
-          unzip -q symbols.zip -d x && du -sh x >> $GITHUB_WORKSPACE/out/download_log.txt
+          python3 - >> $GITHUB_WORKSPACE/out/download_log.txt 2>&1 <<'PY'
+import zipfile, itertools
+z = zipfile.ZipFile('symbols.zip')
+L = z.infolist(); print('entries', len(L), 'total_uncompressed_GB', round(sum(i.file_size for i in L)/1e9, 2))
+for i in L[:15]: print(i.filename, i.file_size, i.compress_type)
+with z.open(L[0]) as f:
+    for line in itertools.islice(f, 8): print(line[:300])
+z.extractall('x'); print('extracted ok')
+PY
+          du -sh x >> $GITHUB_WORKSPACE/out/download_log.txt
       - name: run job
         if: steps.dl.outcome == 'success'
         continue-on-error: true
