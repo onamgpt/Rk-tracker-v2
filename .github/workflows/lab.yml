@@ -25,15 +25,7 @@ jobs:
             curl -sL -o symbols.zip "https://drive.usercontent.google.com/download?id=$ID&export=download&confirm=t" -w "curl http %{http_code} size %{size_download}\n" >> $GITHUB_WORKSPACE/out/download_log.txt
           fi
           ls -la >> $GITHUB_WORKSPACE/out/download_log.txt; file symbols.zip >> $GITHUB_WORKSPACE/out/download_log.txt
-          python3 - >> $GITHUB_WORKSPACE/out/download_log.txt 2>&1 <<'PY'
-import zipfile, itertools
-z = zipfile.ZipFile('symbols.zip')
-L = z.infolist(); print('entries', len(L), 'total_uncompressed_GB', round(sum(i.file_size for i in L)/1e9, 2))
-for i in L[:15]: print(i.filename, i.file_size, i.compress_type)
-with z.open(L[0]) as f:
-    for line in itertools.islice(f, 8): print(line[:300])
-z.extractall('x'); print('extracted ok')
-PY
+          python3 $GITHUB_WORKSPACE/inspect_zip.py symbols.zip x >> $GITHUB_WORKSPACE/out/download_log.txt 2>&1
           du -sh x >> $GITHUB_WORKSPACE/out/download_log.txt
       - name: run job
         if: steps.dl.outcome == 'success'
