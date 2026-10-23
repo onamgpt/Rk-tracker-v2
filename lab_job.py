@@ -29,7 +29,14 @@ def read_any(p):
     if pl.endswith('.json'): return pd.read_json(p)
     return pd.read_csv(p, sep=None, engine='python') if os.path.getsize(p) < 2e6 else pd.read_csv(p)
 import warnings; warnings.filterwarnings('ignore')
+from pandas.tseries.api import guess_datetime_format
 def smart_dt(x):
+    x = pd.Series(x).astype(str)
+    for dayfirst in (False, True):
+        fmt = guess_datetime_format(x.iloc[len(x)//2], dayfirst=dayfirst)
+        if fmt:
+            t = pd.to_datetime(x, format=fmt, errors='coerce', cache=True)
+            if t.notna().mean() > 0.99 and (t.diff().dt.total_seconds().dropna() > 0).mean() > 0.98: return t
     best=None; score=-1
     for dayfirst in (False, True):
         t = pd.to_datetime(x, errors='coerce', dayfirst=dayfirst, format='mixed')

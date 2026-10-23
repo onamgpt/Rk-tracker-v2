@@ -2,6 +2,9 @@ name: bb-lab
 on:
   push:
     branches: [research]
+concurrency:
+  group: bblab
+  cancel-in-progress: true
 jobs:
   run:
     runs-on: ubuntu-latest
