@@ -1,0 +1,17 @@
+liquid symbols 509
+files matched 509
+loaded 0 AARTIIND 1
+loaded 50 AZAD 38
+loaded 100 CIPLA 74
+loaded 150 EXIDEIND 110
+loaded 200 HEROMOTOCO 147
+loaded 250 JINDALSAW 183
+loaded 300 M&M 219
+loaded 350 OLAELEC 256
+loaded 400 RITES 291
+loaded 450 TATACOMM 326
+loaded 500 WHIRLPOOL 362
+loaded all 509 368
+fit until 2025-10-24 test after
+intraday done 374
+DONE 377
