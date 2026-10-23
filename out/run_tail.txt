@@ -1,0 +1,53 @@
+first file nse_data/A2ZINFRA_5minute_2023-10-23_to_2026-10-22.csv columns ['date', 'open', 'high', 'low', 'close', 'volume']
+                        date  open  high   low  close  volume
+0  2023-10-25 09:15:00+05:30  8.50  8.70  8.50   8.70     0.0
+1  2023-10-25 09:20:00+05:30  8.70  8.90  8.70   8.85    17.0
+2  2023-10-25 09:25:00+05:30  8.85  8.85  8.85   8.85   103.0
+read 250 files 219 usable
+read 500 files 451 usable
+read 750 files 677 usable
+read 1000 files 905 usable
+read 1250 files 1127 usable
+read 1500 files 1349 usable
+read 1750 files 1578 usable
+read 2000 files 1795 usable
+read 2250 files 2009 usable
+files read: 2340
+usable symbols: 2089
+             sym   bars  days       start         end  med_turnover_cr  step_sec
+748     HDFCBANK  54969   736  2023-10-25  2026-10-22          2177.21     300.0
+1520    RELIANCE  54969   736  2023-10-25  2026-10-22          1528.03     300.0
+801    ICICIBANK  54969   736  2023-10-25  2026-10-22          1460.75     300.0
+862         INFY  54969   736  2023-10-25  2026-10-22          1041.83     300.0
+1628        SBIN  54969   736  2023-10-25  2026-10-22          1015.51     300.0
+319          BSE  54969   736  2023-10-25  2026-10-22           919.62     300.0
+275   BHARTIARTL  54969   736  2023-10-25  2026-10-22           908.12     300.0
+565      ETERNAL  54969   736  2023-10-25  2026-10-22           874.41     300.0
+1855         TCS  54969   736  2023-10-25  2026-10-22           815.09     300.0
+200     AXISBANK  54969   736  2023-10-25  2026-10-22           797.71     300.0
+liquid (>=20cr/day): 509
+aim HDFCBANK 2
+aim TCS 2
+aim BEL 3
+aim JIOFIN 3
+aim VEDL 3
+aim PAYTM 3
+aim BHEL 3
+aim COFORGE 4
+aim ONGC 4
+aim BANKBARODA 4
+aim APOLLOHOSP 4
+aim ADANIGREEN 5
+aim DIVISLAB 5
+aim ASHOKLEY 5
+aim MOTHERSON 5
+aim INDHOTEL 5
+aim HDFCAMC 5
+aim SBILIFE 6
+aim UNIONBANK 6
+aim GODREJPROP 6
+aim VOLTAS 6
+aim ENRIN 7
+aim NHPC 7
+aim GODREJCP 7
+DONE 8
