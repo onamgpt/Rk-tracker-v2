@@ -1,0 +1,29 @@
+name: bb-lab
+on:
+  push:
+    branches: [research]
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: research }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -q pandas numpy pyarrow gdown
+      - name: download data
+        run: |
+          mkdir -p /tmp/data && cd /tmp/data
+          gdown --fuzzy "https://drive.google.com/file/d/18KtQirmBkgixLznApjzUyNi8_1nXphZV/view" -O symbols.zip || curl -L -o symbols.zip "https://drive.usercontent.google.com/download?id=18KtQirmBkgixLznApjzUyNi8_1nXphZV&export=download&confirm=t"
+          ls -la; unzip -q symbols.zip -d x; du -sh x
+      - name: run job
+        run: python job.py /tmp/data/x out
+      - name: save results
+        run: |
+          git config user.name lab-bot; git config user.email lab@bot
+          git add out; git commit -m "results $(date -u +%H%M)" || true
+          git pull --rebase origin research || true
+          git push origin HEAD:research
