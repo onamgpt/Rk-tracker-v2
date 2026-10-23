@@ -15,13 +15,24 @@ jobs:
         with: { python-version: '3.11' }
       - run: pip install -q pandas numpy numba openpyxl pyarrow gdown
       - name: download data
+        id: dl
+        continue-on-error: true
         run: |
-          mkdir -p /tmp/data && cd /tmp/data
-          gdown --fuzzy "https://drive.google.com/file/d/18KtQirmBkgixLznApjzUyNi8_1nXphZV/view" -O symbols.zip || curl -L -o symbols.zip "https://drive.usercontent.google.com/download?id=18KtQirmBkgixLznApjzUyNi8_1nXphZV&export=download&confirm=t"
-          ls -la; unzip -q symbols.zip -d x; du -sh x
+          mkdir -p /tmp/data out && cd /tmp/data
+          ID=18KtQirmBkgixLznApjzUyNi8_1nXphZV
+          (gdown --fuzzy "https://drive.google.com/file/d/$ID/view" -O symbols.zip 2>&1 | tail -20) > $GITHUB_WORKSPACE/out/download_log.txt || true
+          if ! unzip -tq symbols.zip >/dev/null 2>&1; then
+            curl -sL -o symbols.zip "https://drive.usercontent.google.com/download?id=$ID&export=download&confirm=t" -w "curl http %{http_code} size %{size_download}\n" >> $GITHUB_WORKSPACE/out/download_log.txt
+          fi
+          ls -la >> $GITHUB_WORKSPACE/out/download_log.txt; file symbols.zip >> $GITHUB_WORKSPACE/out/download_log.txt
+          head -c 600 symbols.zip | strings | head -20 >> $GITHUB_WORKSPACE/out/download_log.txt
+          unzip -q symbols.zip -d x && du -sh x >> $GITHUB_WORKSPACE/out/download_log.txt
       - name: run job
-        run: python lab_job.py /tmp/data/x out
+        if: steps.dl.outcome == 'success'
+        continue-on-error: true
+        run: python lab_job.py /tmp/data/x out 2>&1 | tail -200 > out/run_tail.txt; exit ${PIPESTATUS[0]}
       - name: save results
+        if: always()
         run: |
           git config user.name lab-bot; git config user.email lab@bot
           git add out; git commit -m "results $(date -u +%H%M)" || true
