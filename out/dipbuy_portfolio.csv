@@ -1,0 +1,40 @@
+strategy,slots,start_capital_L,idle_cash_pct,per,CAGR,maxDD,worst_month,trades,net_per_trade,win,avg_days
+RSI(2)<10 in uptrend,5,5.0,0.0,all,7.73,-39.76,-14.47,558.0,0.26,63.8,5.18
+RSI(2)<10 in uptrend,5,5.0,0.0,fit,9.99,-27.74,-14.47,346.0,0.35,63.58,5.22
+RSI(2)<10 in uptrend,5,5.0,0.0,test,2.32,-25.11,-9.4,212.0,0.11,64.15,5.13
+RSI(2)<10 in uptrend,5,5.0,6.0,all,9.1,-39.33,-14.41,558.0,0.26,63.8,5.18
+RSI(2)<10 in uptrend,5,5.0,6.0,fit,12.01,-27.36,-14.41,346.0,0.35,63.58,5.22
+RSI(2)<10 in uptrend,5,5.0,6.0,test,2.47,-25.1,-9.58,212.0,0.11,64.15,5.13
+RSI(2)<10 in uptrend,10,10.0,0.0,all,5.98,-27.42,-10.66,1074.0,0.21,64.06,5.15
+RSI(2)<10 in uptrend,10,10.0,0.0,fit,5.29,-27.42,-10.66,663.0,0.19,63.35,5.18
+RSI(2)<10 in uptrend,10,10.0,0.0,test,7.11,-15.33,-7.74,411.0,0.22,65.21,5.12
+RSI(2)<10 in uptrend,10,10.0,6.0,all,7.64,-26.83,-10.45,1074.0,0.21,64.06,5.15
+RSI(2)<10 in uptrend,10,10.0,6.0,fit,7.47,-26.83,-10.45,663.0,0.19,63.35,5.18
+RSI(2)<10 in uptrend,10,10.0,6.0,test,7.72,-15.2,-7.7,411.0,0.23,65.21,5.12
+RSI(2)<10 in uptrend,20,20.0,0.0,all,4.21,-24.25,-7.03,1961.0,0.16,63.03,5.18
+RSI(2)<10 in uptrend,20,20.0,0.0,fit,5.58,-21.01,-7.03,1193.0,0.19,62.78,5.2
+RSI(2)<10 in uptrend,20,20.0,0.0,test,1.51,-14.05,-6.83,768.0,0.1,63.41,5.15
+RSI(2)<10 in uptrend,20,20.0,6.0,all,6.11,-22.73,-6.86,1961.0,0.16,63.08,5.18
+RSI(2)<10 in uptrend,20,20.0,6.0,fit,8.08,-20.24,-6.86,1193.0,0.2,62.87,5.2
+RSI(2)<10 in uptrend,20,20.0,6.0,test,2.24,-13.9,-6.77,768.0,0.1,63.41,5.15
+Bollinger lower band in uptrend,5,5.0,0.0,all,2.11,-33.7,-14.5,245.0,0.21,60.0,10.57
+Bollinger lower band in uptrend,5,5.0,0.0,fit,-6.67,-33.34,-14.5,146.0,-0.37,57.53,11.15
+Bollinger lower band in uptrend,5,5.0,0.0,test,21.54,-11.83,-5.9,99.0,1.06,63.64,9.71
+Bollinger lower band in uptrend,5,5.0,6.0,all,4.15,-32.82,-14.49,245.0,0.21,60.0,10.57
+Bollinger lower band in uptrend,5,5.0,6.0,fit,-4.42,-32.82,-14.49,146.0,-0.37,57.53,11.15
+Bollinger lower band in uptrend,5,5.0,6.0,test,22.98,-11.48,-5.67,99.0,1.07,63.64,9.71
+Bollinger lower band in uptrend,10,10.0,0.0,all,-0.34,-25.84,-14.39,437.0,0.06,59.95,10.56
+Bollinger lower band in uptrend,10,10.0,0.0,fit,-2.39,-23.85,-14.39,263.0,-0.1,59.7,10.67
+Bollinger lower band in uptrend,10,10.0,0.0,test,3.63,-11.85,-6.19,174.0,0.3,60.34,10.39
+Bollinger lower band in uptrend,10,10.0,6.0,all,1.9,-23.98,-14.39,437.0,0.06,59.95,10.56
+Bollinger lower band in uptrend,10,10.0,6.0,fit,0.21,-23.49,-14.39,263.0,-0.1,59.7,10.67
+Bollinger lower band in uptrend,10,10.0,6.0,test,5.08,-11.42,-6.2,174.0,0.3,60.34,10.39
+Bollinger lower band in uptrend,20,20.0,0.0,all,-0.15,-23.32,-9.75,730.0,0.06,60.0,10.41
+Bollinger lower band in uptrend,20,20.0,0.0,fit,1.61,-16.76,-9.75,431.0,0.23,60.79,10.42
+Bollinger lower band in uptrend,20,20.0,0.0,test,-3.69,-13.89,-6.91,299.0,-0.19,58.86,10.4
+Bollinger lower band in uptrend,20,20.0,6.0,all,2.78,-20.88,-9.62,730.0,0.06,60.0,10.41
+Bollinger lower band in uptrend,20,20.0,6.0,fit,5.07,-15.28,-9.62,431.0,0.23,60.79,10.42
+Bollinger lower band in uptrend,20,20.0,6.0,test,-1.78,-13.17,-6.76,299.0,-0.19,58.86,10.4
+Buy & hold all liquid,0,,,all,21.66,-21.92,-11.89,,,,
+Buy & hold all liquid,0,,,fit,34.55,-21.92,-11.89,,,,
+Buy & hold all liquid,0,,,test,-0.43,-16.5,-10.87,,,,

@@ -1,0 +1,20 @@
+loaded 0 0
+loaded 100 6
+loaded 200 12
+loaded 300 19
+loaded 400 25
+loaded 500 31
+stocks 509 days 735
+RSI(2)<10 in uptrend 5 0.0 32
+RSI(2)<10 in uptrend 5 0.06 32
+RSI(2)<10 in uptrend 10 0.0 32
+RSI(2)<10 in uptrend 10 0.06 32
+RSI(2)<10 in uptrend 20 0.0 32
+RSI(2)<10 in uptrend 20 0.06 32
+Bollinger lower band in uptrend 5 0.0 32
+Bollinger lower band in uptrend 5 0.06 32
+Bollinger lower band in uptrend 10 0.0 32
+Bollinger lower band in uptrend 10 0.06 32
+Bollinger lower band in uptrend 20 0.0 32
+Bollinger lower band in uptrend 20 0.06 32
+DONE 33
