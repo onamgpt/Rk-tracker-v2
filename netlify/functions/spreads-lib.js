@@ -28,8 +28,14 @@ async function session() {
 async function kite(path, token) {
   const r = await fetch("https://api.kite.trade" + path, { headers: { "X-Kite-Version": "3", Authorization: "token " + API_KEY() + ":" + token } });
   const ct = r.headers.get("content-type") || "";
-  if (/json/.test(ct)) { const j = await r.json(); if (j.status === "error") throw new Error(j.message || "Kite error"); return j; }
-  const t = await r.text(); if (!r.ok) throw new Error("Kite " + r.status); return t;
+  const t = await r.text();
+  if (/json/.test(ct) || /^\s*\{/.test(t)) {
+    let j = null; try { j = JSON.parse(t); } catch (e) {}
+    if (j && j.status === "error") throw new Error("Kite " + r.status + ": " + (j.message || "error") + (j.error_type ? " (" + j.error_type + ")" : ""));
+    if (j) return j;
+  }
+  if (!r.ok) throw new Error("Kite " + r.status + ": " + t.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 160));
+  return t;
 }
 // NSE equity list (refreshed daily)
 async function instruments(token) {

@@ -9,10 +9,13 @@ exports.handler = async (event) => {
   const out = { at: new Date().toISOString(), cost, rows: [], error: "" };
   try {
     const token = await S.session(); if (!token) throw new Error("Zerodha not logged in today — log in once in the AIM app");
+    // probe one quote first so the page shows the exact reason if market data is blocked
+    try { const pj = await S.kite("/quote?i=NSE:INFY", token); out.probe = pj && pj.data && pj.data["NSE:INFY"] ? "ok" : "empty"; }
+    catch (e) { out.probe = e.message; throw new Error("Quote access: " + e.message); }
     const inst = await S.instruments(token), bySym = {};
     inst.forEach((x) => { bySym[x.s] = x; });
-    for (let i = 0; i < inst.length; i += 500) {
-      const qs = inst.slice(i, i + 500).map((x) => "i=" + encodeURIComponent("NSE:" + x.s)).join("&");
+    for (let i = 0; i < inst.length; i += 250) {
+      const qs = inst.slice(i, i + 250).map((x) => "i=" + encodeURIComponent("NSE:" + x.s)).join("&");
       let j; try { j = await S.kite("/quote?" + qs, token); } catch (e) { out.error = e.message; break; }
       for (const k in (j.data || {})) {
         const q = j.data[k], sym = k.slice(4), meta = bySym[sym] || {};
