@@ -1,0 +1,10 @@
+loaded 0 0
+loaded 100 4
+loaded 200 8
+loaded 300 12
+loaded 400 16
+loaded 500 20
+stocks 509
+aim sweep done 22
+swing table 334137 34
+DONE 36
