@@ -1,24 +1,42 @@
-usage: gdown [-h] [-V] [-O OUTPUT] [-q] [--proxy PROXY] [--speed SPEED]
-             [--cookies FILE] [--cookies-from-browser BROWSER] [--no-cookies]
-             [--no-check-certificate] [--continue] [--retries N] [--folder]
-             [--json] [--format FORMAT] [--user-agent USER_AGENT]
-             [--timeout SECONDS]
-             url_or_id
-gdown: error: unrecognized arguments: --fuzzy
+start
 curl http 200 size 1142227804
 total 1115460
-drwxr-xr-x  2 runner runner         60 Oct 23 05:03 .
-drwxrwxrwt 12 root   root          360 Oct 23 05:03 ..
--rw-r--r--  1 runner runner 1142227804 Oct 23 05:03 symbols.zip
+drwxr-xr-x  2 runner runner         60 Oct 23 05:17 .
+drwxrwxrwt 12 root   root          360 Oct 23 05:17 ..
+-rw-r--r--  1 runner runner 1142227804 Oct 23 05:17 symbols.zip
 symbols.zip: Zip archive data, at least v2.0 to extract, compression method=deflate
-symbols.txtux
-y'XvW
-u&<\
-'pU7?D^E
-a/]O
-SJfW
-]K}\
-sxq+
-nLZ&
-$}00v?
-3jjS
+entries 2342 total_uncompressed_GB 5.83
+symbols.txt 21536 8
+nse_data/ 0 0
+nse_data/A2ZINFRA_5minute_2023-10-23_to_2026-10-22.csv 2805438 8
+nse_data/AAATECH_5minute_2023-10-23_to_2026-10-22.csv 2924136 8
+nse_data/AADHARHFC_5minute_2023-10-23_to_2026-10-22.csv 2612738 8
+nse_data/AAKASH_5minute_2023-10-23_to_2026-10-22.csv 2906910 8
+nse_data/AAREYDRUGS_5minute_2023-10-23_to_2026-10-22.csv 2532632 8
+nse_data/AARON_5minute_2023-10-23_to_2026-10-22.csv 3050858 8
+nse_data/AARTECH_5minute_2023-10-23_to_2026-10-22.csv 2790129 8
+nse_data/AARTIDRUGS_5minute_2023-10-23_to_2026-10-22.csv 3171254 8
+nse_data/AARTIIND_5minute_2023-10-23_to_2026-10-22.csv 3225107 8
+nse_data/AARTIPHARM_5minute_2023-10-23_to_2026-10-22.csv 3184136 8
+nse_data/AARVI_5minute_2023-10-23_to_2026-10-22.csv 3034920 8
+nse_data/AASTHA_5minute_2023-10-23_to_2026-10-22.csv 315855 8
+nse_data/AAVAS_5minute_2023-10-23_to_2026-10-22.csv 3342864 8
+b'A2ZINFRA\r\n'
+b'AAATECH\r\n'
+b'AADHARHFC\r\n'
+b'AAKASH\r\n'
+b'AAREYDRUGS\r\n'
+b'AARON\r\n'
+b'AARTECH\r\n'
+b'AARTIDRUGS\r\n'
+Traceback (most recent call last):
+  File "/home/runner/work/Rk-tracker-v2/Rk-tracker-v2/inspect_zip.py", line 7, in <module>
+    z.extractall(sys.argv[2]); print('extracted ok')
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/zipfile.py", line 1741, in extractall
+    self._extract_member(zipinfo, path, pwd)
+  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/zipfile.py", line 1804, in _extract_member
+    shutil.copyfileobj(source, target)
+  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/shutil.py", line 200, in copyfileobj
+    fdst_write(buf)
+OSError: [Errno 122] Disk quota exceeded
