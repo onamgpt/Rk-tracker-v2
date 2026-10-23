@@ -1,0 +1,13 @@
+loaded 0 0
+loaded 100 6
+loaded 200 13
+loaded 300 19
+loaded 400 26
+loaded 500 32
+stocks 509 cut 2025-10-24
+rules 100 34
+rules 200 36
+rules 300 37
+rules 400 38
+rules 500 39
+DONE 42
