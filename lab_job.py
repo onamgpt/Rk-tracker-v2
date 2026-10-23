@@ -57,42 +57,46 @@ def normalize(df, fname):
     out['sym'] = df[sym].astype(str).values if sym else re.split(r'[_\-. ]', os.path.basename(fname))[0].upper()
     return out.dropna(subset=['ts', 'close'])
 
-files = [p for p in glob.glob(SRC+'/**/*', recursive=True) if os.path.isfile(p) and not os.path.basename(p).startswith('.')
-         and p.lower().endswith(('.csv', '.txt', '.xlsx', '.xls', '.parquet', '.json'))]
-log('files found:', len(files))
-acc = {}
-for i, p in enumerate(sorted(files)):
+import zipfile
+def members():
+    if SRC.lower().endswith('.zip'):
+        z = zipfile.ZipFile(SRC)
+        for i in z.infolist():
+            n = i.filename
+            if n.endswith('/') or os.path.basename(n).startswith('.') or not n.lower().endswith(('.csv', '.txt', '.xlsx', '.xls')): continue
+            if os.path.basename(n).lower() == 'symbols.txt': continue
+            yield n, (lambda i=i: z.open(i))
+    else:
+        for p in glob.glob(SRC+'/**/*', recursive=True):
+            if os.path.isfile(p) and p.lower().endswith(('.csv', '.txt', '.xlsx', '.xls', '.parquet')):
+                yield p, (lambda p=p: p)
+meta = []; nfile = 0
+for name, opener in members():
+    nfile += 1
     try:
-        n = normalize(read_any(p), p)
-        for s, g in n.groupby('sym'):
-            acc.setdefault(s, []).append(g.drop(columns='sym'))
+        src = opener()
+        raw = pd.read_excel(src) if name.lower().endswith(('xlsx', 'xls')) else pd.read_csv(src)
+        if nfile == 1: log('first file', name, 'columns', list(raw.columns)); log(raw.head(3).to_string())
+        base = os.path.basename(name)
+        sym = re.split(r'_\d+minute|_5min|_minute', base)[0].split('.')[0].upper()
+        n = normalize(raw, name)
+        if 'sym' in n and n['sym'].nunique() == 1: n['sym'] = sym
+        for s, d in n.groupby('sym'):
+            d = d.drop(columns='sym').drop_duplicates('ts').sort_values('ts').set_index('ts')
+            if getattr(d.index, 'tz', None) is not None: d.index = d.index.tz_localize(None)
+            step = d.index.to_series().diff().dt.total_seconds().median()
+            if step < 300:
+                d = d.resample('5min', label='left', closed='left').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}).dropna(subset=['close'])
+            d = d.between_time('09:15', '15:25'); d = d[d.index.dayofweek < 5]
+            days = pd.Series(d.index.date).nunique()
+            if days < 120 or d.close.median() < 5: continue
+            turnover = (d.close*d.volume).groupby(d.index.date).sum().median()
+            d.to_pickle(f'{BARS}/{s}.pkl')
+            meta.append(dict(sym=s, bars=len(d), days=days, start=d.index[0].date(), end=d.index[-1].date(), med_turnover_cr=round(turnover/1e7, 2), step_sec=step))
     except Exception as e:
-        log('skip', p, e)
-    if len(acc) and i % 200 == 0: log('read', i, 'files', len(acc), 'symbols')
-    # flush big symbols to disk to save memory
-    if i % 300 == 299:
-        for s in list(acc):
-            pth = f'{BARS}/{s}.part{i}.pkl'; pd.concat(acc[s]).to_pickle(pth)
-        acc = {}
-for s in list(acc): pd.concat(acc[s]).to_pickle(f'{BARS}/{s}.partZ.pkl')
-syms = sorted(set(os.path.basename(p).split('.part')[0] for p in glob.glob(BARS+'/*.part*.pkl')))
-log('symbols:', len(syms))
-# combine, resample to 5-min regular session
-meta = []
-for s in syms:
-    parts = glob.glob(f'{BARS}/{s}.part*.pkl')
-    d = pd.concat([pd.read_pickle(p) for p in parts]).drop_duplicates('ts').sort_values('ts').set_index('ts')
-    for p in parts: os.remove(p)
-    if getattr(d.index, 'tz', None) is not None: d.index = d.index.tz_localize(None)
-    step = d.index.to_series().diff().dt.total_seconds().median()
-    if step < 300:
-        d = d.resample('5min', label='left', closed='left').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}).dropna(subset=['close'])
-    d = d.between_time('09:15', '15:25'); d = d[d.index.dayofweek < 5]
-    days = pd.Series(d.index.date).nunique()
-    if days < 120 or d.close.median() < 5: continue
-    turnover = (d.close*d.volume).groupby(d.index.date).sum().median()
-    d.to_pickle(f'{BARS}/{s}.pkl')
-    meta.append(dict(sym=s, bars=len(d), days=days, start=d.index[0].date(), end=d.index[-1].date(), med_turnover_cr=round(turnover/1e7, 2), step_sec=step))
+        log('skip', name, repr(e)[:200])
+    if nfile % 250 == 0: log('read', nfile, 'files', len(meta), 'usable')
+log('files read:', nfile)
 M = pd.DataFrame(meta).sort_values('med_turnover_cr', ascending=False); M.to_csv(f'{OUT}/universe.csv', index=False)
 log('usable symbols:', len(M)); log(M.head(10).to_string())
 LIQ = set(M[M.med_turnover_cr >= 20].sym)   # liquid: >= Rs 20 cr/day median turnover
