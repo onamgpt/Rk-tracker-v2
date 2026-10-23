@@ -32,7 +32,7 @@ jobs:
       - name: run job
         if: steps.dl.outcome == 'success'
         continue-on-error: true
-        run: python lab_job.py /tmp/data/symbols.zip out 2>&1 | tail -200 > out/run_tail.txt; exit ${PIPESTATUS[0]}
+        run: python job2.py /tmp/data/symbols.zip out/universe.csv out 2>&1 | tail -200 > out/run2_tail.txt; exit ${PIPESTATUS[0]}
       - name: save results
         if: always()
         run: |
