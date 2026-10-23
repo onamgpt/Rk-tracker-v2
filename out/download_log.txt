@@ -1,0 +1,24 @@
+usage: gdown [-h] [-V] [-O OUTPUT] [-q] [--proxy PROXY] [--speed SPEED]
+             [--cookies FILE] [--cookies-from-browser BROWSER] [--no-cookies]
+             [--no-check-certificate] [--continue] [--retries N] [--folder]
+             [--json] [--format FORMAT] [--user-agent USER_AGENT]
+             [--timeout SECONDS]
+             url_or_id
+gdown: error: unrecognized arguments: --fuzzy
+curl http 200 size 1142227804
+total 1115460
+drwxr-xr-x  2 runner runner         60 Oct 23 05:03 .
+drwxrwxrwt 12 root   root          360 Oct 23 05:03 ..
+-rw-r--r--  1 runner runner 1142227804 Oct 23 05:03 symbols.zip
+symbols.zip: Zip archive data, at least v2.0 to extract, compression method=deflate
+symbols.txtux
+y'XvW
+u&<\
+'pU7?D^E
+a/]O
+SJfW
+]K}\
+sxq+
+nLZ&
+$}00v?
+3jjS
