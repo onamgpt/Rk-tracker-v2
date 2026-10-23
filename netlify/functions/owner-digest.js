@@ -9,11 +9,8 @@ const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": 
 // delivers it. Never let a WhatsApp failure affect the email result.
 async function wa(text) {
   try {
-    const r = await require("./wa-queue.js").handler({
-      httpMethod: "POST",
-      body: JSON.stringify({ action: "add", to: "ravi", message: text })
-    });
-    return !!JSON.parse(r.body || "{}").ok;
+    const rows = await require("./wa-lib.js").send("ravi", text);
+    return rows.length > 0;
   } catch (e) { return false; }
 }
 

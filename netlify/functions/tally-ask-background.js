@@ -74,6 +74,7 @@ async function claude(model, system, messages) {
   if (!r.ok) throw new Error((j.error && j.error.message) || ("AI error " + r.status));
   return (j.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n").trim();
 }
+exports.context = context;
 exports.handler = async (event) => {
   if ((event.headers || {})["x-run-key"] !== T.runKey()) return { statusCode: 403, body: "no" };
   let b = {}; try { b = JSON.parse(event.body || "{}"); } catch (e) {}

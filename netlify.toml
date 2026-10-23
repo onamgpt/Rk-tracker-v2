@@ -113,3 +113,7 @@
 # Daily printed work sheets — 09:25 IST (03:55 UTC), so the Mac Mini prints them by 9:45
 [functions."print-daily"]
   schedule = "55 3 * * 1-6"
+
+# WhatsApp office number — #wa emails, task nudges, 10:15 lists, 17:30 summary, retries
+[functions."wa-cron"]
+  schedule = "*/15 * * * *"

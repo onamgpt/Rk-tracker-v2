@@ -37,6 +37,7 @@ async function getAllEntries() {
 }
 
 function tgSend(text) {
+  try { require("./wa-lib.js").send("ravi", text); } catch (e) {}
   return new Promise(function(resolve, reject) {
     var payload = JSON.stringify({chat_id: CHAT_ID, text: text, parse_mode: "HTML"});
     var req = https.request({

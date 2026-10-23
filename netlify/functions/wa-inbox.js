@@ -1,120 +1,55 @@
-// Inbound WhatsApp. The Mac Mini bridge posts every message that arrives at the
-// office number here; this hands it to smartnote, the same brain /note and the
-// Siri shortcut use, and returns one line for the bridge to reply with.
-//
-// Only owner numbers can file entries. A staff member messaging the office
-// number gets a polite pointer back to their own channel — their words are
-// logged for review but never turned into tracker entries, because a misread
-// instruction that creates a financial note is worse than no note at all.
-const H = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
-
-const OWNERS = {
-  "919845563633": "Ravi",
-  "918310368142": "Ravi",
-  "919886211325": "Brunda",
-  "919900504401": "Tassmai"
-};
-const KNOWN = {
-  "919844725484": "Prakash",
-  "919845807015": "Virupaksha",
-  "916364559047": "Maadhu",
-  "919900537494": "Security Onam"
-};
-
-async function call(mod, x) {
-  const m = require("./" + mod);
-  return JSON.parse((await m.handler({ httpMethod: "POST", body: JSON.stringify(x) })).body || "{}");
-}
-
-async function logInbound(entry) {
-  try {
-    const cur = (await call("db.js", { action: "getPortfolio", user: "main", key: "wa_inbound_log" })).data || { items: [] };
-    const items = (cur.items || []).concat([entry]).slice(-300);
-    await call("db.js", { action: "savePortfolio", user: "main", key: "wa_inbound_log", data: { items } });
-  } catch (e) { /* logging must never break the reply */ }
-}
+// Inbound WhatsApp. The Mac Mini bridge posts every message that reaches the
+// office number (direct chats and groups). This stores it (wa_messages, deduped
+// by WhatsApp's message id, so the morning catch-up can safely resend), keeps
+// any photo/PDF in the private tracker-files bucket, then hands it to
+// wa-brain-background, which decides what to do and replies via the outbox.
+const W = require("./wa-lib.js");
+const T = require("./tally.js");
+const db = require("./db.js");
+const H = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Access-Control-Allow-Headers": "Content-Type, x-bridge-key", "Access-Control-Allow-Methods": "POST, OPTIONS" };
+const OK = (o, c) => ({ statusCode: c || 200, headers: H, body: JSON.stringify(o) });
 
 exports.handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: H, body: "" };
+  if (event.httpMethod === "OPTIONS") return OK({});
+  if (!(await W.bridgeOk(event))) return OK({ ok: false, error: "bridge key required" }, 403);
+  let b = {}; try { b = JSON.parse(event.body || "{}"); } catch (e) {}
 
-  let b = {};
-  try { b = JSON.parse(event.body || "{}"); } catch (e) {}
-
+  const id = String(b.id || "").slice(0, 200);
+  const chatJid = String(b.chatJid || "");
+  const isGroup = /@g\.us$/.test(chatJid) || !!b.isGroup;
   const from = String(b.from || "").replace(/\D/g, "");
-  const text = String(b.text || "").trim();
-  const mediaB64 = b.mediaBase64 || "";
-  const mediaType = b.mediaType || "";
-  const stamp = new Date().toISOString();
+  if (!id || !chatJid) return OK({ ok: false, error: "missing id/chat" }, 400);
 
-  if (!from) return { statusCode: 400, headers: H, body: JSON.stringify({ ok: false, error: "no sender" }) };
+  const p = W.personByPhone(from);
+  const role = isGroup ? "group" : (p ? (p.owner ? "owner" : "staff") : "unknown");
 
-  const ownerName = OWNERS[from];
-  const staffName = KNOWN[from];
+  // Duplicate (already stored) → nothing to do.
+  const have = await W.sb("GET", "/rest/v1/wa_messages?id=eq." + encodeURIComponent(id) + "&select=id");
+  if (have && have.length) return OK({ ok: true, duplicate: true });
 
-  // Unknown number: ignore completely. No reply, no log entry worth keeping.
-  if (!ownerName && !staffName) {
-    return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, ignored: "unknown sender" }) };
-  }
-
-  // Staff: record it, point them back to their own channel, file nothing.
-  if (!ownerName) {
-    await logInbound({ at: stamp, from, who: staffName, text, handled: "logged only" });
-    return { statusCode: 200, headers: H, body: JSON.stringify({
-      ok: true,
-      reply: "Noted, " + staffName + ". This number sends reminders only. For orders and production please use your daily sheet or email so it reaches the right place."
-    }) };
-  }
-
-  // Owner: read any image, then let smartnote decide what it is.
-  let ocrText = "";
-  if (mediaB64 && /^image\//.test(mediaType)) {
+  let mediaPath = null;
+  if (b.mediaBase64 && role !== "unknown") {
     try {
-      const r = await call("smartnote.js", { action: "ocr", imageBase64: mediaB64, imageType: mediaType });
-      ocrText = String(r.text || "").trim();
-    } catch (e) { ocrText = ""; }
+      const up = JSON.parse((await db.handler({ httpMethod: "POST", body: JSON.stringify({ action: "uploadFile", user: "main",
+        file: { name: b.mediaName || ("whatsapp-" + Date.now()), type: b.mediaType || "application/octet-stream", data: b.mediaBase64 } }) })).body || "{}");
+      if (up.ok) mediaPath = up.id;
+    } catch (e) {}
   }
 
-  if (!text && !ocrText) {
-    await logInbound({ at: stamp, from, who: ownerName, text: "(attachment only, unreadable)", handled: "no text" });
-    return { statusCode: 200, headers: H, body: JSON.stringify({
-      ok: true,
-      reply: "I could not read that. Send a photo of the document, or type what you want noted."
-    }) };
+  await W.sb("POST", "/rest/v1/wa_messages", [{
+    id, chat_jid: chatJid, chat_name: String(b.chatName || "").slice(0, 120), chat_role: role,
+    sender: from, sender_name: p ? p.name : String(b.senderName || "").slice(0, 80),
+    ts: b.ts ? new Date(Number(b.ts) * 1000).toISOString() : new Date().toISOString(),
+    body: String(b.text || "").slice(0, 20000), media_type: b.mediaType || (b.mediaSkipped ? "skipped:" + b.mediaSkipped : null),
+    media_url: mediaPath, media_name: b.mediaName || null, quoted_id: b.quotedId || null,
+    status: role === "unknown" ? "ignored" : "new", source: "whatsapp"
+  }], { Prefer: "return=minimal,resolution=ignore-duplicates" });
+
+  if (role !== "unknown") {
+    try {
+      await fetch(W.SITE() + "/.netlify/functions/wa-brain-background", { method: "POST",
+        headers: { "Content-Type": "application/json", "x-run-key": T.runKey() }, body: JSON.stringify({ ids: [id] }) });
+    } catch (e) {}
   }
-
-  let routed = {};
-  try {
-    routed = await call("smartnote.js", { action: "route", user: "main", text, ocr: ocrText });
-  } catch (e) {
-    await logInbound({ at: stamp, from, who: ownerName, text, handled: "route failed: " + e.message });
-    return { statusCode: 200, headers: H, body: JSON.stringify({
-      ok: true,
-      reply: "Could not file that just now. It is logged, nothing lost. Try again in a minute."
-    }) };
-  }
-
-  if (routed.error) {
-    await logInbound({ at: stamp, from, who: ownerName, text, handled: "error: " + routed.error });
-    return { statusCode: 200, headers: H, body: JSON.stringify({
-      ok: true, reply: "Nothing to file in that message."
-    }) };
-  }
-
-  await logInbound({ at: stamp, from, who: ownerName, text, handled: routed.category || "filed", entryId: routed.id });
-
-  // Confirm precisely. A vague "done" leaves the person unsure whether the
-  // reminder actually exists, which defeats the point of messaging it in.
-  let reply;
-  if (routed.mode === "append") {
-    reply = "Added to: " + (routed.title || "existing entry");
-  } else if (routed.category === "Reminders") {
-    reply = "Reminder set: " + (routed.title || text.slice(0, 50));
-    if (routed.reminder) reply += "\nWhen: " + String(routed.reminder).slice(0, 16).replace("T", " ");
-  } else {
-    reply = "Filed under " + (routed.category || "Quick Notes") + ": " + (routed.title || text.slice(0, 50));
-  }
-  if (ocrText) reply += "\n(Text read from the attachment.)";
-  reply += "\n\nOpen the tracker to check or change it.";
-
-  return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, reply, entryId: routed.id }) };
+  return OK({ ok: true, role });
 };

@@ -48,6 +48,8 @@ exports.handler = async (event) => {
         const r = await tg("sendMessage", { chat_id: String(id), text: text, parse_mode: "HTML" });
         results.push({ chatId: id, ok: !!r.ok, error: r.ok ? null : (r.description || "failed") });
       }
+      // Same message on WhatsApp (office number) for the people it maps to.
+      try { await require("./wa-lib.js").mirrorTg(chatIds, text); } catch (e) {}
       const sent = results.filter(r => r.ok).length;
       return { statusCode: 200, headers: h, body: JSON.stringify({ ok: true, sent, total: results.length, results }) };
     }

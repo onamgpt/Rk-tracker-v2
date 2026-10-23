@@ -60,6 +60,7 @@ function sb(method, path, bodyObj, extraHeaders) {
 
 // ---------- Telegram helper (never throws) ----------
 function tgSend(text) {
+  try { require("./wa-lib.js").send("ravi", text); } catch (e) {}
   return new Promise((resolve) => {
     if (!BOT) return resolve({ ok: false, error: "TELEGRAM_BOT_TOKEN not set" });
     const payload = JSON.stringify({

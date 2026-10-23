@@ -15,6 +15,9 @@ const MAIL_FROM = process.env.MAIL_FROM || "";
 
 // Puts a reminder into the WhatsApp queue the Mac Mini bridge drains.
 function queueWhatsApp(phone, text) {
+  return require("./wa-lib.js").send(String(phone), String(text));
+}
+function queueWhatsAppOldHttp(phone, text) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify({ action: "add", to: String(phone), message: String(text).replace(/<[^>]+>/g, "") });
     const req = https.request({
@@ -160,6 +163,8 @@ exports.handler = async () => {
         // WhatsApp leg. Queued, not sent directly — the Mac Mini bridge drains
         // the queue, so a reminder survives the Mac Mini being off and goes out
         // when it next comes on.
+        // Telegram chats also get the WhatsApp copy (skipped if phones already listed).
+        if (!(m.phones || []).length) { try { await require("./wa-lib.js").mirrorTg(m.chatIds || [], m.text || ""); } catch (e) {} }
         for (const ph of (m.phones || [])) {
           try {
             await queueWhatsApp(ph, m.body || m.text || "");
