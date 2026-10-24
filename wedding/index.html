@@ -194,8 +194,20 @@ button{cursor:pointer}
       var m = Object.assign({}, newer);
       m.notes = Object.assign({}, older.notes||{});
       Object.keys(newer.notes||{}).forEach(function(k){ var x=newer.notes[k], y=m.notes[k]; if(!y || String(x.at||'')>=String(y.at||'')) m.notes[k]=x; });
-      var seen = {}; m.comments = (older.comments||[]).concat(newer.comments||[]).filter(function(c){ var k=c.at+'|'+c.by+'|'+c.text; if(seen[k]) return false; seen[k]=1; return true; })
-        .sort(function(x,y){ return String(x.at).localeCompare(String(y.at)); });
+      // photos, files, pros, cons and messages can be added from WhatsApp and the page
+      // at the same time, so they are combined; anything someone removed stays removed.
+      var gone = {}; (older.removed||[]).concat(newer.removed||[]).forEach(function(k){ gone[k]=1; });
+      m.removed = Object.keys(gone);
+      function uni(field, keyOf, sort){
+        var seen={}, outA=[]; (newer[field]||[]).concat(older[field]||[]).forEach(function(x){ var k=keyOf(x); if(!x||seen[k]||gone[k]) return; seen[k]=1; outA.push(x); });
+        if(sort) outA.sort(function(x,y){ return String(x.at||'').localeCompare(String(y.at||'')); });
+        m[field]=outA;
+      }
+      uni('photos', function(x){ return x.url; });
+      uni('files', function(x){ return x.url; });
+      uni('pros', function(x){ return 'pc:'+x.at+'|'+x.by+'|'+x.text; }, true);
+      uni('cons', function(x){ return 'pc:'+x.at+'|'+x.by+'|'+x.text; }, true);
+      uni('comments', function(x){ return x.at+'|'+x.by+'|'+x.text; }, true);
       map[p.id] = m;
     });
     var out = Object.keys(map).map(function(k){ return map[k]; });
@@ -314,7 +326,7 @@ button{cursor:pointer}
     });
 
     // files
-    h+='<div class="sec"><h3>Biodata &amp; Jathaka</h3><div class="files">'+(p.files||[]).map(function(f,i){ return '<div><a href="'+esc(f.url)+'" target="_blank">\ud83d\udcce '+esc((f.kind?f.kind+' \u2014 ':'')+f.name)+'</a>'+(editing?' <button class="btn x2" data-i="'+i+'" data-t="files">Remove</button>':'')+'</div>'; }).join('')+
+    h+='<div class="sec"><h3>Biodata &amp; Jathaka</h3><div class="files">'+(p.files||[]).map(function(f,i){ return '<div><a href="'+esc(f.url)+'" target="_blank">\ud83d\udcce '+esc((f.kind?f.kind+' \u2014 ':'')+f.name)+(f.addedBy?' \u00b7 via WhatsApp from '+esc(NAMES[f.addedBy]||f.addedBy):'')+'</a>'+(editing?' <button class="btn x2" data-i="'+i+'" data-t="files">Remove</button>':'')+'</div>'; }).join('')+
        ((p.files||[]).length?'':'<div class="muted">None yet.</div>')+'</div>'+
        '<div class="addrow"><button class="btn" id="addBio">+ Biodata</button><button class="btn" id="addJat">+ Jathaka</button><button class="btn" id="addOther">+ Other file</button></div></div>';
 
@@ -366,12 +378,12 @@ button{cursor:pointer}
       touch(P()); await save(); renderSheet();
     }; }
     $('addBio').onclick=addFile('Biodata'); $('addJat').onclick=addFile('Jathaka'); $('addOther').onclick=addFile('');
-    Array.from(document.querySelectorAll('.gal .x, .x2')).forEach(function(b){ b.onclick=function(ev){ ev.preventDefault(); if(!confirm('Remove this?')) return; P()[b.dataset.t].splice(+b.dataset.i,1); touch(P()); save(); renderSheet(); }; });
+    Array.from(document.querySelectorAll('.gal .x, .x2')).forEach(function(b){ b.onclick=function(ev){ ev.preventDefault(); if(!confirm('Remove this?')) return; var q=P(), it=q[b.dataset.t][+b.dataset.i]; if(it&&it.url) (q.removed=q.removed||[]).push(it.url); q[b.dataset.t].splice(+b.dataset.i,1); touch(q); save(); renderSheet(); }; });
     var rating=((P().notes||{})[USER]||{}).rating||0;
     if($('sp')) Array.from($('sp').children).forEach(function(b){ b.onclick=function(){ rating=+b.dataset.r; Array.from($('sp').children).forEach(function(x){ x.className=(+x.dataset.r<=rating)?'on':''; }); }; });
     if($('saveNote')) $('saveNote').onclick=function(){ P().notes=P().notes||{}; P().notes[USER]={text:$('myNote').value.trim(), rating:rating, at:now()}; touch(P()); save(); renderSheet(); };
     Array.from(document.querySelectorAll('[data-add]')).forEach(function(b){ b.onclick=function(){ var t=b.dataset.add, v=$('in_'+t).value.trim(); if(!v) return; (P()[t]=P()[t]||[]).push({text:v, by:USER, at:now()}); touch(P()); save(); renderSheet(); }; });
-    Array.from(document.querySelectorAll('[data-del]')).forEach(function(b){ b.onclick=function(){ P()[b.dataset.del].splice(+b.dataset.i,1); touch(P()); save(); renderSheet(); }; });
+    Array.from(document.querySelectorAll('[data-del]')).forEach(function(b){ b.onclick=function(){ var q=P(), it=q[b.dataset.del][+b.dataset.i]; if(it) (q.removed=q.removed||[]).push('pc:'+it.at+'|'+it.by+'|'+it.text); q[b.dataset.del].splice(+b.dataset.i,1); touch(q); save(); renderSheet(); }; });
     $('cmtGo').onclick=function(){ var v=$('cmtIn').value.trim(); if(!v) return; (P().comments=P().comments||[]).push({by:USER, text:v, at:now()}); touch(P()); save(); renderSheet(); };
     $('sDel').onclick=function(){ if(!confirm('Delete '+(P().name||'this proposal')+' for everyone?')) return;
       DATA.profiles=DATA.profiles.filter(function(x){return x.id!==P().id;}); DATA.deleted.push(P().id); save(); history.back(); };
@@ -470,6 +482,16 @@ button{cursor:pointer}
     try{ DATA=await load(); }catch(e){ $('grid').innerHTML='<div class="empty">Could not load. Check internet and reopen.</div>'; return; }
     if(!DATA.profiles.length && !DATA.deleted.length){ seed(); await save(); }
     renderList();
+    var want=new URLSearchParams(location.search).get('p'); if(want && find(want)) openProfile(want);
+    // pick up what the others (or WhatsApp) added, whenever the page comes back into view and every minute
+    var refresh=async function(){
+      if(document.hidden) return;
+      try{ var srv=await load(); DATA=merge(srv, DATA); }catch(e){ return; }
+      var typing=document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
+      if(openId && $('sheet').classList.contains('on')){ if(!editing && !typing && find(openId)) renderSheet(); }
+      else if(!$('sheet').classList.contains('on')) renderList();
+    };
+    document.addEventListener('visibilitychange', refresh); setInterval(refresh, 60000);
   }
   $('q').oninput=renderList;
   $('bAdd').onclick=function(){ var p=newProfile({}); openProfile(p.id, true); };
