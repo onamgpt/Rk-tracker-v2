@@ -140,13 +140,14 @@ function setCartons(id){
 }
 function labels(id){
   api("labels",{orderId:id}).then(function(x){ if(x.error) return toast(x.error);
-    var L=x.load, loaded=L.loaded||[], html='<div class="card noprint"><div class="row"><b>Labels — '+esc(L.customer.slice(0,50))+'</b><button onclick="window.print()">Print</button></div><div class="muted">'+L.total+' labels · invoice '+esc(L.invoice||"—")+'</div></div><div class="labels">';
+    var L=x.load, loaded=L.loaded||[], html='<div class="card noprint"><div class="row"><b>Labels — '+esc(L.customer.slice(0,50))+'</b><span><button onclick="zebra(\''+id+'\')">🖨 Zebra</button> <button class="g" onclick="window.print()">Print (A4)</button></span></div><div class="muted">'+L.total+' labels · invoice '+esc(L.invoice||"—")+'</div></div><div class="labels">';
     for(var n=1;n<=L.total;n++){ var q=qrcode(0,"M"); q.addData("ONAMC:"+L.token+"|"+n+"|"+L.total); q.make();
       html+='<div class="lbl"><div class="qr">'+q.createImgTag(3,0)+'</div><div class="big">'+n+' / '+L.total+'</div><div class="cust">'+esc(L.customer.slice(0,46))+'</div><div>Inv '+esc(L.invoice||"—")+' · '+esc(L.orderNo||"")+'</div></div>'; }
     html+='</div>';
     $("view").innerHTML=html; window.scrollTo(0,0); });
 }
 onScanner(function(c){ if(c.indexOf("ONAMC:")!==0) return toast("Not a carton label"); if(tab!=="scan"){ tab="scan"; render(); } submit(c); });
+function zebra(id){ fetch("/.netlify/functions/label-queue",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"print",what:"carton",orderId:id,user:USER,pin:pin})}).then(function(r){return r.json();}).then(function(x){ toast(x.error?x.error:"Sent to the Zebra label printer"); }); }
 if(pin) load(); else lock("");
 })();
 </script></body></html>

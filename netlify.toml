@@ -117,3 +117,7 @@
 # WhatsApp office number — #wa emails, task nudges, 10:15 lists, 17:30 summary, retries
 [functions."wa-cron"]
   schedule = "*/15 * * * *"
+
+# Event-based label printing (Zebra on the Mac Mini) + gate scans → payroll muster — every minute.
+[functions."label-cron"]
+  schedule = "* * * * *"
