@@ -28,8 +28,8 @@ function inward(lots, p, by, day, ts) {
   return out;
 }
 function act(lot, action, q, by, day, ts) {
-  if (action === "receive") { if (lot.status !== "expected") return "Already received"; lot.status = "store"; lot.recvd = day; lot.ev.push({ t: "in", d: day, ts, by, q: lot.qty }); return null; }
-  if (action === "issue") { if (lot.status !== "store") return "Not in store (" + lot.status + ")"; lot.status = "issued"; lot.dept = DEPT[lot.cat] || "Production"; lot.ev.push({ t: "issue", d: day, ts, by, q: lot.qty }); return null; }
+  if (action === "receive") { if (lot.status !== "expected") return "Already received – not counted again"; lot.status = "store"; lot.recvd = day; lot.ev.push({ t: "in", d: day, ts, by, q: lot.qty }); return null; }
+  if (action === "issue") { if (lot.status !== "store") { const last = lot.ev[lot.ev.length - 1] || {}; return lot.status === "issued" ? "Already issued on " + last.d + " " + (last.t === "issue" ? "" : "") + "– not counted again" : lot.status === "used" ? "This package is already finished – not counted again" : "Not received yet – scan it at the gate first"; } lot.status = "issued"; lot.dept = DEPT[lot.cat] || "Production"; lot.ev.push({ t: "issue", d: day, ts, by, q: lot.qty }); return null; }
   if (action === "return") { if (lot.status !== "issued") return "Only an issued package can be returned"; const r = Math.max(0, Math.min(q, lot.qty)); if (!r) return "Enter the quantity left";
     lot.ev.push({ t: "return", d: day, ts, by, q: r }); lot.qty = r2(r); lot.status = "store"; lot.dept = ""; return null; }
   if (action === "used") { if (lot.status !== "issued") return "Only an issued package can be closed"; lot.status = "used"; lot.ev.push({ t: "used", d: day, ts, by, q: 0 }); return null; }
