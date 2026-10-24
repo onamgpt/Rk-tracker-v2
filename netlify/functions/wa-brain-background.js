@@ -10,6 +10,7 @@
 const W = require("./wa-lib.js");
 const T = require("./tally.js");
 const db = require("./db.js");
+const WED = require("./wa-wedding.js");
 const call = async (b) => JSON.parse((await db.handler({ httpMethod: "POST", body: JSON.stringify(b) })).body || "{}");
 
 const CATS = ["Business - Purchase", "Sales - Order", "Sales - Payment", "Sales - Visit", "Sales - Expense", "Sales - Complaint",
@@ -215,7 +216,7 @@ async function processRow(row) {
   const done = (result) => W.sb("PATCH", "/rest/v1/wa_messages?id=eq." + encodeURIComponent(row.id), { status: "done", result: String(result).slice(0, 500) }, { Prefer: "return=minimal" });
   const isGroup = row.chat_role === "group";
   const SALES = require("./wa-sales.js");
-  let p = W.personByPhone(row.sender);
+  let p = await W.personByAny(row.sender);
   const rep = !p && !isGroup ? await SALES.repByPhone(row.sender) : null;
   if (!p) p = rep ? { key: "rep", name: rep.name, owner: false, rep: true } : { key: "unknown", name: row.sender_name || "Someone", owner: false };
   const replyTo = row.chat_jid;
@@ -229,7 +230,7 @@ async function processRow(row) {
   // Ravi / family manage sales reps: "add rep Sooraj 98…", "remove rep …", "reps"
   if (!isGroup && p.owner && text) { const h = await SALES.ownerCmd(text); if (h) { await reply(h); return done("reps cmd"); } }
   // quick commands (direct chats only)
-  if (!isGroup && !p.rep && /^(help|\?|hi|hello|menu)$/i.test(text) && !row.media_url) { await reply(HELP); return done("help"); }
+  if (!isGroup && !p.rep && /^(help|\?|hi|hello|menu)$/i.test(text) && !row.media_url) { await reply(HELP + (WED.FAMILY[p.key] ? "\n• 💍 *Wedding Desk*: send a boy\u2019s biodata, his photos or jathaka; _note on Amrut: good family 4/5_; _shortlist Amrut_; _which proposals are shortlisted?_" : "")); return done("help"); }
   if (!isGroup && !p.rep && /^(tasks?|my tasks|pending|open tasks)\??$/i.test(text)) {
     const list = await openTasks(p.owner ? null : p.key);
     await reply(list.length ? "*Open tasks (" + list.length + ")*\n" + list.map((t) => "• " + taskLine(t, p.owner)).join("\n") : "No open tasks 🎉");
@@ -269,6 +270,8 @@ async function processRow(row) {
     if (b64 && b64.length < 6.5e6) media = { b64, type: row.media_type };
   }
   if (!text && !media && !row.media_url) return done("empty");
+  // 💍 family only: marriage proposals go to the private Wedding Desk, never into the business tracker
+  if (!isGroup && WED.FAMILY[p.key]) { const w = await WED.maybeHandle(row, p, media, reply, quoted); if (w) return done(w); }
   // sales reps: orders / status / payments only — nothing else
   if (p.rep) return done(await SALES.handleRep(row, rep, reply, media, row.media_url));
 
