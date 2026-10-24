@@ -8,7 +8,7 @@ const SITE = () => (process.env.URL || "https://rk-tracker-v2.netlify.app").repl
 
 // owner:true = sees money, margins, attendance and Tally answers.
 const PEOPLE = {
-  ravi:       { name: "Ravi",          phone: "919845563633", owner: true,  tg: "8632288596" },
+  ravi:       { name: "Ravi",          phone: "919845563633", owner: true,  tg: "8632288596", lid: "273946050056398" },
   ravi2:      { name: "Ravi",          phone: "918310368142", owner: true,  alias: "ravi" },
   brunda:     { name: "Brunda",        phone: "919886211325", owner: true,  tg: "6729590573" },
   tassmai:    { name: "Tassmai",       phone: "919900504401", owner: true },
@@ -19,9 +19,39 @@ const PEOPLE = {
 };
 const ALIASES = { viru: "virupaksha", madhu: "maadhu", gate: "security", me: "ravi", rk: "ravi", ravikiran: "ravi", bru: "brunda", tass: "tassmai" };
 
+// WhatsApp now identifies some senders by a LID (a long internal number) instead
+// of their phone number, and the phone number is nowhere on the message. So a
+// person is matched by phone OR by any LID we have seen them use. LIDs are
+// learned over time and kept in kv (pf_wa_lids) as { lid: personKey }.
+let _lids = null, _lidsAt = 0;
+async function lidMap() {
+  if (_lids && Date.now() - _lidsAt < 60000) return _lids;
+  try { _lids = (await kvGet("wa_lids")) || {}; } catch (e) { _lids = _lids || {}; }
+  _lidsAt = Date.now();
+  return _lids;
+}
+async function learnLid(lid, key) {
+  const d = String(lid || "").replace(/\D/g, "");
+  if (!d || !PEOPLE[key]) return;
+  const m = await lidMap();
+  if (m[d] === key) return;
+  m[d] = key; _lids = m; _lidsAt = Date.now();
+  try { await kvSet("wa_lids", m); } catch (e) {}
+}
 function personByPhone(num) {
   const d = String(num || "").replace(/\D/g, "");
-  for (const k of Object.keys(PEOPLE)) if (PEOPLE[k].phone === d) return Object.assign({ key: PEOPLE[k].alias || k }, PEOPLE[k]);
+  for (const k of Object.keys(PEOPLE)) if (PEOPLE[k].phone === d) return Object.assign({ key: PEOPLE[k].alias || k, matchedBy: "phone" }, PEOPLE[k]);
+  for (const k of Object.keys(PEOPLE)) if (PEOPLE[k].lid && String(PEOPLE[k].lid) === d) return Object.assign({ key: PEOPLE[k].alias || k, matchedBy: "lid" }, PEOPLE[k]);
+  return null;
+}
+// Same as personByPhone but also consults the learned LID map.
+async function personByAny(num) {
+  const direct = personByPhone(num);
+  if (direct) return direct;
+  const d = String(num || "").replace(/\D/g, "");
+  const m = await lidMap();
+  const k = m[d];
+  if (k && PEOPLE[k]) return Object.assign({ key: PEOPLE[k].alias || k, matchedBy: "lidmap" }, PEOPLE[k]);
   return null;
 }
 function personKey(name) {
@@ -125,4 +155,4 @@ function fmtDue(iso) {
   return day + " " + ((hh % 12) || 12) + (mm ? ":" + String(mm).padStart(2, "0") : "") + (hh < 12 ? "am" : "pm");
 }
 
-module.exports = { PEOPLE, personByPhone, personKey, jidFor, sb, kvGet, kvSet, bridgeOk, bridgeSecret, send, mirrorTg, claude, parseJSON, clean, istNow, istDate, istHour, fmtDue, SITE };
+module.exports = { PEOPLE, personByPhone, personByAny, lidMap, learnLid, personKey, jidFor, sb, kvGet, kvSet, bridgeOk, bridgeSecret, send, mirrorTg, claude, parseJSON, clean, istNow, istDate, istHour, fmtDue, SITE };
