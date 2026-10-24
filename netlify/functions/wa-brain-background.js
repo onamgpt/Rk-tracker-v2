@@ -79,27 +79,65 @@ async function closeTask(task, by, note, mediaPath) {
 }
 
 // ---------- context for answers ----------
+// Each person's answer is built ONLY from the data their role may see (locked here, not just told to the AI).
+//   owners (Ravi, Brunda, Tassmai): everything · maadhu: office accounts (Tally) + own tasks
+//   prakash: dispatch + perfume/chemical stock · virupaksha: production status + packing/carton stock
+//   security: lorries expected, inward labels, today's gate scans (names/times only)
+const ROLE_CATS = { prakash: ["perfume", "other"], virupaksha: ["packing", "carton"], security: ["raw"] };
+const fmtIST = (ts) => new Date(new Date(ts).getTime() + 5.5 * 3600e3).toISOString().slice(5, 16).replace("T", " ");
+function stockLines(lots, cats) {
+  const s = {};
+  (lots || []).forEach((l) => { if (cats && !cats.includes(l.cat)) return; if (l.status === "used") return;
+    const e = s[l.item] = s[l.item] || { unit: l.unit, store: 0, pk: 0, issued: 0, expected: 0 };
+    if (l.status === "store") { e.store += +l.qty || 0; e.pk++; } else if (l.status === "issued") e.issued++; else if (l.status === "expected") e.expected++; });
+  return Object.keys(s).sort().map((k) => k + ": in store " + Math.round(s[k].store * 100) / 100 + " " + (s[k].unit || "") + " (" + s[k].pk + " pkgs), issued " + s[k].issued + ", expected " + s[k].expected).join("\n") || "no labelled stock yet";
+}
+function dispatchFor(lg, money) {
+  return ((lg && lg.shipments) || []).slice(0, 80).map((x) => {
+    const o = { order: x.orderNo, customer: x.customer, date: x.date, items: x.items, cartons: x.qty, production: x.production, invoice: x.invoiceNo,
+      readyOn: x.readyOn, dispatchedOn: x.dispatchedOn, deliveredOn: x.deliveredOn, transporter: x.transporter, lr: x.lrNo, destination: x.destination, followUp: x.followUp };
+    if (money) { o.invoiceAmount = x.invoiceAmount; o.freight = x.freight; o.payments = x.payments; }
+    return JSON.stringify(o);
+  }).join("\n");
+}
 async function answerContext(p) {
-  const parts = [];
+  const parts = [], role = p.owner ? "owner" : p.key;
   const tasks = await openTasks(p.owner ? null : p.key);
   parts.push("OPEN TASKS (id | for | title | due):\n" + (tasks.length ? tasks.map((t) => "#" + t.id + " | " + t.assignee + " | " + t.title + " | " + W.fmtDue(t.due)).join("\n") : "none"));
   const done = await W.sb("GET", "/rest/v1/wa_tasks?status=eq.done&done_at=gte." + new Date(Date.now() - 7 * 864e5).toISOString() + (p.owner ? "" : "&assignee=eq." + p.key) + "&order=done_at.desc&limit=40&select=id,assignee,title,done_at");
   parts.push("TASKS DONE IN LAST 7 DAYS:\n" + ((done || []).map((t) => "#" + t.id + " " + t.assignee + " — " + t.title + " (" + String(t.done_at).slice(0, 10) + ")").join("\n") || "none"));
+  // messages: owners see all; staff see only their own direct chat + groups
   const since = new Date(Date.now() - 3 * 864e5).toISOString();
-  const msgs = await W.sb("GET", "/rest/v1/wa_messages?ts=gte." + since + "&chat_role=neq.unknown&order=ts.desc&limit=120&select=ts,chat_name,chat_role,sender_name,body,media_name,result");
-  parts.push("WHATSAPP MESSAGES, LAST 3 DAYS (newest first; time | chat | sender | text):\n" + (msgs || []).filter((m) => p.owner || m.chat_role !== "owner")
-    .map((m) => new Date(new Date(m.ts).getTime() + 5.5 * 3600e3).toISOString().slice(5, 16).replace("T", " ") + " | " + (m.chat_role === "group" ? m.chat_name : "direct") + " | " + (m.sender_name || "?") + " | " + String(m.body || m.media_name || "").replace(/\s+/g, " ").slice(0, 220)).join("\n"));
-  try {
-    const lg = await W.kvGet("logistics_v2");
-    if (lg) parts.push("DISPATCH REGISTER (raw JSON, may be truncated):\n" + JSON.stringify(lg).slice(0, 14000));
-  } catch (e) {}
-  if (p.owner) {
+  const msgs = (await W.sb("GET", "/rest/v1/wa_messages?ts=gte." + since + "&chat_role=neq.unknown&order=ts.desc&limit=120&select=ts,chat_name,chat_role,chat_jid,sender,sender_name,body,media_name")) || [];
+  const mine = (m) => m.chat_role === "group" || (W.personByPhone(m.sender) || {}).key === p.key || m.sender_name === p.name;
+  parts.push("WHATSAPP MESSAGES, LAST 3 DAYS (newest first; time | chat | sender | text):\n" + msgs.filter((m) => p.owner || mine(m))
+    .map((m) => fmtIST(m.ts) + " | " + (m.chat_role === "group" ? m.chat_name : "direct") + " | " + (m.sender_name || "?") + " | " + String(m.body || m.media_name || "").replace(/\s+/g, " ").slice(0, 300)).join("\n"));
+  const K = {};
+  try { const rows = (await W.sb("GET", "/rest/v1/kv?owner=eq.main&k=in.(pf_logistics_v2,pf_inv_lots,pf_inv_expected,pf_dispatch_loads,pf_gate_scans)&select=k,v")) || []; rows.forEach((r) => (K[r.k.slice(3)] = r.v)); } catch (e) {}
+  if (role === "owner") {
+    parts.push("DISPATCH REGISTER (raw JSON, may be truncated):\n" + JSON.stringify(K.logistics_v2 || {}).slice(0, 14000));
+    parts.push("STORE STOCK (labelled packages):\n" + stockLines(K.inv_lots));
     try {
       const ent = await W.sb("GET", "/rest/v1/entries?owner=eq.main&created_at=gte." + new Date(Date.now() - 21 * 864e5).toISOString() + "&order=created_at.desc&limit=200&select=date,category,title,person,vendor,amount,tags");
       parts.push("TRACKER ENTRIES, LAST 3 WEEKS (date | category | title | person | vendor | amount | tags):\n" + (ent || []).map((e) => [e.date, e.category, e.title, e.person, e.vendor, e.amount, (e.tags || []).join("/")].map((x) => x || "").join(" | ")).join("\n"));
     } catch (e) {}
     try { parts.push(await require("./tally-ask-background.js").context()); } catch (e) {}
+  } else if (role === "maadhu") {
+    try { parts.push(await require("./tally-ask-background.js").context()); } catch (e) {}
+  } else if (role === "prakash") {
+    parts.push("DISPATCH REGISTER:\n" + dispatchFor(K.logistics_v2, true));
+    parts.push("CARTON LOADING (customer | invoice | loaded/total):\n" + (K.dispatch_loads || []).map((L) => L.customer + " | " + (L.invoice || "-") + " | " + (L.loaded || []).length + "/" + L.total).join("\n"));
+    parts.push("PERFUME & CHEMICAL STOCK:\n" + stockLines(K.inv_lots, ROLE_CATS.prakash));
+  } else if (role === "virupaksha") {
+    parts.push("ORDERS & PRODUCTION STATUS:\n" + dispatchFor(K.logistics_v2, false));
+    parts.push("PACKING & CARTON STOCK:\n" + stockLines(K.inv_lots, ROLE_CATS.virupaksha));
+  } else if (role === "security") {
+    parts.push("LORRIES / BILLS EXPECTED (supplier | bill | packages):\n" + (K.inv_expected || []).filter((e) => !e.done).map((e) => (e.supplier || "") + " | " + (e.billNo || "") + " | " + ((K.inv_lots || []).filter((l) => l.expId === e.id && l.status === "expected").length) + " still to arrive").join("\n"));
+    parts.push("RAW MATERIAL STOCK:\n" + stockLines(K.inv_lots, ROLE_CATS.security));
+    const today = W.istDate();
+    parts.push("TODAY'S GATE SCANS (name | in/out | time):\n" + (K.gate_scans || []).filter((x) => x.d === today && (x.dir === "IN" || x.dir === "OUT")).map((x) => x.name + " | " + x.dir + " | " + x.t).join("\n"));
   }
+  parts.push("ACCESS: this person is " + (p.owner ? "an owner — may see everything above." : "staff (" + p.name + ") — the data above is ALL they may see. If asked about anything else (money, profit, salaries, bank, other people's chats, Ravi's personal notes or reminders) reply: \"Sorry, that isn't available on this number for you.\""));
   return parts.join("\n\n");
 }
 
@@ -286,7 +324,7 @@ async function processRow(row) {
   return done("filed " + e.id + " " + e.category);
 }
 
-exports.processRow = processRow;
+exports.processRow = processRow; exports.answerContext = answerContext;
 exports.handler = async (event) => {
   if ((event.headers || {})["x-run-key"] !== T.runKey()) return { statusCode: 403, body: "no" };
   let b = {}; try { b = JSON.parse(event.body || "{}"); } catch (e) {}

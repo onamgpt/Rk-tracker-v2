@@ -46,6 +46,18 @@ exports.handler = async (event) => {
     status: role === "unknown" ? "ignored" : "new", source: "whatsapp"
   }], { Prefer: "return=minimal,resolution=ignore-duplicates" });
 
+  // a number that isn't registered gets no reply; Ravi is told once a day per number
+  if (role === "unknown" && !isGroup && from) {
+    try {
+      const day = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+      const seen = (await W.kvGet("wa_unknown_seen")) || {};
+      if (seen[from] !== day) {
+        seen[from] = day; await W.kvSet("wa_unknown_seen", seen);
+        await W.send("ravi", "📵 *Unregistered number messaged the office WhatsApp* (no reply was sent)\nFrom: " + (b.senderName || "unknown") + " · +" + from +
+          "\n\"" + String(b.text || (b.mediaName ? "[file] " + b.mediaName : "[photo/file]")).slice(0, 150) + "\"\nTo give them access, tell Claude their name and role.", { kind: "alert" });
+      }
+    } catch (e) {}
+  }
   if (role !== "unknown") {
     try {
       await fetch(W.SITE() + "/.netlify/functions/wa-brain-background", { method: "POST",
