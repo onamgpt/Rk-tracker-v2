@@ -1333,13 +1333,13 @@ function computeStatutory(basic, da, hra, other, monthIdx, minWage){
   const structuralGross = bd + n(hra);
   const basicDaShareOk = structuralGross > 0 ? (bd / structuralGross) >= 0.499 : true;
   const pfWage = Math.min(bd, R.pfWageCeiling);
-  const pfEmployee = r2(pfWage * R.pfEmployeeRate);
+  const pfEmployee = Math.round(pfWage * R.pfEmployeeRate);   // EPF rounds to the nearest rupee
   const eps = Math.min(r2(pfWage * R.epsRate), R.epsCap);
   const pfEmployer = r2(pfWage * R.pfEmployerRate - eps);
   const edli = Math.min(r2(pfWage * R.edliRate), R.edliCap);
 
   const esiApplicable = gross > 0 && gross <= R.esiWageCeiling;
-  const esiEmployee = esiApplicable ? r2(gross * R.esiEmployeeRate) : 0;
+  const esiEmployee = esiApplicable ? Math.round(gross * R.esiEmployeeRate) : 0;   // rounded to the rupee, as on Onam's pay sheets
   const esiEmployer = esiApplicable ? r2(gross * R.esiEmployerRate) : 0;
 
   const pt = gross < R.ptExemptBelow ? 0 : (monthIdx === 1 ? R.ptFeb : R.ptMonthly); // monthIdx 1 = Feb
@@ -1528,7 +1528,9 @@ function PayrollTracker({onClose}){
       otAmount:0,otRate:0,deductionTotal:0,fineTotal:0,gross:0,basicDaShareOk:true,pfWage:0,pfEmployee:0,pfEmployer:0,eps:0,edli:0,
       esiApplicable:false,esiEmployee:0,esiEmployer:0,pt:0,bonusAccrual:0,gratuityAccrual:0,netPay:0,overFineCap:false,overDeductionCap:false };
     const att = attendanceIn(w.id, effFrom, to);
-    const b=r2(n(w.dailyBasic)*att.payableDays), d=r2(n(w.dailyDA)*att.payableDays), h=r2(n(w.dailyHRA)*att.payableDays);
+    // Onam pays a fixed monthly salary (daily rate × 30) pro-rated by payable days of the calendar month
+    const [yy,mm]=ym.split("-").map(Number), dim=new Date(yy,mm,0).getDate();
+    const b=Math.round(n(w.dailyBasic)*30*att.payableDays/dim), d=Math.round(n(w.dailyDA)*30*att.payableDays/dim), h=Math.round(n(w.dailyHRA)*30*att.payableDays/dim);
     const otRate = otRateFor(w);
     const otAmount = r2(att.otHours * otRate);
     const mIdx = parseInt(ym.split("-")[1],10)-1;
@@ -1543,8 +1545,10 @@ function PayrollTracker({onClose}){
     const overFineCap = stat.gross>0 && fineTotal > r2(stat.gross*0.03);
     const overDeductionCap = stat.gross>0 && deductionTotal > r2(stat.gross*0.50);
 
+    // monthly bonus paid with salary where the worker has a bonus % (Onam: 12% production/admin, 8.33% marketing)
+    const bonusPaid = n(w.bonusPct) ? Math.round(stat.gross * n(w.bonusPct)/100) : 0;
     return { ...att, basic:b, da:d, hra:h, otRate, otAmount, deductionTotal, fineTotal, overFineCap, overDeductionCap,
-      ...stat, netPay: r2(stat.netPay - deductionTotal) };
+      ...stat, bonusAccrual: bonusPaid || stat.bonusAccrual, bonusPaid, netPay: r2(stat.netPay - deductionTotal + bonusPaid) };
   };
 
   const monthRows = activeWorkers.map(w=>({ w, pay: payFor(w, curMonth) }));

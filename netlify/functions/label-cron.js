@@ -82,7 +82,7 @@ function plan(D, S0, now) {
   // 3. payroll workers → gate cards
   const gwAll = gws.map((w) => Object.assign({}, w));
   for (const p of pws) {
-    if (!p || !p.id || !String(p.name || "").trim()) continue;
+    if (!p || !p.id || !String(p.name || "").trim() || p.noGate) continue;   // field staff (marketing) don't use the gate
     let g = gwAll.find((w) => w.payrollId === p.id) || gwAll.find((w) => !w.payrollId && w.name.trim().toLowerCase() === p.name.trim().toLowerCase());
     const active = p.active !== false;
     if (!g) {
