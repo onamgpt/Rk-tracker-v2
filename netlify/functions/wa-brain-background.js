@@ -214,7 +214,10 @@ async function processRow(row) {
   if (!claim || !claim.length) return; // someone else has it
   const done = (result) => W.sb("PATCH", "/rest/v1/wa_messages?id=eq." + encodeURIComponent(row.id), { status: "done", result: String(result).slice(0, 500) }, { Prefer: "return=minimal" });
   const isGroup = row.chat_role === "group";
-  const p = W.personByPhone(row.sender) || { key: "unknown", name: row.sender_name || "Someone", owner: false };
+  const SALES = require("./wa-sales.js");
+  let p = W.personByPhone(row.sender);
+  const rep = !p && !isGroup ? await SALES.repByPhone(row.sender) : null;
+  if (!p) p = rep ? { key: "rep", name: rep.name, owner: false, rep: true } : { key: "unknown", name: row.sender_name || "Someone", owner: false };
   const replyTo = row.chat_jid;
   const reply = (t) => (isGroup ? null : W.send(replyTo, t));
   const text = String(row.body || "").trim();
@@ -223,9 +226,11 @@ async function processRow(row) {
   if (/^audio\//.test(row.media_type || "") && !text) { await reply("🎙️ Voice notes can't be read yet — please type it, or send a photo."); return done("voice"); }
   if (/^skipped:/.test(row.media_type || "")) { await reply("That file is too large to read (over ~4 MB). Send a photo of the page instead."); }
 
+  // Ravi / family manage sales reps: "add rep Sooraj 98…", "remove rep …", "reps"
+  if (!isGroup && p.owner && text) { const h = await SALES.ownerCmd(text); if (h) { await reply(h); return done("reps cmd"); } }
   // quick commands (direct chats only)
-  if (!isGroup && /^(help|\?|hi|hello|menu)$/i.test(text) && !row.media_url) { await reply(HELP); return done("help"); }
-  if (!isGroup && /^(tasks?|my tasks|pending|open tasks)\??$/i.test(text)) {
+  if (!isGroup && !p.rep && /^(help|\?|hi|hello|menu)$/i.test(text) && !row.media_url) { await reply(HELP); return done("help"); }
+  if (!isGroup && !p.rep && /^(tasks?|my tasks|pending|open tasks)\??$/i.test(text)) {
     const list = await openTasks(p.owner ? null : p.key);
     await reply(list.length ? "*Open tasks (" + list.length + ")*\n" + list.map((t) => "• " + taskLine(t, p.owner)).join("\n") : "No open tasks 🎉");
     return done("tasks");
@@ -240,7 +245,7 @@ async function processRow(row) {
     if ((!q || !q.length) && tail && tail.length > 8) q = await W.sb("GET", "/rest/v1/wa_outbox?wa_id=like.*" + encodeURIComponent(tail) + "&select=body,task_id&limit=1");
     if (q && q[0]) { quoted = q[0].body; if (q[0].task_id) quotedTask = q[0].task_id; }
   }
-  if (!isGroup && (dm || (quotedTask && /\b(done|completed|finished|delivered|sent|ok)\b/i.test(text)) || (quotedTask && row.media_url && !text))) {
+  if (!isGroup && !p.rep && (dm || (quotedTask && /\b(done|completed|finished|delivered|sent|ok)\b/i.test(text)) || (quotedTask && row.media_url && !text))) {
     const mine = await openTasks(p.owner ? null : p.key);
     const id = (dm && dm[2]) ? Number(dm[2]) : quotedTask;
     let t = id ? (await W.sb("GET", "/rest/v1/wa_tasks?id=eq." + id + "&select=*"))[0] : null;
@@ -264,6 +269,8 @@ async function processRow(row) {
     if (b64 && b64.length < 6.5e6) media = { b64, type: row.media_type };
   }
   if (!text && !media && !row.media_url) return done("empty");
+  // sales reps: orders / status / payments only — nothing else
+  if (p.rep) return done(await SALES.handleRep(row, rep, reply, media, row.media_url));
 
   const myTasks = (await openTasks(p.key)).map((t) => "#" + t.id + " " + t.title).join("; ");
   let d;

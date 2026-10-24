@@ -22,7 +22,8 @@ exports.handler = async (event) => {
 
   // Match by phone, by a LID we already know, or by the learned LID map.
   const p = await W.personByAny(from);
-  const role = isGroup ? "group" : (p ? (p.owner ? "owner" : "staff") : "unknown");
+  const rep = !p && !isGroup ? await require("./wa-sales.js").repByPhone(from) : null;
+  const role = isGroup ? "group" : (p ? (p.owner ? "owner" : "staff") : rep ? "rep" : "unknown");
 
   // Duplicate (already stored) → nothing to do.
   const have = await W.sb("GET", "/rest/v1/wa_messages?id=eq." + encodeURIComponent(id) + "&select=id");

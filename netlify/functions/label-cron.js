@@ -183,6 +183,7 @@ exports.handler = async () => {
   try {
     const { D, S } = await load();
     const r = plan(D, S, nowObj());
+    try { await require("./wa-sales.js").notifyChanges(r.S); } catch (e) { r.out.notes.push("rep notify: " + e.message); }
     const done = await apply(r, D);
     return { statusCode: 200, body: JSON.stringify({ ok: true, done, notes: r.out.notes }) };
   } catch (e) { return { statusCode: 200, body: JSON.stringify({ ok: false, error: String(e && e.message || e) }) }; }
