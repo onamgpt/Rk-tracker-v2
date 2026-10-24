@@ -130,10 +130,10 @@ function plan(D, S0, now) {
   const oldest = pend.length ? (now.ts - Date.parse(pend[0].created_at)) / 60e3 : 0;
   const work = now.hour >= 10 && now.hour < 18 && now.dow !== 0;
   const alert = (k, text) => { if (!S.alerts[k] || now.ts - S.alerts[k] > 3600e3) { S.alerts[k] = now.ts; out.alerts.push({ k, to: ["ravi", "prakash"], text }); } };
-  if (pend.length && seenAgo < 3 && !ag.printer) alert("noprinter", "⚠️ *Label printer not found* on the Mac Mini – " + pend.length + " label job(s) waiting.\nCheck the Zebra is switched on and its USB cable is in the Mac Mini.");
-  else if (pend.length && seenAgo < 3 && /disabled|paused|stopped/i.test(ag.state || "")) alert("paused", "⚠️ *Label printer is paused* on the Mac Mini – " + pend.length + " job(s) waiting.\nOn the Mac Mini: System Settings → Printers & Scanners → Zebra → Open Print Queue → Resume.");
+  if (pend.length && seenAgo < 3 && !ag.printer) alert("noprinter", "⚠️ *Label printer not found* on Prakash's PC – " + pend.length + " label job(s) waiting.\nCheck the Zebra is switched on and its USB cable is in Prakash's PC.");
+  else if (pend.length && seenAgo < 3 && /disabled|paused|stopped|offline|error/i.test(ag.state || "")) alert("paused", "⚠️ *Label printer is paused / offline* on Prakash's PC – " + pend.length + " job(s) waiting.\nOn Prakash's PC: Start → Printers & scanners → ZDesigner → Open queue → Printer menu → untick *Pause Printing* and *Use Printer Offline*.");
   else if (pend.length && seenAgo < 3 && oldest > 5) alert("stuck", "⚠️ *Labels not printing* – " + pend.length + " job(s) waiting over 5 min (" + pend[0].title + ").\nCheck the Zebra for labels, ribbon or a red light.");
-  if (pend.length && work && ag.lastSeen && seenAgo > 15) alert("agent", "⚠️ *Label program not running* – the Mac Mini hasn't checked in for " + (seenAgo > 600 ? "a long time" : Math.round(seenAgo) + " min") + ", " + pend.length + " label job(s) waiting.\nSwitch on the Mac Mini / check it is awake.");
+  if (pend.length && work && ag.lastSeen && seenAgo > 15) alert("agent", "⚠️ *Label program not running* – Prakash's PC hasn't checked in for " + (seenAgo > 600 ? "a long time" : Math.round(seenAgo) + " min") + ", " + pend.length + " label job(s) waiting.\nSwitch on Prakash's PC and log in – the label program starts by itself.");
   return { S, out, loads };
 }
 
