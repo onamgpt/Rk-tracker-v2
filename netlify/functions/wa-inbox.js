@@ -20,7 +20,8 @@ exports.handler = async (event) => {
   const from = String(b.from || "").replace(/\D/g, "");
   if (!id || !chatJid) return OK({ ok: false, error: "missing id/chat" }, 400);
 
-  const p = W.personByPhone(from);
+  // Match by phone, by a LID we already know, or by the learned LID map.
+  const p = await W.personByAny(from);
   const role = isGroup ? "group" : (p ? (p.owner ? "owner" : "staff") : "unknown");
 
   // Duplicate (already stored) → nothing to do.
@@ -53,3 +54,4 @@ exports.handler = async (event) => {
   }
   return OK({ ok: true, role });
 };
+
