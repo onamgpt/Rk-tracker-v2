@@ -63,7 +63,7 @@ function personKey(name) {
 }
 function jidFor(to) {
   const t = String(to || "").trim();
-  if (/@(c|g)\.us$/.test(t)) return t;
+  if (/@(c|g)\.us$/.test(t) || /@lid$/.test(t)) return t;   // @lid is a real address too
   const k = personKey(t);
   if (k) return PEOPLE[k].phone + "@c.us";
   let d = t.replace(/\D/g, "").replace(/^0+/, "");
