@@ -24,7 +24,9 @@ async function importEmails() {
     if (seen.has(m.id)) continue;
     seen.add(m.id);
     const addr = (String(m.from).match(/[\w.+-]+@[\w.-]+/) || [""])[0].toLowerCase();
-    const key = EMAIL_PEOPLE[addr] || "ravi";
+    // only our own team's addresses may act through #wa — an outsider emailing "#wa" is ignored (Ravi is told)
+    if (!EMAIL_PEOPLE[addr]) { await W.send("ravi", "📵 Ignored a *#wa* email from an outside address: " + addr + " – \"" + String(m.subject || "").slice(0, 80) + "\". Forward it yourself if it's genuine."); continue; }
+    const key = EMAIL_PEOPLE[addr];
     const p = W.PEOPLE[key];
     let mediaPath = null, mediaType = null, mediaName = null;
     const att = (m.attachments || []).find((a) => READABLE.test(a.type) && (a.size || 0) < 4.5e6);
